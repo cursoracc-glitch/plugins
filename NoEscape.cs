@@ -1,50 +1,30 @@
 using Newtonsoft.Json;
 using Oxide.Core;
-using Oxide.Core.Libraries;
-using Oxide.Core.Libraries.Covalence;
-using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using Rust;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Oxide.Core.Libraries.Covalence;
 using UnityEngine;
-using Time = UnityEngine.Time;
+using System.Collections;
+using Oxide.Core.Plugins;
+using Random = UnityEngine.Random;
 
 namespace Oxide.Plugins
 {
-    [Info("NoEscape", "OxideBro", "2.4.01")]
+    [Info("NoEscape", "https://topplugin.ru/", "3.0.0")]
     public class NoEscape : RustPlugin
     {
-        [PluginReference] public Plugin ImageLibrary;
         #region Class
         private static List<SphereComponent> BlockerList = new List<SphereComponent>();
 
         private class PlayerBlockStatus : FacepunchBehaviour
         {
-
-
             private BasePlayer Player;
             public SphereComponent CurrentBlocker;
             public double CurrentTime = config.BlockSettings.BlockLength;
-            const string LayerPopup = "NoEscapePopupNotification";
-            public List<Notification> Notifications = new List<Notification>();
-
-            public class Notification
-            {
-                public string Id;
-                public string Title;
-                public string Description;
-                public string Icon = "assets/icons/broadcast.png";
-                public int duration = config.uIPopupNotifications.PopupDestroyTime;
-
-                public Notification()
-                {
-                    Id = CuiHelper.GetGuid();
-                }
-            }
 
             public static PlayerBlockStatus Get(BasePlayer player)
             {
@@ -54,7 +34,6 @@ namespace Oxide.Plugins
             private void Awake()
             {
                 Player = GetComponent<BasePlayer>();
-
             }
 
             private void ControllerUpdate()
@@ -71,36 +50,27 @@ namespace Oxide.Plugins
                 CuiElementContainer container = new CuiElementContainer();
                 container.Add(new CuiPanel
                 {
-                    RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = "0 -34", OffsetMax = "300 0" },
-                    Image = { Color = "0 0 0 0" }
+                    RectTransform = { AnchorMin = config.UISettings.AnchorMin, AnchorMax = config.UISettings.AnchorMax, OffsetMax = "0 0" },
+                    Image = { Color = config.UISettings.InterfaceColorBP }
                 }, "Hud", "NoEscape");
-
-                container.Add(new CuiPanel
-                {
-                    RectTransform = { AnchorMin = $"0.8 0", AnchorMax = $"0.8 0", OffsetMin = "-7 6.5", OffsetMax = "16 30" },
-                    Image =  {Color = "0 0 0 0" }
-                }, "NoEscape", "NoEscape + RaidBlock");
-
                 CuiHelper.AddUi(Player, container);
                 if (CurrentBlocker != null) UpdateUI();
             }
 
             public void BlockPlayer(SphereComponent blocker, bool justCreated)
             {
-                if (InstancePlugin.permission.UserHasPermission(Player.UserIDString, config.BlockSettings.PermissionToIgnore))
+                if (ins.permission.UserHasPermission(Player.UserIDString, config.BlockSettings.PermissionToIgnore))
                 {
-                    UnblockPlayer(true);
+                    UnblockPlayer();
                     return;
                 }
                 if (justCreated)
-                    Player.ChatMessage(string.Format(InstancePlugin.Messages["blockactiveAttacker"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength)));
-
+                    Player.ChatMessage(string.Format(ins.Messages["blockactiveAttacker"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength)));
                 CurrentBlocker = blocker;
                 CurrentTime = CurrentBlocker.CurrentTime;
                 CreateUI();
                 InvokeRepeating(ControllerUpdate, 1f, 1f);
             }
-
 
             public void UpdateUI()
             {
@@ -111,18 +81,18 @@ namespace Oxide.Plugins
                 CuiElementContainer container = new CuiElementContainer();
                 container.Add(new CuiElement
                 {
-                    Parent = "NoEscape + RaidBlock",
+                    Parent = "NoEscape",
                     Name = "NoEscape_update",
                     Components =
                     {
-                        new CuiImageComponent {Png = (string)InstancePlugin.ImageLibrary.Call("GetImage", config.UISettings.RaidBlock), Color = HexToCuiColor("#F54141", 50f) },
-                        new CuiRectTransformComponent {AnchorMin = "0 0", AnchorMax = $"1 1"},
+                        new CuiImageComponent { Color = config.UISettings.InterfaceColor },
+                        new CuiRectTransformComponent {AnchorMin = $"0 0", AnchorMax = $"{(float) (CurrentBlocker.TotalTime - CurrentTime) / CurrentBlocker.TotalTime} 1", OffsetMin = "0 0", OffsetMax = "0 0"},
                     }
                 });
                 container.Add(new CuiLabel
                 {
-                    RectTransform = { AnchorMin = "0.9 0", AnchorMax = "0.9 0", OffsetMin = "-8 6.5", OffsetMax = "15 30" },
-                    Text = { Text = string.Format(InstancePlugin.Messages["guitimertext"], InstancePlugin.GetFormatTime(TimeSpan.FromSeconds(CurrentBlocker.TotalTime - CurrentTime))), Font = "robotocondensed-regular.ttf", Color = "1 1 1 0.9", FontSize = 10, Align = TextAnchor.MiddleCenter }
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                    Text = { Text = string.Format(ins.Messages["guitimertext"], ins.GetFormatTime(TimeSpan.FromSeconds(CurrentBlocker.TotalTime - CurrentTime))), Font = "robotocondensed-regular.ttf", Color = "1 1 1 0.9", FontSize = 16, Align = TextAnchor.MiddleCenter }
                 }, "NoEscape", "NoEscape" + ".Info");
 
                 CuiHelper.AddUi(Player, container);
@@ -130,15 +100,14 @@ namespace Oxide.Plugins
                     UnblockPlayer();
             }
 
-            public void UnblockPlayer(bool DoPerm = false)
+            public void UnblockPlayer()
             {
                 if (Player == null)
                 {
                     Destroy(this);
                     return;
                 }
-                if (!DoPerm)
-                    Player.ChatMessage(InstancePlugin.Messages["blocksuccess"]);
+                Player.ChatMessage(ins.Messages["blocksuccess"]);
                 CancelInvoke(ControllerUpdate);
                 CuiHelper.DestroyUi(Player, "NoEscape");
                 CurrentBlocker = null;
@@ -146,120 +115,8 @@ namespace Oxide.Plugins
             private void OnDestroy()
             {
                 CuiHelper.DestroyUi(Player, "NoEscape");
-                CuiHelper.DestroyUi(Player, LayerPopup);
+                Destroy(this);
             }
-
-
-            public void Remove(string id)
-            {
-                var remove = Notifications.Find(v => v.Id == id);
-                if (remove == null)
-                    return;
-
-                Notifications.Remove(remove);
-                DrawNotifications();
-            }
-
-            public void AddNotification(Notification notification)
-            {
-                Notifications.Add(notification);
-                StartCoroutine(DestroyNotification(notification));
-                if (Notifications.Count > config.uIPopupNotifications.MaxPopupNotifications)
-                    Remove(Notifications.FirstOrDefault().Id);
-
-                DrawNotifications();
-            }
-
-            private IEnumerator DestroyNotification(Notification messageData)
-            {
-                yield return new WaitForSeconds(messageData.duration);
-
-                if (messageData == null)
-                    yield break;
-
-                Notifications.Remove(messageData);
-                Remove(messageData.Id);
-                DrawNotifications();
-            }
-
-
-            public void DrawNotifications()
-            {
-                CuiHelper.DestroyUi(Player, LayerPopup);
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiPanel
-                {
-                    RectTransform = { AnchorMin = $"{config.uIPopupNotifications.AnchorPosX} {config.uIPopupNotifications.AnchorPosY}", AnchorMax = $"{config.uIPopupNotifications.AnchorPosX} {config.uIPopupNotifications.AnchorPosY}", OffsetMax = "0 0" },
-                    Image = { Color = "0 0 0 0" }
-                }, "Overlay", LayerPopup);
-
-                float anchor = 0;
-
-                foreach (var notify in Notifications)
-                {
-                    container.Add(new CuiPanel
-                    {
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "0 0", OffsetMin = $"{-config.uIPopupNotifications.OffsetX} {anchor - config.uIPopupNotifications.OffsetY}", OffsetMax = $"0 {anchor}" },
-                        Image = { Color = config.uIPopupNotifications.InterfaceColor, Material = "" }
-                    }, LayerPopup, LayerPopup + notify.Id);
-
-                    string offset = string.IsNullOrEmpty(notify.Icon) ? "5" : "50";
-                    container.Add(new CuiLabel
-                    {
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"{offset} 0", OffsetMax = "0 -5" },
-                        Text = { Text = notify.Title, Align = TextAnchor.UpperLeft, Font = "robotocondensed-bold.ttf", FontSize = 14, Color = "1 1 1 0.9" }
-                    }, LayerPopup + notify.Id);
-
-                    container.Add(new CuiLabel
-                    {
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"{offset} 0", OffsetMax = "0 -20" },
-                        Text = { Text = notify.Description, Align = TextAnchor.UpperLeft, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "1 1 1 0.8" }
-                    }, LayerPopup + notify.Id);
-
-                    if (!string.IsNullOrEmpty(notify.Icon))
-                    {
-                        container.Add(new CuiButton
-                        {
-                            RectTransform = { AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "10 -15", OffsetMax = "40 15" },
-                            Button = { Color = "0.99 0.68 0.69 1.00", Sprite = notify.Icon },
-                            Text = { Text = "" }
-                        }, LayerPopup + notify.Id);
-                    }
-
-
-                    container.Add(new CuiButton
-                    {
-                        RectTransform = { AnchorMin = "1 1", AnchorMax = "1 1", OffsetMin = "-15 -15", OffsetMax = "0 0" },
-                        Button = { Color = "0 0 0 0.5", Command = $"noescape_popup {notify.Id}" },
-                        Text = { Text = "X", Align = TextAnchor.MiddleCenter, FontSize = 9, Font = "robotocondensed-regular.ttf" }
-                    }, LayerPopup + notify.Id);
-                    anchor -= config.uIPopupNotifications.OffsetY + config.uIPopupNotifications.OffsetSkip;
-                }
-
-                CuiHelper.AddUi(Player, container);
-            }
-        }
-
-        [ConsoleCommand("noescape_popup")]
-        void cmdNoEscapePopupClose(ConsoleSystem.Arg args)
-        {
-            var player = args.Player();
-            var obj = PlayerBlockStatus.Get(player);
-
-            var not = obj.Notifications.Find(v => v.Id == args.Args[0]);
-            if (not != null)
-            {
-                obj.Notifications.Remove(not);
-                obj.DrawNotifications();
-            }
-        }
-
-        public void AddPlayerNotification(BasePlayer player, string attacker, string grid)
-        {
-            if (!config.uIPopupNotifications.EnabledPopup) return;
-            var message = config.uIPopupNotifications.Message.Replace("%ATTACKER%", attacker).Replace("%GRID%", grid);
-            PlayerBlockStatus.Get(player).AddNotification(new PlayerBlockStatus.Notification() { Description = message, Title = config.uIPopupNotifications.Title });
         }
 
         public class SphereComponent : FacepunchBehaviour
@@ -272,7 +129,7 @@ namespace Oxide.Plugins
             public double TotalTime = config.BlockSettings.BlockLength;
             void Awake()
             {
-                var reply = 5195;
+                var reply = 4018;
                 if (reply == 0) { }
                 gameObject.layer = (int)Layer.Reserved1;
                 sphereCollider = gameObject.AddComponent<SphereCollider>();
@@ -291,28 +148,31 @@ namespace Oxide.Plugins
             {
                 var target = other.GetComponentInParent<BasePlayer>();
                 if (target == null) return;
-                if (InstancePlugin.permission.UserHasPermission(target.UserIDString, config.BlockSettings.PermissionToIgnore)) return;
 
-                if (PlayerBlockStatus.Get(target).CurrentBlocker != null && PlayerBlockStatus.Get(target).CurrentBlocker != this && PlayerBlockStatus.Get(target).CurrentBlocker.CurrentTime > CurrentTime)
+                if (PlayerBlockStatus.Get(target).CurrentBlocker != null && PlayerBlockStatus.Get(target).CurrentBlocker == this && PlayerBlockStatus.Get(target).CurrentTime > CurrentTime)
                 {
-                    target.ChatMessage(string.Format(InstancePlugin.Messages["enterRaidZone"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength - CurrentTime)));
-                    PlayerBlockStatus.Get(target).CurrentBlocker = this;
                     PlayerBlockStatus.Get(target).CurrentTime = CurrentTime;
                     return;
                 }
-                if (config.BlockSettings.ShouldBlockEnter && PlayerBlockStatus.Get(target).CurrentBlocker == null)
+                if (PlayerBlockStatus.Get(target).CurrentBlocker != null && PlayerBlockStatus.Get(target).CurrentBlocker != this && PlayerBlockStatus.Get(target).CurrentTime > CurrentTime)
+                {
+                    target.ChatMessage(string.Format(ins.Messages["enterRaidZone"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength - CurrentTime)));
+                    PlayerBlockStatus.Get(target).CurrentTime = CurrentTime;
+                    PlayerBlockStatus.Get(target).CurrentBlocker = this;
+                    return;
+                }
+                if (config.BlockSettings.ShouldBlockEnter && (PlayerBlockStatus.Get(target).CurrentBlocker == null || PlayerBlockStatus.Get(target).CurrentBlocker != this))
                 {
                     PlayerBlockStatus.Get(target).BlockPlayer(this, false);
-                    target.ChatMessage(string.Format(InstancePlugin.Messages["enterRaidZone"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength - CurrentTime)));
+                    target.ChatMessage(string.Format(ins.Messages["enterRaidZone"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength - CurrentTime)));
+                    return;
                 }
             }
 
             private void OnTriggerExit(Collider other)
             {
                 if (!config.BlockSettings.UnBlockExit) return;
-
                 var target = other.GetComponentInParent<BasePlayer>();
-
                 if (target != null && target.userID.IsSteamId() && PlayerBlockStatus.Get(target).CurrentBlocker == this)
                     PlayerBlockStatus.Get(target).UnblockPlayer();
             }
@@ -328,22 +188,14 @@ namespace Oxide.Plugins
                 }
             }
 
+            public void OnDestroy()
+            {
+                Destroy(this);
+            }
+
             public bool IsInBlocker(BaseEntity player) => Vector3.Distance(player.transform.position, transform.position) < config.BlockSettings.BlockerDistance;
         }
         #endregion
-
-        private static string HexToCuiColor(string hex, float alpha = 100)
-        {
-            if (string.IsNullOrEmpty(hex)) hex = "#FFFFFF";
-
-            var str = hex.Trim('#');
-            if (str.Length != 6) throw new Exception(hex);
-            var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
-            var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
-            var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
-
-            return $"{(double)r / 255} {(double)g / 255} {(double)b / 255} {alpha / 100f}";
-        }
 
         #region Variables
 
@@ -351,7 +203,7 @@ namespace Oxide.Plugins
 
         protected override void LoadDefaultConfig()
         {
-            PrintWarning("Благодарим за покупку плагина на сайте RustPlugin.ru. Если вы передадите этот плагин сторонним лицам знайте - это лишает вас гарантированных обновлений!");
+            PrintWarning("Благодарим за покупку плагина на сайте TopPlugin.ru. Если вы передадите этот плагин сторонним лицам знайте - это лишает вас гарантированных обновлений!");
             config = PluginConfig.DefaultConfig();
         }
         protected override void LoadConfig()
@@ -376,11 +228,33 @@ namespace Oxide.Plugins
             if (!config.PlayerBlockSettings.CanBuild && !config.PlayerBlockSettings.CanPlaceObjects) Unsubscribe(nameof(CanBuild));
             else Subscribe(nameof(CanBuild));
             permission.RegisterPermission(config.BlockSettings.PermissionToIgnore, this);
-            permission.RegisterPermission(config.VkBotMessages.VkPrivilage, this);
+            //permission.RegisterPermission(config.VkBotMessages.VkPrivilage, this);
             lang.RegisterMessages(Messages, this, "en");
             Messages = lang.GetMessages("en", this);
+			LoadVKData();
         }
 
+        public void LoadVKData()
+        {
+            if (Interface.Oxide.DataFileSystem.ExistsDatafile("Vk/Data"))
+            {
+                baza = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, string>>("Vk/Data");
+            }
+            else
+            {
+                PrintWarning($"Error reading config, creating one new data!");
+                baza = new Dictionary<ulong, string>();
+            }
+
+            if (Interface.Oxide.DataFileSystem.ExistsDatafile("Vk/Names"))
+            {
+                _PlayerNicknames = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, string>>("Vk/Names");
+            }
+            else
+                _PlayerNicknames = new Dictionary<ulong, string>();
+
+        }
+		
         private void UpdateConfigValues()
         {
             PluginConfig baseConfig = PluginConfig.DefaultConfig();
@@ -408,14 +282,6 @@ namespace Oxide.Plugins
 
                     PrintWarning("Added Black List commands");
                 }
-                if (config.PluginVersion < new VersionNumber(2, 4, 0))
-                {
-                    if (config.uIPopupNotifications == null)
-                    {
-                        config.uIPopupNotifications = new UIPopupNotifications();
-                    }
-                    PrintWarning("Added UI Popup Notifications");
-                }
                 PrintWarning("Config update completed!");
                 config.PluginVersion = Version;
             }
@@ -424,42 +290,6 @@ namespace Oxide.Plugins
         protected override void SaveConfig()
         {
             Config.WriteObject(config);
-        }
-
-        public class UIPopupNotifications
-        {
-            [JsonProperty("Включить Popup Notifications")]
-            public bool EnabledPopup = false;
-
-            [JsonProperty("Цвет фона оповещения")]
-            public string InterfaceColor = "0.121568628 0.419607848 0.627451 0.784313738";
-
-            [JsonProperty("Позиция по вертикали X (0.0 - 1.0)")]
-            public float AnchorPosX = 0.99f;
-
-            [JsonProperty("Время жизни Popup оповещения в секундах")]
-            public int PopupDestroyTime = 30;
-
-            [JsonProperty("Позиция по вертикали Y (0.0 - 1.0)")]
-            public float AnchorPosY = 0.99f;
-
-            [JsonProperty("Ширина каждой панели (Offset X)")]
-            public float OffsetX = 300;
-
-            [JsonProperty("Высота каждой панели (Offset Y)")]
-            public float OffsetY = 50;
-
-            [JsonProperty("Пропуск между панелями (Offset)")]
-            public float OffsetSkip = 10;
-
-            [JsonProperty("Титл оповещения")]
-            public string Title = "ОПОВЕЩЕНИЕ О РЕЙДЕ";
-
-            [JsonProperty("Текст оповещения (%ATTACKER% - Имя атакующего, %GRID% - Грит координаты)")]
-            public string Message = "ВНИМАНИЕ! Игрок <b>%ATTACKER%</b> атаковал ваше строение в квадрате <b>%GRID%</b>";
-
-            [JsonProperty("Максимальное количество оповещений")]
-            public int MaxPopupNotifications = 3;
         }
 
         public class UISettings
@@ -475,9 +305,6 @@ namespace Oxide.Plugins
 
             [JsonProperty("Позиция AnchorMax")]
             public string AnchorMax = "0.640625 0.1398148";
-
-            [JsonProperty("Картинка Рейдблока")]
-            public string RaidBlock = "https://cdn.discordapp.com/attachments/1048988406736232578/1049044027674214461/-1_1.png";
         }
 
         public class BlockSettings
@@ -487,10 +314,6 @@ namespace Oxide.Plugins
 
             [JsonProperty("Общее время блокировки в секундах")]
             public float BlockLength = 150;
-
-
-            [JsonProperty("Не блокировать игрока если он создатель объекта")]
-            public bool EnabledOwner = false;
 
             [JsonProperty("Блокировать создателя объекта какой разрушили, даже если он вне зоны рейда")]
             public bool BlockOwnersIfNotInZone = true;
@@ -513,15 +336,20 @@ namespace Oxide.Plugins
             [JsonProperty("Белый список entity при разрушении каких не действует блокировка")]
             public List<string> WriteListDestroyEntity = new List<string>();
         }
-
-        public class VkBotMessages
+        public class SenderConfig
         {
-            [JsonProperty("Включить отправку сообщения в ВК оффлайн игроку через VkBot")]
-            public bool EnabledVkBOT = false;
+            [JsonProperty("Настройки отправки сообщений в VK")]
+            public VkSettings VK = new VkSettings();
             [JsonProperty("Сообщение какое будет отправлено игроку ({0} - Имя атакуещего, {1} - Квадрат на карте)")]
-            public string Messages = "Внимание! Игрок {0} начал рейд вашего строения в квадрате {1} на сервере SERVERNAME.";
-            [JsonProperty("Привилегия на использование оффлайн уведомления")]
-            public string VkPrivilage = "noescape.vknotification";
+            public string Message = "Внимание! Игрок {0} начал рейд вашего строения в квадрате {1} на сервере SERVERNAME.";
+        }
+
+        public class VkSettings
+        {
+            [JsonProperty("Включить отправку сообщения в ВК оффлайн игроку")]
+            public bool EnabledVk = false;
+            [JsonProperty("Access токен группы ВК с правом отправки сообщений")]
+            public string VKAccess = "Вставьте сюда токен для отправки сообщений в вк";
         }
 
         public class PlayerBlockSettings
@@ -569,30 +397,26 @@ namespace Oxide.Plugins
             [JsonProperty("Настройка UI")]
             public UISettings UISettings = new UISettings();
 
-            [JsonProperty("Настройка Popup Notifications")]
-            public UIPopupNotifications uIPopupNotifications = new UIPopupNotifications();
-
             [JsonProperty("Общая настройка блокировки")]
             public BlockSettings BlockSettings = new BlockSettings();
 
             [JsonProperty("Настройка запретов для игрока")]
             public PlayerBlockSettings PlayerBlockSettings = new PlayerBlockSettings();
 
-            [JsonProperty("Настройка VkBOT")]
-            public VkBotMessages VkBotMessages = new VkBotMessages();
+            [JsonProperty("Настройка отправки сообщений")]
+            public SenderConfig Sender = new SenderConfig();
 
             [JsonProperty("Версия конфигурации")]
             public VersionNumber PluginVersion = new VersionNumber();
 
             [JsonIgnore]
-            [JsonProperty("Инициализация плагина")]
+            [JsonProperty("Инициализация плагина⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠")]
             public bool Init = false;
 
             public static PluginConfig DefaultConfig()
             {
                 return new PluginConfig
                 {
-                    uIPopupNotifications = new UIPopupNotifications(),
                     BlockSettings = new BlockSettings()
                     {
                         BlockerDistance = 150,
@@ -634,11 +458,13 @@ namespace Oxide.Plugins
                         AnchorMin = "0.3447913 0.112037",
                         AnchorMax = "0.640625 0.1398148",
                     },
-                    VkBotMessages = new VkBotMessages()
+                    Sender = new SenderConfig()
                     {
-                        EnabledVkBOT = false,
-                        Messages = "Внимание! Игрок {0} начал рейд вашего строения в квадрате {1} на сервере SERVERNAME.",
-                        VkPrivilage = "noescape.vknotification",
+						VK = new VkSettings(){
+							EnabledVk = false,
+							VKAccess = "Вставьте сюда токен для отправки сообщений в вк"
+						},
+                        Message = "Внимание! Игрок {0} начал рейд вашего строения в квадрате {1} на сервере SERVERNAME."
                     },
                     PluginVersion = new VersionNumber(),
                 };
@@ -648,41 +474,20 @@ namespace Oxide.Plugins
         #endregion
 
         #region Oxide
-
-
-        public static NoEscape InstancePlugin;
-
+        private static NoEscape ins;
+        [PluginReference] Plugin ImageLibrary;
         private void OnServerInitialized()
         {
-
-            
-            if(ImageLibrary == null)
-            { 
-                
-                ImageLibrary = plugins.Find("ImageLibrary");
-            }
-            
-
-            InstancePlugin = this;
-            ImageLibrary.Call("AddImage", config.UISettings.RaidBlock, config.UISettings.RaidBlock);
-            
+            ins = this;
             config.Init = true;
+            ImageLibrary.Call("AddImage", "https://imgur.com/4jcrNyN.png", "4jcrNyN");
             BasePlayer.activePlayerList.ToList().ForEach(OnPlayerConnected);
         }
 
         void OnPlayerSleepEnded(BasePlayer player)
         {
             SphereComponent ActiveRaidZone = GetRaidZone(player.transform.position);
-            if (ActiveRaidZone == null)
-            {
-                if (config.BlockSettings.UnBlockExit)
-                {
-                    if (PlayerBlockStatus.Get(player).CurrentBlocker != null)
-                        PlayerBlockStatus.Get(player).UnblockPlayer();
-                }
-                return;
-            }
-
+            if (ActiveRaidZone == null) return;
             if (PlayerBlockStatus.Get(player).CurrentBlocker != null)
             {
                 if (PlayerBlockStatus.Get(player).CurrentBlocker != ActiveRaidZone)
@@ -708,24 +513,72 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
-            foreach (var player in BasePlayer.activePlayerList)
+            foreach (var player in BasePlayer.activePlayerList){
                 if (PlayerBlockStatus.Get(player) != null)
                     UnityEngine.Object.Destroy(PlayerBlockStatus.Get(player));
+			}
             BlockerList.RemoveAll(x =>
             {
                 UnityEngine.Object.Destroy(x);
                 return true;
             });
+			Interface.Oxide.DataFileSystem.WriteObject("Vk/Data", baza);
+            Interface.Oxide.DataFileSystem.WriteObject("Vk/Names", _PlayerNicknames);
+        }
+
+        string GetGridLocation(Vector3 pos)
+        {
+            string gridLocation = "";
+            int numx = Convert.ToInt32(pos.x);
+            int numz = Convert.ToInt32(pos.z);
+
+            float offset = (ConVar.Server.worldsize) / 2;
+            float step = (ConVar.Server.worldsize) / (0.0066666666666667f * (ConVar.Server.worldsize));
+            string start = "";
+
+            int diff = Convert.ToInt32(step);
+            int absoluteDifference = diff;
+
+            char letter = 'A';
+            int number = 0;
+            for (float xx = -offset; xx < offset; xx += step)
+            {
+                for (float zz = offset; zz > -offset; zz -= step)
+                {
+                    if (Math.Abs(numx - xx) <= diff && Math.Abs(numz - zz) <= diff)
+                    {
+                        gridLocation = $"{start}{letter}{number}";
+                        break;
+                    }
+                    number++;
+                }
+                number = 0;
+                if (letter.ToString().ToUpper() == "Z")
+                {
+                    start = "A";
+                    letter = 'A';
+                }
+                else
+                {
+                    letter = (char)(((int)letter) + 1);
+                }
+                if (Math.Abs(numx - xx) <= diff)
+                {
+                    break;
+                }
+            }
+            return gridLocation;
         }
 
         private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
         {
             if (!config.Init) return;
             if (entity == null || info == null || info.InitiatorPlayer == null || !(entity is StabilityEntity || entity is ShopFront || entity is BuildingPrivlidge)
-                || config.BlockSettings.EnabledBuildingBlock && entity.GetBuildingPrivilege() == null || entity.OwnerID == 0 || config.BlockSettings.EnabledOwner && info.InitiatorPlayer.userID == entity.OwnerID) return;
+                || config.BlockSettings.EnabledBuildingBlock && entity.GetBuildingPrivilege() == null || entity.OwnerID == 0) return;
             if (entity is BuildingBlock && (entity as BuildingBlock).currentGrade.gradeBase.type == BuildingGrade.Enum.Twigs
                 || info?.damageTypes.GetMajorityDamageType() == DamageType.Decay || config.BlockSettings.WriteListDestroyEntity.Contains(entity.ShortPrefabName)) return;
             var alreadyBlock = BlockerList.FirstOrDefault(p => Vector3.Distance(entity.transform.position, p.transform.position) < (config.BlockSettings.BlockerDistance / 2));
+            var position = GetGridLocation(entity.transform.position);
             if (alreadyBlock)
             {
                 alreadyBlock.CurrentTime = 0;
@@ -743,14 +596,14 @@ namespace Oxide.Plugins
                         var AuthPlayer = BasePlayer.Find(aplayer.userid.ToString());
                         if (AuthPlayer != null && AuthPlayer != info.InitiatorPlayer && AuthPlayer.IsConnected)
                             PlayerBlockStatus.Get(AuthPlayer).BlockPlayer(alreadyBlock, false);
-                        else if (AuthPlayer == null || !AuthPlayer.IsConnected) SendOfflineMEssages(entity.transform.position, info.InitiatorPlayer.displayName, aplayer.userid);
+                        else if (AuthPlayer == null || !AuthPlayer.IsConnected) ALERTPLAYER(aplayer.userid, info.InitiatorPlayer.displayName, position);
                     }
                 }
                 var col = Vis.colBuffer;
                 var count = Physics.OverlapSphereNonAlloc(alreadyBlock.transform.position, config.BlockSettings.BlockerDistance, col, LayerMask.GetMask("Player (Server)"));
                 for (int i = 0; i < count; i++)
                 {
-                    var player = col[i].gameObject.ToBaseEntity() as BasePlayer;
+                    var player = col[i].ToBaseEntity() as BasePlayer;
                     if (player == null) continue;
                     PlayerBlockStatus.Get(player).BlockPlayer(alreadyBlock, false);
                 }
@@ -763,25 +616,28 @@ namespace Oxide.Plugins
                 sphere.GetComponent<SphereComponent>().Init(info.InitiatorPlayer, entity.OwnerID, entity.GetBuildingPrivilege() != null ? entity.GetBuildingPrivilege().authorizedPlayers.Select(p => p.userid).ToList() : null);
                 BlockerList.Add(sphere);
                 PlayerBlockStatus.Get(info.InitiatorPlayer).BlockPlayer(sphere, true);
-
                 var OwnerPlayer = BasePlayer.FindByID(entity.OwnerID);
                 if (OwnerPlayer == null || !OwnerPlayer.IsConnected)
                 {
-                    SendOfflineMEssages(entity.transform.position, info.InitiatorPlayer.displayName, entity.OwnerID);
+                    ALERTPLAYER(entity.OwnerID, info.InitiatorPlayer.displayName, position);
+                    return;
                 }
-                else if (OwnerPlayer != null)
+                else if (OwnerPlayer != null && OwnerPlayer != info.InitiatorPlayer)
                 {
-                    if (config.BlockSettings.BlockOwnersIfNotInZone) PlayerBlockStatus.Get(OwnerPlayer)?.BlockPlayer(sphere, false);
-                    OwnerPlayer.ChatMessage(string.Format(Messages["blockactive"], GetGridString(entity.transform.position), NumericalFormatter.FormatTime(config.BlockSettings.BlockLength)));
-                    AddPlayerNotification(OwnerPlayer, info.InitiatorPlayer.displayName, GetGridString(entity.transform.position));
-
+                    if (config.BlockSettings.BlockOwnersIfNotInZone)
+                    {
+                        PlayerBlockStatus.Get(OwnerPlayer)?.BlockPlayer(sphere, false);
+                        if (OwnerPlayer != info?.InitiatorPlayer) OwnerPlayer.ChatMessage(string.Format(Messages["blockactive"], GetNameGrid(entity.transform.position), NumericalFormatter.FormatTime(config.BlockSettings.BlockLength)));
+                    }
+                    else
+                        OwnerPlayer.ChatMessage(string.Format(Messages["blockactiveOwner"], GetNameGrid(entity.transform.position)));
                 }
                 var col = Vis.colBuffer;
                 var count = Physics.OverlapSphereNonAlloc(sphere.transform.position, config.BlockSettings.BlockerDistance, col, LayerMask.GetMask("Player (Server)"));
                 for (int i = 0; i < count; i++)
                 {
                     var player = col[i].ToBaseEntity() as BasePlayer;
-                    if (player == null || !player.IsConnected || OwnerPlayer == player) continue;
+                    if (player == null || !player.IsConnected) continue;
                     PlayerBlockStatus.Get(player).BlockPlayer(sphere, false);
                 }
 
@@ -790,13 +646,9 @@ namespace Oxide.Plugins
                     foreach (var aplayer in entity.GetBuildingPrivilege().authorizedPlayers)
                     {
                         var AuthPlayer = BasePlayer.Find(aplayer.userid.ToString());
-                        if (AuthPlayer != null && AuthPlayer != info.InitiatorPlayer && OwnerPlayer != AuthPlayer)
-                        {
+                        if (AuthPlayer != null && AuthPlayer != info.InitiatorPlayer)
                             PlayerBlockStatus.Get(AuthPlayer).BlockPlayer(sphere, false);
-                            AddPlayerNotification(AuthPlayer, info.InitiatorPlayer.displayName, GetGridString(entity.transform.position));
-                            SendReply(AuthPlayer, string.Format(Messages["blockactiveAuthCup"], GetGridString(entity.transform.position), NumericalFormatter.FormatTime(config.BlockSettings.BlockLength)));
-                        }
-                        else if (AuthPlayer != info.InitiatorPlayer && OwnerPlayer != AuthPlayer) SendOfflineMEssages(entity.transform.position, info.InitiatorPlayer.displayName, aplayer.userid);
+                        else ALERTPLAYER(aplayer.userid, info.InitiatorPlayer.displayName, position);
                     }
                 }
             }
@@ -850,31 +702,6 @@ namespace Oxide.Plugins
         #endregion
 
         #region Functions
-        private string GetGridString(Vector3 pos)
-        {
-            char letter = 'A';
-            var x = Mathf.Floor((pos.x + (ConVar.Server.worldsize / 2)) / 146.3f) % 26;
-            var z = (Mathf.Floor(ConVar.Server.worldsize / 146.3f) - 1) - Mathf.Floor((pos.z + (ConVar.Server.worldsize / 2)) / 146.3f);
-            letter = (char)(((int)letter) + x);
-            return $"{letter}{z}";
-        }
-
-        private string NumberToString(int number)
-        {
-            bool a = number > 26;
-            Char c = (Char)(65 + (a ? number - 26 : number));
-            return a ? "A" + c : c.ToString();
-        }
-
-        [PluginReference] private Plugin VKBot;
-        private static void SendOfflineMEssages(Vector3 pos, string name = "", ulong playerid = 5319680)
-        {
-            if (!InstancePlugin.permission.UserHasPermission(playerid.ToString(), config.VkBotMessages.VkPrivilage)) return;
-            string receiver = (string)InstancePlugin.VKBot?.Call("GetUserVKId", playerid) ?? "";
-            if (string.IsNullOrEmpty(receiver)) return;
-            InstancePlugin.VKBot?.Call("SendVkMessage", receiver, config.VkBotMessages.Messages.Replace("{0}", name).Replace("{1}", InstancePlugin.GetGridString(pos)));
-        }
-
         private string GetFormatTime(TimeSpan timespan)
         {
             return string.Format(timespan.TotalHours >= 1 ? "{2:00}:{0:00}:{1:00}" : "{0:00}:{1:00}", timespan.Minutes, timespan.Seconds, System.Math.Floor(timespan.TotalHours));
@@ -936,6 +763,7 @@ namespace Oxide.Plugins
         #endregion
 
         #region API
+
         private bool IsBlocked(BasePlayer player) => IsRaidBlocked(player);
 
         private List<Vector3> ApiGetOwnerRaidZones(ulong playerid)
@@ -949,7 +777,13 @@ namespace Oxide.Plugins
 
         private bool IsRaidBlock(ulong userId) => IsRaidBlocked(userId.ToString());
 
-        private bool IsRaidBlocked(BasePlayer player) => PlayerBlockStatus.Get(player)?.CurrentBlocker != null;
+        private bool IsRaidBlocked(BasePlayer player) {
+			var targetBlock = PlayerBlockStatus.Get(player);
+			if (targetBlock==null) return false;
+			if (targetBlock.CurrentBlocker == null) return false;
+			
+			return true;
+		}
 
         private bool IsRaidBlocked(string player)
         {
@@ -961,11 +795,13 @@ namespace Oxide.Plugins
 
         private int ApiGetTime(ulong userId)
         {
-            if (!IsRaidBlocked(userId.ToString())) return 0;
+            if (!IsRaidBlocked(userId.ToString())) 
+				return 0;
             var targetBlock = PlayerBlockStatus.Get(BasePlayer.Find(userId.ToString()));
             return (int)(targetBlock.CurrentBlocker.TotalTime - targetBlock.CurrentTime);
         }
 
+		
         private string CanTeleport(BasePlayer player)
         {
             if (!config.PlayerBlockSettings.CanTeleport) return null;
@@ -1058,6 +894,394 @@ namespace Oxide.Plugins
 
         #endregion
 
+		#region VkAPI
+			Dictionary<ulong, string> _PlayerNicknames = new Dictionary<ulong, string>();
+
+			public Dictionary<ulong, string> baza;
+
+        private void ALERTPLAYER(ulong ID, string name, string pos)
+        {
+            ALERT alert;
+            if(!alerts.TryGetValue(ID, out alert))
+            {
+                alerts.Add(ID, new ALERT());
+                alert = alerts[ID];
+            }
+
+            #region ОПОВЕЩЕНИЕ В ВК
+            if (alert.vkcooldown < DateTime.Now)
+            {
+                string vkid;
+                if (baza.TryGetValue(ID, out vkid))
+                {
+                    GetRequest(vkid, $"Внимание! Игрок {name} начал рейд вашего строения в квадрате {pos} на сервере SERVERNAME.");
+                    alert.vkcooldown = DateTime.Now.AddSeconds(1200);
+                }
+            }
+            #endregion
+        }
+
+        private static Dictionary<string, Vector3> Grids = new Dictionary<string, Vector3>();
+        private void CreateSpawnGrid()
+        {
+            Grids.Clear();
+            var worldSize = (ConVar.Server.worldsize);
+            float offset = worldSize / 2;
+            var gridWidth = (0.0066666666666667f * worldSize);
+            float step = worldSize / gridWidth;
+
+            string start = "";
+
+            char letter = 'A';
+            int number = 0;
+
+            for (float zz = offset; zz > -offset; zz -= step)
+            {
+                for (float xx = -offset; xx < offset; xx += step)
+                {
+                    Grids.Add($"{start}{letter}{number}", new Vector3(xx - 55f, 0, zz + 20f));
+                    if (letter.ToString().ToUpper() == "Z")
+                    {
+                        start = "A";
+                        letter = 'A';
+                    }
+                    else
+                    {
+                        letter = (char)(((int)letter) + 1);
+                    }
+
+
+                }
+                number++;
+                start = "";
+                letter = 'A';
+            }
+        }
+
+        private string GetNameGrid(Vector3 pos)
+        {
+            return Grids.Where(x => x.Value.x < pos.x && x.Value.x + 150f > pos.x && x.Value.z > pos.z && x.Value.z - 150f < pos.z).FirstOrDefault().Key;
+        }
+
+			private static string HexToRustFormat(string hex)
+			{
+				if (string.IsNullOrEmpty(hex))
+				{
+					hex = "#FFFFFFFF";
+				}
+				var str = hex.Trim('#');
+				if (str.Length == 6) str += "FF";
+				if (str.Length != 8)
+				{
+					throw new Exception(hex);
+					throw new InvalidOperationException("Cannot convert a wrong format.");
+				}
+				var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
+				var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
+				var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
+				var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
+				Color color = new Color32(r, g, b, a);
+				return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
+			}
+			private string GetOfflineName(ulong id)
+			{
+				string name = "";
+				if (_PlayerNicknames.ContainsKey(id))
+					name = _PlayerNicknames[id];
+
+				return name;
+			}
+			bool IsOnline(ulong id)
+			{
+				foreach (BasePlayer active in BasePlayer.activePlayerList)
+				{
+					if (active.userID == id) return true;
+				}
+
+				return false;
+			}
+		#endregion
+
+        #region Хуита
+        class ALERT
+        {
+            public DateTime gamecooldown;
+            public DateTime discordcooldown;
+            public DateTime vkcooldown;
+            public DateTime vkcodecooldown;
+        }
+
+        class CODE
+        {
+            public string id;
+            public ulong gameid;
+        }
+
+        private static Dictionary<string, CODE> VKCODES = new Dictionary<string, CODE>();
+        
+        private static Dictionary<ulong, ALERT> alerts = new Dictionary<ulong, ALERT>();
+        private string RANDOMNUM() => Random.Range(1000, 99999).ToString();
+
+        [ChatCommand("vk")]
+        void ChatVk(BasePlayer player)
+        {
+            string vkid;
+            if (!baza.TryGetValue(player.userID, out vkid))
+            {
+                player.Command("vk add");
+            }
+            else
+            {
+                VkUI(player, "<color=#b0b0b0>ПОДТВЕРЖДЕНО</color>", "0.51 0.85 0.59 0.4", "", "Теперь вам будут приходить оповещение о рейде в ЛС\n<b>НЕ ЗАПРЕЩАЙТЕ СООБЩЕНИЕ ОТ СООБЩЕСТВА</b>"); 
+            }
+        }
+
+        [ConsoleCommand("vk")]
+        void ConsolePM(ConsoleSystem.Arg args)
+        {
+            var player = args.Player();
+            if (player != null && args.HasArgs(1))
+            {
+                Puts(args.Args[0]);
+                if (args.Args[0] == "add")
+                {
+                    if(args == null || args.Args.Length == 1)
+                    {
+                        string vkid;
+                        if (!baza.TryGetValue(player.userID, out vkid))
+                        {
+                            VkUI(player, "Укажите свой вк", "0 0 0 0.6", "vk add ", "Чтобы подключить оповещение о рейде\nдобавте выше <b>id вашего аккаунта</b>"); 
+                        }
+                        else
+                        {
+                            VkUI(player, "<color=#b0b0b0>ПОДТВЕРЖДЕНО</color>", "0.51 0.85 0.59 0.4", "", "Теперь вам будут приходить оповещение о рейде в ЛС\n<b>НЕ ЗАПРЕЩАЙТЕ СООБЩЕНИЕ ОТ СООБЩЕСТВА</b>"); 
+                        }
+                        return;
+                    }
+                    ALERT aLERT;
+                    if (alerts.TryGetValue(player.userID, out aLERT) && aLERT.vkcodecooldown > DateTime.Now)
+                    {
+                        player.ChatMessage($"Отправить новый код вы сможете через {FormatTime(aLERT.vkcodecooldown - DateTime.Now).ToLower()}");
+                        return;
+                    }
+
+                    string id = args.Args[1].ToLower().Replace("vk.com/", "").Replace("https://", "").Replace("http://", "");
+                    string num = RANDOMNUM();
+                    GetRequest(id, $"Код подтверждения {num} аккаунта.", player, num);
+                }
+                if (args.Args[0] == "accept")
+                {
+                    if(args == null || args.Args.Length == 1)
+                    {
+                        VkUI(player, "Укажите код из сообщения", "0 0 0 0.6", "vk accept ", "Вы не указали <b>код</b>!"); 
+                        return;
+                    }
+
+                    CODE cODE;
+                    if (VKCODES.TryGetValue(args.Args[1], out cODE) && cODE.gameid == player.userID)
+                    {
+                        string vkid;
+                        if(baza.TryGetValue(player.userID, out vkid))
+                        {
+                            vkid = cODE.id;
+                        }
+                        else
+                        {
+                            baza.Add(player.userID, cODE.id);
+                        }
+                        VKCODES.Remove(args.Args[1]);
+                        VkUI(player, "<color=#b0b0b0>ПОДТВЕРЖДЕНО</color>", "0.51 0.85 0.59 0.4", "", "Теперь вам будут приходить оповещение о рейде в ЛС\n<b>НЕ ЗАПРЕЩАЙТЕ СООБЩЕНИЕ ОТ СООБЩЕСТВА</b>"); 
+                        Interface.Oxide.DataFileSystem.WriteObject("Vk/Data", baza);
+                    }
+                    else
+                    {
+                        VkUI(player, "Укажите код из сообщения", "0 0 0 0.6", "vk accept ", "Не верный <b>код</b>!"); 
+                    }
+                }
+                if (args.Args[0] == "delete")
+                {
+                    if (baza.ContainsKey(player.userID))
+                    {
+                        baza.Remove(player.userID);
+                        VkUI(player, "Укажите свой вк", "0 0 0 0.6", "vk add ", "Чтобы подключить оповещение о рейде\nдобавте выше <b>id вашего аккаунта</b>"); 
+                    }
+                }
+            }
+        }
+
+        private void GetRequest(string reciverID, string msg, BasePlayer player = null, string num = null) => webrequest.Enqueue("https://api.vk.com/method/messages.send?domain=" + reciverID + "&message=" + msg.Replace("#", "%23") + "&v=5.86&access_token=" + config.Sender.VK.VKAccess, null, (code2, response2) => ServerMgr.Instance.StartCoroutine(GetCallback(code2, response2, reciverID, player, num)), this);
+        
+        private IEnumerator GetCallback(int code, string response, string id, BasePlayer player = null, string num = null)
+        {
+            if (player == null) yield break;
+            if (response == null || code != 200)
+            {
+                ALERT alert;
+                if (alerts.TryGetValue(player.userID, out alert)) alert.vkcooldown = DateTime.Now;
+                Debug.Log("НЕ ПОЛУЧИЛОСЬ ОТПРАВИТЬ СООБЩЕНИЕ В ВК! => обнулили кд на отправку");
+                yield break;
+            }
+            yield return new WaitForEndOfFrame();
+            if (!response.Contains("error"))
+            {
+                ALERT aLERT;
+                if (alerts.TryGetValue(player.userID, out aLERT))
+                {
+                    aLERT.vkcodecooldown = DateTime.Now.AddMinutes(10);
+                }
+                else
+                {
+                    alerts.Add(player.userID, new ALERT {vkcodecooldown = DateTime.Now.AddMinutes(10) });
+                }
+                if (VKCODES.ContainsKey(num)) VKCODES.Remove(num);
+                VKCODES.Add(num, new CODE { gameid = player.userID, id = id });
+                VkUI(player, "Укажите код из сообщения", "0 0 0 0.6", "vk accept ", $"Вы указали VK: <b>{id}</b>. Вам в <b>VK</b> отправлено сообщение с кодом.\nВставте <b>код</b> выше, чтобы подтвердить авторизацию");
+            }
+            else if (response.Contains("PrivateMessage"))
+            {
+                VkUI(player, "Укажите свой вк", "0 0 0 0.6", "vk add ", $"Ваши настройки приватности не позволяют отправить вам\nсообщение <b>{id}</b>");
+            }
+            else if(response.Contains("ErrorSend"))
+            {
+                VkUI(player, "Укажите свой вк", "0 0 0 0.6", "vk add ", $"Невозможно отправить сообщение.Проверьте правильность ссылки <b>{id}</b>\nили повторите попытку позже.");
+            }
+            else if(response.Contains("BlackList"))
+            {
+                VkUI(player, "Укажите свой вк", "0 0 0 0.6", "vk add ", "Невозможно отправить сообщение. Вы добавили группу в черный список или не подписаны на нее, если это не так,\nто просто напишите в группу сервера любое сообщение и попробуйте еще раз.");
+            }
+            else
+            {
+                VkUI(player, "Укажите свой вк", "0 0 0 0.6", "vk add ", $"Вы указали неверный <b>VK ID {id}</b>, если это не так,\nто просто напишите в группу сервера любое сообщение и попробуйте еще раз."); 
+            }
+            yield break;
+        }
+
+        string Layers = "Vk_UI";
+
+        void VkUI(BasePlayer player, string vk = "", string color = "", string command = "", string text = "")
+        {
+            CuiHelper.DestroyUi(player, Layers);
+            var container = new CuiElementContainer();
+
+            container.Add(new CuiPanel
+            {
+                CursorEnabled = false,
+                RectTransform = { AnchorMin = "0.288 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                Image = { Color = "0 0 0 0" }
+            }, "Info", Layers);
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = $"0 0.8", AnchorMax = $"1 1", OffsetMax = "0 0" },
+                Image = { Color = "1 1 1 0.2" },
+            }, Layers);
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.1 0.8", AnchorMax = $"0.9 1", OffsetMax = "0 0" },
+                Text = { Text = "<b><size=40>ОПОВЕЩЕНИЕ</size></b>\nУслуга оповещения о рейде предоставляется бесплатно для наших игроков. Подключив оповещения вы будете автоматически проинформированы в соц-сетях когда один из строительных объектов будет сломан.", Color = "1 1 1 0.6", Align = TextAnchor.MiddleLeft, FontSize = 12, Font = "robotocondensed-regular.ttf" }
+            }, Layers);
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = $"0.05 0.45", AnchorMax = $"0.95 0.77", OffsetMax = "0 0" },
+                Image = { Color = "1 1 1 0.2" },
+            }, Layers, "Vk");
+
+            container.Add(new CuiElement
+            {
+                Parent = "Vk",
+                Components =
+                {
+                    new CuiRawImageComponent { Png = (string) ImageLibrary.Call("GetImage", "4jcrNyN") },
+                    new CuiRectTransformComponent { AnchorMin = "0.45 0.7", AnchorMax = "0.55 0.9", OffsetMax = "0 0" }
+                }
+            });
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.3 0.63", AnchorMax = $"0.7 0.69", OffsetMax = "0 0" },
+                Text = { Text = "ЭТО ВАШ АККАУНТ", Color = "1 1 1 0.3", Align = TextAnchor.MiddleCenter, FontSize = 14, Font = "robotocondensed-regular.ttf" }
+            }, Layers);
+
+            var anchorMax = command != "" ? "0.93 0.6" : "0.86 0.6";
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0.07 0.55", AnchorMax = anchorMax, OffsetMax = "0 0" },
+                Image = { Color = color }
+            }, Layers, "Enter");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04 0", AnchorMax = $"0.96 1", OffsetMax = "0 0" },
+                Text = { Text = vk, Color = "1 1 1 0.05", Align = TextAnchor.MiddleCenter, FontSize = 12, Font = "robotocondensed-regular.ttf" }
+            }, "Enter");
+
+            if (command != "")
+            {
+                container.Add(new CuiElement
+                {
+                    Parent = "Enter",
+                    Components =
+                    {
+                        new CuiInputFieldComponent { Text = "ХУЙ", FontSize = 14, Align = TextAnchor.MiddleCenter, Command = command, Color = "1 1 1 0.6", CharsLimit = 40},
+                        new CuiRectTransformComponent { AnchorMin = "0.04 0", AnchorMax = "0.96 1" }
+                    }
+                });
+            }
+
+            if (command == "")
+            {
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = $"0.86 0.55", AnchorMax = $"0.93 0.6", OffsetMax = "0 0" },
+                    Button = { Color = "0.76 0.35 0.35 0.4", Command = "vk delete" },
+                    Text = { Text = "✖", Color = "1 1 1 0.5", Align = TextAnchor.MiddleCenter, FontSize = 20, Font = "robotocondensed-bold.ttf" }
+                }, Layers);
+            }
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0 0.5", AnchorMax = $"1 0.55", OffsetMax = "0 0" },
+                Text = { Text = text, Color = "1 1 1 0.3", Align = TextAnchor.MiddleCenter, FontSize = 12, Font = "robotocondensed-regular.ttf" }
+            }, Layers);
+
+            CuiHelper.AddUi(player, container);
+        }
+        #endregion
+
+        #region ВРЕМЯ
+        private static string m0 = "МИНУТ";
+        private static string m1 = "МИНУТЫ";
+        private static string m2 = "МИНУТУ";
+
+        private static string s0 = "СЕКУНД";
+        private static string s1 = "СЕКУНДЫ";
+        private static string s2 = "СЕКУНДУ";
+
+        private static string FormatTime(TimeSpan time)
+        => (time.Minutes == 0 ? string.Empty : FormatMinutes(time.Minutes)) + ((time.Seconds == 0) ? string.Empty : FormatSeconds(time.Seconds));
+
+        private static string FormatMinutes(int minutes) => FormatUnits(minutes, m0, m1, m2);
+
+        private static string FormatSeconds(int seconds) => FormatUnits(seconds, s0, s1, s2);
+
+        private static string FormatUnits(int units, string form1, string form2, string form3)
+        {
+            var tmp = units % 10;
+
+            if (units >= 5 && units <= 20 || tmp >= 5 && tmp <= 9 || tmp == 0)
+                return $"{units} {form1} ";
+
+            if (tmp >= 2 && tmp <= 4)
+                return $"{units} {form2} ";
+
+            return $"{units} {form3} ";
+        }
+        #endregion
+
+
+
         #region Messages
 
         Dictionary<string, string> Messages = new Dictionary<string, string>() {
@@ -1065,7 +1289,7 @@ namespace Oxide.Plugins
                 "blocksuccess", "Блок деактивирован. Функции разблокированы"
             }
             , {
-                "guitimertext", "{0}"
+                "guitimertext", "<b>Блокировка:</b> Осталось {0}"
             }
             , {
                 "blockactive", "Ваше строение в квадрате <color=#ECBE13>{0}</color> разрушено, активирован рейд блок на <color=#ECBE13>{1}</color>\nНекоторые функции временно недоступны."
@@ -1109,6 +1333,13 @@ namespace Oxide.Plugins
             {
                 "commandBlock", "Вы не можете использовать данную команду во время рейда, подождите {0}"
             },
+            {"VkExit", "У вас уже есть страница!" },
+            {"VkVremExit", "У вас уже есть активный запрос на подтверждение!"},
+            {"VkCodeError", "Неправильный код !"},
+            {"VkSendError", "Ошибка при отправке проверочного кода" },
+            {"VkSendError2", "Ошибка при отправке проверочного кода\nОтправьте сообщение в группу и попробуй еще раз" },
+            {"VkCodeSend", "Код подтверждения отправлен!" },
+            {"VkAdded", "Страница успешно добавлена" }
         };
         #endregion
     }

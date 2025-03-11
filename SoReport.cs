@@ -6,14 +6,13 @@ using Facepunch.Extend;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Libraries;
-using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("SoReport", "LAGZYA", "1.0.7")]
+    [Info("SoReport", "https://topplugin.ru/", "1.0.1")]
     public class SoReport : RustPlugin
     {
         #region Data
@@ -22,7 +21,7 @@ namespace Oxide.Plugins
 
         private class ConfigData
         {
-            [JsonProperty("Demonic RUST")] public string Lable;
+            [JsonProperty("Название сервера")] public string Lable;
             [JsonProperty("Включить дискорд?")] public bool discord;
 
             [JsonProperty("Dircord Report WebHook")]
@@ -44,16 +43,16 @@ namespace Oxide.Plugins
 
             [JsonProperty("Cooldown")] public int cooldown;
             [JsonProperty("Причина 1")] public string res1 = "МАКРОСЫ";
-            [JsonProperty("Причина 2")] public string res2 = "ЧИТЫ";
+            [JsonProperty("Причина 2")] public string res2 = "ЧЭТЫ";
             [JsonProperty("Причина 3")] public string res3 = "БАГОЮЗ";
-            [JsonProperty("Причина 4")] public string res4 = "Игра +3";
+            [JsonProperty("Причина 4")] public string res4 = "+3";
 
  
             [JsonProperty("Кол-во репортов для появление в панели модератора")]
             public int kolreport = 2;
 
             [JsonProperty("Кол-во репортов для подсветки красный в панели модератора")]
-            public int redcolor = 5;
+            public int redcolor = 10;
 
             [JsonProperty("Кол-во проверки для подсветки зеленым в панели модератора")]
             public int greencolor = 3;
@@ -62,10 +61,10 @@ namespace Oxide.Plugins
             {
                 var newConfig = new ConfigData();
                 newConfig.Lable = "SoReport";
-                newConfig.discord = true;
+                newConfig.discord = false;
                 newConfig.cooldown = 30; 
-                newConfig.discordhook = "https://discord.com/api/webhooks/940857028740522055/LPrIUHpQFyzDNhoYBbXKOQpZ8_XPbZteie_m_KxASfuqsWvFRJG4IxRJ3ADQfs9dCyjO";
-                newConfig.discordhook2 = "https://discord.com/api/webhooks/940858719212830771/okHGbhHobKSaM2m4UOKmnRRYijgzeox4j2ZTWJ6YWDYBXvyo9fn1_LVVT_P3BgI5o4G7";
+                newConfig.discordhook = "";
+                newConfig.discordhook2 = "";
                 return newConfig;
             }
         }
@@ -95,9 +94,9 @@ namespace Oxide.Plugins
             NextTick(SaveConfig);
         }
 
-        public Dictionary<ulong, PlayerData> _playerData = new Dictionary<ulong, PlayerData>();
+        Dictionary<ulong, PlayerData> _playerData = new Dictionary<ulong, PlayerData>();
 
-        public class PlayerData
+        class PlayerData
         {
             public string UserName;
             public int ReportCount;
@@ -128,7 +127,7 @@ namespace Oxide.Plugins
             RectTransform =
                 {AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-1920 -1080", OffsetMax = "1920 1080"},
             CursorEnabled = true,
-            Image = {Color = "0.24978750 0.2312312 0.312312312 0"}
+            Image = {Color = "0.211200 0.2312312 0.312312312 0"}
         };
 
         private CuiPanel _redPanel = new CuiPanel()
@@ -178,6 +177,7 @@ namespace Oxide.Plugins
             PlayerListLoad(player, 1);
             ReportFon(player);
         }
+
         private void Alert(ulong targetId)
         {
             var targetPlayer = BasePlayer.FindByID(targetId);
@@ -186,8 +186,8 @@ namespace Oxide.Plugins
             cont.Add(new CuiPanel()
             {
                 RectTransform =
-                    {AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-300 100", OffsetMax = "300 200"},
-                Image = {Color = HexToRustFormat("#26567CFF")}
+                    {AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-300 250", OffsetMax = "300 300"},
+                Image = {Color = "0 0 0 0.64", Material = Blur}
             }, Overlay, "AlerUISo");
             cont.Add(new CuiElement()
             {
@@ -197,12 +197,10 @@ namespace Oxide.Plugins
                     new CuiTextComponent()
                     {
                         Align = TextAnchor.MiddleCenter,
-                        FontSize = 15,
-                        Font = "robotocondensed-bold.ttf",
                         Text =
-                            "Вы подозреваетесь в использовании запрещённого ПО. Администратор вызвал вас на проверку. Напишите свой дискорд через команду /discord. (Пример: /discord никнейм#1234). У вас есть 2 минуты, за выход с сервера вы получите бан за отказ от проверки! Если ваш дискорд с пробелом - напишите его в общий чат"
+                            "Вас вызвали на проверку напиши ваш дискорд /discord <color=purple>{ВАШ ДИСКОРД}</color>.Если вы покините сервер вы будете наказаны,за отказ вы тоже будете наказаны!"
                     },
-                    new CuiRectTransformComponent() {AnchorMin = "0 0", AnchorMax = "0 0", OffsetMin = "10 0", OffsetMax = "590 100"}
+                    new CuiRectTransformComponent() {AnchorMin = "0.09 0", AnchorMax = "0.9 1"}
                 }
             });
             CuiHelper.AddUi(targetPlayer, cont);
@@ -236,6 +234,7 @@ namespace Oxide.Plugins
                     RectTransform = {AnchorMin = "0.4305381 0.01297505", AnchorMax = "0.4722021 0.05097298"}
                 }, Layer + "Mod");
             }
+
             cont.Add(new CuiButton()
             {
                 Button = {Color = "0 0 0 0.64"},
@@ -261,7 +260,7 @@ namespace Oxide.Plugins
             });
             foreach (var players in _playerData.Where(p => p.Value.ReportCount >= cfg.kolreport)
                 .Where(p => BasePlayer.FindByID(p.Key) != null)
-                .Select((i, t) => new {A = i, B = t - (page - 1) * 14}).Skip((page - 1) * 14).Take(14))
+                .Select((i, t) => new {A = i, B = t - (page - 1) * 15}).Skip((page - 1) * 15).Take(15))
             {
                 var target = BasePlayer.FindByID(players.A.Key);
                 if (players.A.Value.AlertCount >= cfg.greencolor)
@@ -339,13 +338,13 @@ namespace Oxide.Plugins
                     }
                 });
                 cont.Add(new CuiElement()
-                { 
+                {
                     Parent = Layer + "Mod" + players.B,
                     Components =
                     {
                         new CuiTextComponent()
                         {
-                            Text = $" {target.displayName.ToUpper().Substring(0, target.displayName.Length > 15 ? 15 :target.displayName.Length)}", Align = TextAnchor.MiddleLeft,
+                            Text = $" {target.displayName.ToUpper()}", Align = TextAnchor.MiddleLeft,
                             FontSize = 16
                         },
                         new CuiRectTransformComponent()
@@ -770,7 +769,7 @@ namespace Oxide.Plugins
                     {
                         new CuiTextComponent()
                         {
-                            Text = $" {targetPlayer.displayName.ToUpper().Substring(0, targetPlayer.displayName.Length > 15 ? 15 : targetPlayer.displayName.Length )}", Align = TextAnchor.MiddleLeft,
+                            Text = $" {targetPlayer.displayName.ToUpper()}", Align = TextAnchor.MiddleLeft,
                             FontSize = 16
                         },
                         new CuiRectTransformComponent()
@@ -862,9 +861,9 @@ namespace Oxide.Plugins
                         Parent = Layer + "Players" + players.B,
                         Components =
                         {
-                            new CuiTextComponent() 
+                            new CuiTextComponent()
                             {
-                                Text = $" {players.A.displayName.ToUpper().Substring(0, players.A.displayName.Length > 15 ? 15 : players.A.displayName.Length)}", Align = TextAnchor.MiddleLeft,
+                                Text = $" {players.A.displayName.ToUpper()}", Align = TextAnchor.MiddleLeft,
                                 FontSize = 16
                             },
                             new CuiRectTransformComponent()
@@ -922,7 +921,7 @@ namespace Oxide.Plugins
             if (cfg.Vkontakte) 
                 webrequest.Enqueue( 
                     "https://api.vk.com/method/messages.send?user_ids=" + cfg.vkadmin + "&message=" + $"Игрок {player.displayName}[{player.userID}] отправил свой дискорд: {arg}" +
-                    "&v=5.103" + "&random_id=" + UnityEngine.Random.Range(Int32.MinValue, Int32.MaxValue) +
+                    "&v=5.92" + "&random_id=" + UnityEngine.Random.Range(Int32.MinValue, Int32.MaxValue) +
                     "&access_token=" + cfg.vkAcces, null, (code, response) => { }, this);
             if(cfg.TelegramUse) webrequest.Enqueue($"https://api.telegram.org/bot{cfg.botToken}/sendMessage?chat_id=@{cfg.chatid}&text=Игрок {player.displayName}[{player.userID}] отправил свой дискорд: {arg}", null, (code, response) => { if(code == 400) Puts("Chat not found");},this, RequestMethod.POST);
             if (cfg.discord) SendDiscord("SendPlayerDiscord", $"Игрок {player.displayName}[{player.userID}] отправил свой дискорд: {arg}", cfg.discordhook2);
@@ -995,14 +994,11 @@ namespace Oxide.Plugins
                     if (playerDat.IsCooldown > 0) return;
                     if (_reportList.TryGetValue(targetPlayer.userID, out f))
                     {
-                        var reportReasone = arg.Args.ToList();
-                        reportReasone.RemoveAt(0);
                         string text =
-                            $"Игрок {targetPlayer.displayName}[{targetPlayer.userID}] пожаловался по причине {string.Join(" ", reportReasone.ToArray())} на игрока(-ов):";
+                            $"Игрок {targetPlayer.displayName}[{targetPlayer.userID}] пожаловался по причине {arg.Args[1]} на игрока(-ов):";
                         if (f.Count < 1) return;
                         foreach (var reportSend in f)
                         {
-                            Interface.CallHook("RA_ReportSend", targetPlayer.userID.ToString(), reportSend.ToString(), string.Join(" ", reportReasone.ToArray()));
                             var target = BasePlayer.FindByID(reportSend);
                             if (target == null) continue;
                             PlayerData dataPlayer;
@@ -1207,38 +1203,26 @@ namespace Oxide.Plugins
 
         #region Hooks
 
-        void OnUserDisconnected(IPlayer player)
-        {
-            var basePlayer = player.Object as BasePlayer;
-            if (basePlayer != null)
-            {
-                if (_reportList.ContainsKey(basePlayer.userID))
-                    _reportList.Remove(basePlayer.userID);
-                var find = _reportList.ToList().Where(p => p.Value.Contains(basePlayer.userID));
-                foreach (var keyValuePair in find)
-                {
-                    keyValuePair.Value.Remove(basePlayer.userID);
-                }
-
-            }
-        }
         private void OnPlayerConnected(BasePlayer player)
         {
             if (!_playerData.ContainsKey(player.userID))
-                _playerData.Add(player.userID, new PlayerData() {UserName = player.displayName, ReportCount = 0});
+                _playerData.Add(player.userID, new PlayerData() {UserName = player.displayName, ReportCount = 1});
         }
 
         private void OnServerInitialized()
         {
             permission.RegisterPermission("soreport.admin", this);
             _instance = this;
-            _playerData = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, PlayerData>>("SoReport/Players");
+
+            if (Interface.Oxide.DataFileSystem.ExistsDatafile("TryReport/Report"))
+                _playerData =
+                    Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, PlayerData>>("SoReport/Players");
             foreach (var basePlayer in BasePlayer.activePlayerList)
             {
                 OnPlayerConnected(basePlayer);
             }
         }
- 
+
         private void Unload()
         {
             Interface.Oxide.DataFileSystem.WriteObject("SoReport/Players", _playerData);
