@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("AbsolutSorter", "Sempai#3239", "2.0.1")]
+    [Info("AbsolutSorter", "k1lly0u", "2.0.3")]
     [Description("Sort items from your inventory into designated storage containers with the click of a button")]
     class AbsolutSorter : RustPlugin
     {
@@ -20,11 +20,13 @@ namespace Oxide.Plugins
         private StoredData storedData;
         private DynamicConfigFile data;
 
-        [PluginReference] Plugin NoEscape;
+        [PluginReference] Plugin NoEscape, SkinBox;
         
         private ItemCategory[] itemCategories;
 
         private bool wipeDetected = false;
+
+        private List<ulong> hiddenPlayers = new List<ulong>();
 
         private const string SORTING_UI = "asui.sorting";
 
@@ -79,7 +81,7 @@ namespace Oxide.Plugins
 
         private void OnLootEntity(BasePlayer player, StorageContainer container)
         {
-            if (player == null || container == null)
+            if (player == null || !container.IsValid())
                 return;
 
             if (!permission.UserHasPermission(player.UserIDString, PERMISSION_ALLOW))
@@ -94,7 +96,17 @@ namespace Oxide.Plugins
             if (NoEscape && (bool)NoEscape.Call("IsRaidBlocked", player))
                 return;
 
-            CreateSortingPanel(player, container.net.ID);
+            NextTick(() =>
+            {
+                if (SkinBox)
+                {
+                    object isSkinBoxPlayer = SkinBox.Call("IsSkinBoxPlayer", player.userID);
+                    if (isSkinBoxPlayer is bool && (bool)isSkinBoxPlayer)
+                        return;
+                }
+
+                CreateSortingPanel(player, container.net.ID);
+            });
         }
 
         private void OnLootEntityEnd(BasePlayer player, BaseCombatEntity entity) => CuiHelper.DestroyUi(player, SORTING_UI);        
@@ -278,6 +290,8 @@ namespace Oxide.Plugins
 
             return items;
         }
+
+        private bool IsHidden(BasePlayer player) => hiddenPlayers.Contains(player.userID);
         #endregion
 
         #region UI         
@@ -365,34 +379,47 @@ namespace Oxide.Plugins
         #region UI Creation
         private void CreateSortingPanel(BasePlayer player, uint id)
         {
-            CuiElementContainer container = UI.Container(SORTING_UI, BG_COLOR, new UI4(0.646f, 0.01f, 0.831f, 0.14f), true);
+            CuiElementContainer container = null;
 
-            StoredData.BoxData data;
-            storedData.boxes.TryGetValue(id, out data);
+            if (!IsHidden(player))
+            {
+                container = UI.Container(SORTING_UI, BG_COLOR, new UI4(0.646f, 0.01f, 0.831f, 0.14f), true);
 
-            UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.SelectCategories", player.userID), 10, new UI4(0f, 0.824f, 0.49f, 1f), $"asui.opencategories {id}");
+                StoredData.BoxData data;
+                storedData.boxes.TryGetValue(id, out data);
 
-            if (data?.HasAnyCategory() ?? false)
-                UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.SelectItems", player.userID), 10, new UI4(0.51f, 0.824f, 1f, 1f), $"asui.openitems {id}");
+                UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.SelectCategories", player.userID), 10, new UI4(0f, 0.824f, 0.49f, 1f), $"asui.opencategories {id}");
 
-            UI.Label(ref container, SORTING_UI, msg("UI.SortingOptions", player.userID), 10, new UI4(0f, 0.624f, 1f, 0.8f), TextAnchor.MiddleLeft);
+                if (data?.HasAnyCategory() ?? false)
+                    UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.SelectItems", player.userID), 10, new UI4(0.51f, 0.824f, 1f, 1f), $"asui.openitems {id}");
 
-            UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.This", player.userID), 10, new UI4(0f, 0.448f, 0.32f, 0.624f), $"asui.sort 1 {id}");
-            UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.Nearby", player.userID), 10, new UI4(0.34f, 0.448f, 0.66f, 0.624f), $"asui.sort 2 {id}");
+                UI.Label(ref container, SORTING_UI, msg("UI.SortingOptions", player.userID), 10, new UI4(0f, 0.624f, 1f, 0.8f), TextAnchor.MiddleLeft);
 
-            if (data != null)
-                UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.Arrange", player.userID), 10, new UI4(0.68f, 0.448f, 1f, 0.624f), $"asui.sort 0 {id}");
+                UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.This", player.userID), 10, new UI4(0f, 0.448f, 0.32f, 0.624f), $"asui.sort 1 {id}");
+                UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.Nearby", player.userID), 10, new UI4(0.34f, 0.448f, 0.66f, 0.624f), $"asui.sort 2 {id}");
 
-            if (permission.UserHasPermission(player.UserIDString, PERMISSION_ALLOWDUMP))
-                UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.Dump", player.userID), 10, new UI4(0f, 0.234f, 0.32f, 0.41f), $"asui.sort 3 {id}");
+                if (data != null)
+                    UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.Arrange", player.userID), 10, new UI4(0.68f, 0.448f, 1f, 0.624f), $"asui.sort 0 {id}");
 
-            if (permission.UserHasPermission(player.UserIDString, PERMISSION_LOOTALL) && (player.inventory?.loot?.entitySource as StorageContainer)?.inventory?.itemList?.Count > 0)
-                UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.Take", player.userID), 10, new UI4(0.34f, 0.234f, 0.66f, 0.41f), $"asui.sort 4 {id}");
+                if (permission.UserHasPermission(player.UserIDString, PERMISSION_ALLOWDUMP))
+                    UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.Dump", player.userID), 10, new UI4(0f, 0.234f, 0.32f, 0.41f), $"asui.sort 3 {id}");
 
-            UI.Button(ref container, SORTING_UI, BUTTON_SELECTED_COLOR, msg("UI.Sort.Help", player.userID), 10, new UI4(0.68f, 0.234f, 1f, 0.41f), "asui.help");
+                if (permission.UserHasPermission(player.UserIDString, PERMISSION_LOOTALL) && (player.inventory?.loot?.entitySource as StorageContainer)?.inventory?.itemList?.Count > 0)
+                    UI.Button(ref container, SORTING_UI, BUTTON_COLOR, msg("UI.Sort.Take", player.userID), 10, new UI4(0.34f, 0.234f, 0.66f, 0.41f), $"asui.sort 4 {id}");
 
-            if (data != null)
-                UI.Button(ref container, SORTING_UI, BUTTON_EXIT_COLOR, msg("UI.Sort.Remove", player.userID), 10, new UI4(0f, 0.02f, 1f, 0.196f), $"asui.destroy {id}");
+                UI.Button(ref container, SORTING_UI, BUTTON_SELECTED_COLOR, msg("UI.Sort.Help", player.userID), 10, new UI4(0.68f, 0.234f, 1f, 0.41f), "asui.help");
+
+                if (data != null)
+                    UI.Button(ref container, SORTING_UI, BUTTON_EXIT_COLOR, msg("UI.Sort.Remove", player.userID), 10, new UI4(0f, 0.02f, 0.66f, 0.196f), $"asui.destroy {id}");
+
+                UI.Button(ref container, SORTING_UI, BUTTON_EXIT_COLOR, msg("UI.Sort.Hide", player.userID), 10, new UI4(0.68f, 0.02f, 1f, 0.196f), $"asui.hide {id}");
+            }
+            else
+            {
+                container = UI.Container(SORTING_UI, BG_COLOR, new UI4(0.7718f, 0.0126f, 0.831f, 0.03548f), true);
+
+                UI.Button(ref container, SORTING_UI, BUTTON_EXIT_COLOR, msg("UI.Sort.Show", player.userID), 10, new UI4(0, 0, 1, 1), $"asui.hide {id}");
+            }
 
             CuiHelper.DestroyUi(player, SORTING_UI);
             CuiHelper.AddUi(player, container);
@@ -625,6 +652,22 @@ namespace Oxide.Plugins
             CreateSortingPanel(player, id);
         }
 
+        [ConsoleCommand("asui.hide")]
+        private void ccmdHide(ConsoleSystem.Arg arg)
+        {
+            BasePlayer player = arg.Connection.player as BasePlayer;
+            if (player == null)
+                return;
+
+            if (IsHidden(player))
+                hiddenPlayers.Remove(player.userID);
+            else hiddenPlayers.Add(player.userID);
+
+            uint id = arg.GetUInt(0);
+
+            CreateSortingPanel(player, id);
+        }
+
         [ConsoleCommand("asui.help")]
         private void ccmdHelp(ConsoleSystem.Arg arg)
         {
@@ -850,6 +893,8 @@ namespace Oxide.Plugins
             ["UI.Sort.Take"] = "Loot All",
             ["UI.Sort.Help"] = "Help",
             ["UI.Sort.Remove"] = "Remove Sorter From Container",
+            ["UI.Sort.Hide"] = "Hide",
+            ["UI.Sort.Show"] = "Show",
             ["UI.Return"] = "Return",
             ["Global.Notification"] = "This server is running <color=#ce422b>AbsolutSorter</color>! Type <color=#ce422b>/sorthelp</color> for information on how to use it",
         };

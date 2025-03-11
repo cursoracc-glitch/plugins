@@ -14,13 +14,8 @@ using UnityEngine;
 using Random = Oxide.Core.Random;
 
 namespace Oxide.Plugins
-{
-    /*
-     * За идею взят подобный плагин на Magic-Rust
-     */
-    
-    [Info("Foundation Drop", "TopPlugin.ru/Sempai#3239", "1.0.0")]
-    [Description("Плагин куплен на TopPlugin.ru | Спасибо за покупку! Оригинальная идея принадлежит проекту MagicRust")]
+{  
+    [Info("Foundation Drop", "Server-rust.ru", "0.0.81")]
     public class FoundationDrop : RustPlugin
     {
         #region References
@@ -62,7 +57,7 @@ namespace Oxide.Plugins
                     }
                     if (player.inventory.AllItems().Length != 0)
                     {
-                        SendMessage(player, $"На мероприятие можно попасть только<size=2765></size> <color=#538fef><b>полностью голым</b></color>");
+                        SendMessage(player, $"На мероприятие можно попасть только <color=#538fef><b>полностью голым</b></color>");
                         return;
                     }
                     
@@ -146,11 +141,11 @@ namespace Oxide.Plugins
             public void StartEvent(int startDelay)
             {
                 Interface.Oxide.LogWarning($"Foundation Drop announced!");
-                BasePlayer.activePlayerList.ToList().ForEach(p => SendMessage(p, "Началась регистрация на мероприятие, нажмите на кнопку <b><color=#538fef>зарегистрироваться</color></b>"));
+                BasePlayer.activePlayerList.ForEach(p => SendMessage(p, "Началась регистрация на мероприятие, нажмите на кнопку <b><color=#538fef>зарегистрироваться</color></b>"));
                 StartTimer = instance.timer.Once(startDelay, () =>
                 {
-                    BasePlayer.activePlayerList.ToList().ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_MainLayer));
-                    BasePlayer.activePlayerList.ToList().ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_SideLayer));
+                    BasePlayer.activePlayerList.ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_MainLayer));
+                    BasePlayer.activePlayerList.ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_SideLayer));
                     
                     List<ulong> removeKeys = new List<ulong>();
                     foreach (var check in PlayerConnected)
@@ -177,7 +172,7 @@ namespace Oxide.Plugins
                         return;
                     }
                     
-                    BasePlayer.activePlayerList.ToList().ForEach(p =>
+                    BasePlayer.activePlayerList.ForEach(p =>
                     {
                         if (!PlayerConnected.ContainsKey(p.userID))
                             return;
@@ -213,9 +208,9 @@ namespace Oxide.Plugins
                 StartTimer?.Destroy();
                 DestroyTimer?.Destroy();
                
-                BasePlayer.activePlayerList.ToList().ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_MainLayer));
-                BasePlayer.activePlayerList.ToList().ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_SideLayer));
-                BasePlayer.activePlayerList.ToList().ForEach(p => p.SetPlayerFlag(BasePlayer.PlayerFlags.ChatMute, false));
+                BasePlayer.activePlayerList.ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_MainLayer));
+                BasePlayer.activePlayerList.ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_SideLayer));
+                BasePlayer.activePlayerList.ForEach(p => p.SetPlayerFlag(BasePlayer.PlayerFlags.ChatMute, false));
                 var listPredicted = BasePlayer.activePlayerList.Where(p => cEvent.PlayerConnected.ContainsKey(p.userID));
                 foreach (var check in listPredicted)
                     LeftEvent(check, external);
@@ -224,7 +219,7 @@ namespace Oxide.Plugins
                     check?.Kill();
 
                 string message = external ? "Мероприятие закончено по <b><color=#538fef>техническим причинам</color></b>!" : "Мероприятие окончено, всем <b><color=#538fef>спасибо</color></b> за участие!";
-                BasePlayer.activePlayerList.ToList().ForEach(p => SendMessage(p, message)); 
+                BasePlayer.activePlayerList.ForEach(p => SendMessage(p, message)); 
             }
         }
 
@@ -233,18 +228,16 @@ namespace Oxide.Plugins
             [JsonProperty("Размер арены в квадратах")]
             public int CONF_ArenaSize = 10;
             [JsonProperty("Выдавать ли специальный пистолет для разрушения блоков")]
-            public bool CONF_GivePistol = false;
+            public bool CONF_GivePistol = true;
             [JsonProperty("Количество патронов в пистолете")]
-            public int CONF_GivePistolAmount = 5;
-            [JsonProperty("Интвервал между удалениями блоков (сек)")]
-            public float CONF_DelayDestroy = 1.0f;
-            [JsonProperty("Время ожидания игроков с момента объявления ивента (сек)")]
+            public int CONF_GivePistolAmount = 1;
+            [JsonProperty("Интвервал между удалениями блоков")]
+            public float CONF_DelayDestroy = 0.1f;
+            [JsonProperty("Время ожидания игроков с момента объявления ивента")]
             public int CONF_WaitTime = 30;
             [JsonProperty("Максимальное количество победителей")]
             public int CONF_MaxWinners = 1;
-            [JsonProperty("Автозапуск ивента каждие n секунд если 0 отключён")]
-            public float CONF_AutoStartTimer = 7200f;
-
+            
             [JsonProperty("Список наград (выбирается случайно)")]
             public Dictionary<string, int> RewardList;
 
@@ -254,7 +247,13 @@ namespace Oxide.Plugins
                 {
                     RewardList = new Dictionary<string, int>
                     {
-                        ["item+rifle.ak"] = 1
+                        ["item+rifle.ak"] = 1,
+                        ["command+ownerid 76561190000000000"] = 1 
+						/* 
+						 * Пример: command+ownerid 76561190000000000 - Выдать права администратора
+						 * Пример: command+oxide.grant user 76561190000000000 skin.box - Выдать права на использования команды /skin
+						 *
+						 */
                     }
                 };
             }
@@ -266,8 +265,6 @@ namespace Oxide.Plugins
 
         private Configuration config;
         
-        Timer AutoStartTimer;
-
         #region System
 
         private static FoundationDrop instance;
@@ -283,7 +280,6 @@ namespace Oxide.Plugins
         #region Initialization
         protected override void LoadConfig()
         {
-            PrintWarning("Благодарим за приобритение плагина на сайте Oxide-Russia.RU. Если вы скачали этот плагин на другом ресурсе знайте - это лишает вас гарантированной поддержки!");
             base.LoadConfig();
             try
             {
@@ -305,31 +301,25 @@ namespace Oxide.Plugins
         } 
         
         protected override void SaveConfig() => Config.WriteObject(config);
-
+        
         private void OnServerInitialized()
-        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+        {
             instance = this;
-            if(config.CONF_AutoStartTimer != 0f)
-            {
-                AutoStartTimer = timer.Once(config.CONF_AutoStartTimer, StartEvent);
-            }
         }
 
         private void Unload()
-        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+        {
             if (cEvent != null)
             {
                 StopEvent(true);
             }
-
-            if (!AutoStartTimer.Destroyed) AutoStartTimer.Destroy();
             
-            BasePlayer.activePlayerList.ToList().ForEach(p => p.SetPlayerFlag(BasePlayer.PlayerFlags.ChatMute, false));
+            BasePlayer.activePlayerList.ForEach(p => p.SetPlayerFlag(BasePlayer.PlayerFlags.ChatMute, false));
             
-            foreach (var check in UnityEngine.Object.FindObjectsOfType<BaseEntity>().Where(p => p.name == "OXIDE-RUSSIA").Where(p => !p.IsDestroyed))
+            foreach (var check in UnityEngine.Object.FindObjectsOfType<BaseEntity>().Where(p => p.name == "S23qRT").Where(p => !p.IsDestroyed))
                 check?.Kill();
             
-            BasePlayer.activePlayerList.ToList().ForEach(p =>
+            BasePlayer.activePlayerList.ForEach(p =>
             {
                 CuiHelper.DestroyUi(p, CONF_UI_MainLayer);
                 CuiHelper.DestroyUi(p, CONF_UI_SideLayer);
@@ -365,8 +355,8 @@ namespace Oxide.Plugins
             return null;
         }
 
-        private void OnPlayerDeath(BasePlayer player)
-        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+        private void OnPlayerDie(BasePlayer player)
+        {
             if (cEvent != null && cEvent.PlayerConnected.ContainsKey(player.userID))
             {
                 cEvent.LeftEvent(player);
@@ -375,7 +365,7 @@ namespace Oxide.Plugins
         }
 
         private void OnPlayerDisconnected(BasePlayer player, string reason)
-        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+        {
             if (cEvent != null && cEvent.PlayerConnected.ContainsKey(player.userID))
             {
                 cEvent.LeftEvent(player);
@@ -389,7 +379,7 @@ namespace Oxide.Plugins
 
         [ConsoleCommand("UI_FE_Handler")]
         private void cmdConsoleHandler(ConsoleSystem.Arg args)
-        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+        {
             if (cEvent == null)
                 return;
             
@@ -404,7 +394,7 @@ namespace Oxide.Plugins
         
         [ConsoleCommand("fe.start")]
         private void cmdStartEvent(ConsoleSystem.Arg args)
-        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+        {
             if (args.Player() != null)
                 return;
 
@@ -413,59 +403,13 @@ namespace Oxide.Plugins
 
         [ConsoleCommand("fe.stop")]
         private void cmdStopEvent(ConsoleSystem.Arg args)
-        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+        {                                             
             if (args.Player() != null)
                 return;
             
             StopEvent(true);
         }
-		
-		[ChatCommand("event")]
-        void cmdChatCommand(BasePlayer player, string command, string[] args)
-        {
-            if (player == null) return;
-            if (!player.IsAdmin)
-            {
-                SendReply(player, $"<color=#F50B12>Ты куда полез блять?! Руки убрал быстро</color>");
-                return;
-            }
-            if (args.Length < 1)
-            {
-                 SendReply(player, "Используйте: /event Start или Stop");
-                 return;
-            }        
 
-            switch (args[0])
-            {
-               case "start":
-                   {
-                       {
-                           if (cEvent != null)
-                           {
-                                SendReply(player, $"<color=#F50B12>Ивент уже запущен</color>");
-                                return;
-                           }
-
-                           SendReply(player, $"<color=#28F50B>Ивент запущен</color>");
-                           StartEvent();
-                       }
-                       return;
-                   }
-               case "stop":
-                   {
-                       {
-                           if (cEvent == null)
-                           {
-                               SendReply(player, $"<color=#F50B12>Попытка отключить несуществующий ивент!</color>");
-                               return;
-                           }
-                           SendReply(player, $"<color=#28F50B>Ивент остановлен</color>");
-                           StopEvent(true);
-                       }
-                       break;
-                   }
-            }
-        }
         #endregion
         
         #region Functions
@@ -500,7 +444,7 @@ namespace Oxide.Plugins
         }
 
         private void StartEvent()
-        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+        {
             if (cEvent != null)
             {
                 PrintError("Попытка начать новое мероприятие, пока не закончено предыдущее!");
@@ -508,14 +452,13 @@ namespace Oxide.Plugins
             }
             else
             {
-                if (!AutoStartTimer.Destroyed) AutoStartTimer.Destroy();
                 cEvent = new Event();
                 cEvent.InitializeEvent(instance.config.CONF_WaitTime);
             }
         }
 
         private void StopEvent(bool external = false)
-        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+        {
             if (cEvent == null)
             {
                 PrintError("Попытка отключить несуществующий ивент!");
@@ -523,18 +466,11 @@ namespace Oxide.Plugins
             }
             else
             {
-                BasePlayer.activePlayerList.ToList().ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_MainLayer));
-                BasePlayer.activePlayerList.ToList().ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_SideLayer));
-                BasePlayer.activePlayerList.ToList().ForEach(p => p.SetPlayerFlag(BasePlayer.PlayerFlags.ChatMute, false));
+                BasePlayer.activePlayerList.ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_MainLayer));
+                BasePlayer.activePlayerList.ForEach(p => CuiHelper.DestroyUi(p, CONF_UI_SideLayer));
+                BasePlayer.activePlayerList.ForEach(p => p.SetPlayerFlag(BasePlayer.PlayerFlags.ChatMute, false));
                 cEvent.FinishEvent(external);
                 cEvent = null;
-                var Max = 2765;
-                if (Max == 0) { }
-                if (!AutoStartTimer.Destroyed) AutoStartTimer.Destroy();
-                if (config.CONF_AutoStartTimer != 0f)
-                {
-                    AutoStartTimer = timer.Once(config.CONF_AutoStartTimer, StartEvent);
-                }
             }
         }
 
@@ -549,7 +485,7 @@ namespace Oxide.Plugins
                     {
                         var newFoundation = GameManager.server.CreateEntity("assets/prefabs/building core/foundation/foundation.prefab", EventPosition + new Vector3(i * 3, grade * 1f, t * 3));
                         newFoundation.Spawn();
-                        newFoundation.name = "OXIDE-RUSSIA";
+						newFoundation.name = "S23qRT";
                         
                         newFoundation.GetComponent<BuildingBlock>().SetGrade((BuildingGrade.Enum) grade);
                         cEvent.BlockList.Last().Add(newFoundation);
@@ -758,9 +694,7 @@ namespace Oxide.Plugins
                 Config[menu, key] = varObject;
             }
         }
-
-        
-
+		
         #endregion
         
     }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using Oxide.Core;
@@ -6,13 +6,12 @@ using Oxide.Core.Configuration;
 using UnityEngine;
 using System.Linq;
 using System.Globalization;
+using System.Text;
 using Facepunch;
-using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("TsunHorse", "Sempai#3239", "3.1.7")]
-    [Description("Allows players to mount and ride animals")]
+    [Info("TsunHorse", "k1lly0u", "3.0.1", ResourceId = 0)]
     class TsunHorse : RustPlugin
     {
         #region Fields  
@@ -22,29 +21,16 @@ namespace Oxide.Plugins
         private List<Controller> controllers = new List<Controller>();
         private static TsunHorse ins = null;
 
-        const string CHAIR_PREFAB = "assets/prefabs/deployable/chair/chair.deployed.prefab";
-        const string ANIMAL_PREFAB = "assets/rust.ai/agents/{0}/{0}.prefab";
-        const string HORSE_PREFAB = "assets/rust.ai/nextai/testridablehorse.prefab";
-
-        const int ROCK_MASK = 1 << 16;
-
-        protected static readonly RaycastHit[] raycastHits = new RaycastHit[64];
+        const string chairPrefab = "assets/prefabs/vehicle/seats/passengerchair.prefab";
+        const string animalPrefab = "assets/rust.ai/agents/{0}/{0}.prefab";
         #endregion
 
         #region Oxide Hooks
         private void Loaded()
-        {            
+        {
             permission.RegisterPermission("tsunhorse.stophorse", this);
             permission.RegisterPermission("tsunhorse.ridehorse", this);
             permission.RegisterPermission("tsunhorse.spawnhorse", this);
-
-            for (int i = 0; i < configData.Settings.AllowedTypes.Length; i++)
-            {
-                string str = configData.Settings.AllowedTypes[i];
-                permission.RegisterPermission($"tsunhorse.ridehorse.{str}", this);
-                permission.RegisterPermission($"tsunhorse.spawnhorse.{str}", this);
-            }            
-            
             lang.RegisterMessages(Messages, this);
 
             data = Interface.Oxide.DataFileSystem.GetFile("tsunhorse_cooldowns");
@@ -77,24 +63,20 @@ namespace Oxide.Plugins
                 return null;
 
             AnimalController animalController = entity.GetComponent<AnimalController>();
-            if (animalController != null)
+            if (animalController == null)
             {
                 if (configData.Command.Invulnerable)
                 {
-                    if (!baseNpc.GetNavAgent.enabled)
+                    if (!baseNpc.GetNavAgent.enabled && (!baseNpc.Entity?.GetComponent<Apex.AI.Components.UtilityAIComponent>()?.enabled ?? false))
                         return true;
                 }
-
-                if (configData.Settings.Invulnerable)
-                    return true;
-
-                if (info?.InitiatorPlayer == animalController.Human)
-                    return true;
-
                 return null;
-            }            
+            }
 
-            return null;
+            if (configData.Settings.Invulnerable)
+                return true;
+
+            return false;
         }
 
         private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
@@ -124,18 +106,15 @@ namespace Oxide.Plugins
 
         private void OnPlayerInput(BasePlayer player, InputState input)
         {
-            if (player == null || player.isMounted) return;
+            if (player == null || !permission.UserHasPermission(player.UserIDString, "tsunhorse.ridehorse") || player.isMounted) return;
 
             if (input.WasJustPressed(BUTTON.USE))
             {
                 RaycastHit hit;
                 if (Physics.SphereCast(player.eyes.position, 0.5f, Quaternion.Euler(player.serverInput.current.aimAngles) * Vector3.forward, out hit, 1.5f))
                 {
-                    BaseAnimalNPC baseNpc = hit.GetEntity()?.GetComponent<BaseAnimalNPC>();
+                    BaseNpc baseNpc = hit.GetEntity()?.GetComponent<BaseNpc>();
                     if (baseNpc == null)
-                        return;
-
-                    if (!permission.UserHasPermission(player.UserIDString, "tsunhorse.ridehorse") && !permission.UserHasPermission(player.UserIDString, $"tsunhorse.ridehorse.{baseNpc.ShortPrefabName}"))
                         return;
 
                     if (!configData.Settings.AllowedTypes.Any(x => x.Contains(baseNpc.ShortPrefabName, CompareOptions.IgnoreCase)))
@@ -233,7 +212,7 @@ namespace Oxide.Plugins
             Vector3 point;
             if (FindPointOnNavmesh(position, 1, out point))
             {
-                baseNpc = InstantiateEntity(string.Format(ANIMAL_PREFAB, type), point) as BaseNpc;
+                baseNpc = InstantiateEntity(string.Format(animalPrefab, type), point) as BaseNpc;
                 if (baseNpc == null)
                     return false;
 
@@ -242,16 +221,6 @@ namespace Oxide.Plugins
             }
             baseNpc = null;
             return false;
-        }
-
-        private bool SpawnRideableHorse(Vector3 position, out RidableHorse ridableHorse)
-        {
-            ridableHorse = InstantiateEntity(HORSE_PREFAB, position) as RidableHorse;
-            if (ridableHorse == null)
-                return false;
-
-            ridableHorse.Spawn();
-            return true;
         }
 
         private BaseEntity InstantiateEntity(string type, Vector3 position)
@@ -287,42 +256,19 @@ namespace Oxide.Plugins
         }
         #endregion
 
-        #region Controller         
+        #region Controller
         private class Controller : MonoBehaviour
-        {            
+        {
             public BasePlayer Player { get; private set; }
-
             public AnimalController Animal { get; private set; }
 
             public ConfigData.RidingSettings config;
 
             private float acceleration = 0f;
-
             private float steering = 0f;
-
-            private float currentSpeed;
-
-            private float accelerationSpeed;
-
-            private float turnSpeedMultiplier;
-
-            private float maxSpeed;
-
             private bool sprint = false;
 
             private Vector3 targetPosition;
-
-            private Vector3 currentPosition;
-
-            private Vector3 steerPos;
-
-            private Vector3 accelPos;
-
-            private Vector3 lookPosition;
-
-            private Quaternion targetRotation;
-
-            private NavMeshHit navHit;
 
             private void Awake()
             {
@@ -330,75 +276,49 @@ namespace Oxide.Plugins
                 enabled = false;
 
                 config = ins.configData.Settings;
-                InvokeHandler.InvokeRepeating(this, BlockTargeting, 5f, 5f);
+                InvokeHandler.InvokeRepeating(this, BlockTargeting, 5f, 5f);                
             }
 
             private void BlockTargeting()
             {
                 Animal.Npc.BlockEnemyTargeting(5f);
                 Animal.Npc.BlockFoodTargeting(5f);
-
+                
                 InvokeHandler.Invoke(this, BlockTargeting, 5f);
             }
 
-            private void Update()
+            public void FixedUpdate()
             {
                 if (Player == null || Animal == null || Animal.Npc == null)
                     return;
+               
+                Animal.Npc.AutoBraking = false;               
 
-                accelerationSpeed = acceleration > 0 ? (sprint ? Time.deltaTime * 5f : currentSpeed > Animal.stats.Walk ? -Time.deltaTime * 5f : Time.deltaTime * 5f) : currentSpeed > 0 ? -Time.deltaTime * 5f : 0;
-
-                maxSpeed = acceleration > 0 ? (sprint || currentSpeed > Animal.stats.Walk ? Animal.stats.Sprint : Animal.stats.Walk) : sprint ? Animal.stats.Sprint : Animal.stats.Walk;
-
-                currentSpeed = Mathf.Clamp(currentSpeed + accelerationSpeed, 0, maxSpeed);
-
-                turnSpeedMultiplier = currentSpeed / maxSpeed;
+                Animal.Npc.IsDormant = false;
+                Animal.Npc.IsStopped = false;
 
                 if (acceleration == 0 && steering == 0)
                 {
-                    if (currentSpeed > 0)
-                    {
-                        targetPosition = Animal.Transform.position + (Animal.Transform.rotation * (Vector3.forward * currentSpeed));
+                    Animal.Npc.IsStopped = true;
+                    Animal.Npc.SetFact(BaseNpc.Facts.CanTargetFood, 0, true, true);
+                    Animal.Npc.ToSpeedEnum(0);
 
-                        currentPosition = Vector3.Lerp(Animal.Npc.ServerPosition, targetPosition, Time.deltaTime);
-
-                        if (NavMesh.SamplePosition(currentPosition, out navHit, 5f, NavMesh.AllAreas))
-                            currentPosition = Vector3.Lerp(currentPosition, navHit.position, Vector3.Distance(currentPosition, navHit.position) / 2f);
-                        else currentPosition = Animal.Npc.ServerPosition;
-
-                        Animal.Npc.ServerPosition = currentPosition;
-                    }
-                    return;
+                    Animal.TargetSpeed = 0;
                 }
 
-                steerPos = steering == 0 ? Vector3.zero : (Animal.Transform.rotation * (Vector3.right * (sprint && acceleration > 0 ? steering * 5f : steering)));
+                Animal.TargetSpeed = sprint ? Animal.stats.Sprint : Animal.stats.Walk;
 
-                accelPos = acceleration == 0 ? Vector3.zero : (Animal.Transform.rotation * (Vector3.forward * currentSpeed));
+                Animal.Npc.SetFact(BaseNpc.Facts.Speed, (byte)(sprint ? BaseNpc.SpeedEnum.Run : BaseNpc.SpeedEnum.Walk), true, true);
 
-                targetPosition = Animal.Transform.position + steerPos + (acceleration > 0 ? accelPos : Animal.Transform.forward);
+                Transform trans = Animal.Npc.transform;
+                
+                Vector3 steerPos = ((trans.rotation * Vector3.right) * steering) * 0.75f;
+                Vector3 accelPos = ((trans.rotation * Vector3.forward) * acceleration) * 5f;
 
-                lookPosition = targetPosition - Animal.Npc.ServerPosition;
+                targetPosition = trans.position + steerPos + (acceleration > 0 ? accelPos : trans.forward);
 
-                targetRotation = Quaternion.LookRotation(lookPosition);
-
-                Animal.Npc.ServerRotation = Quaternion.Slerp(Animal.Npc.ServerRotation, targetRotation, Time.deltaTime * (sprint ? Mathf.Clamp(5f * turnSpeedMultiplier, 2.5f, 5f) : 2.5f));
-
-                currentPosition = Vector3.Lerp(Animal.Npc.ServerPosition, targetPosition, Time.deltaTime);
-
-                if (NavMesh.SamplePosition(currentPosition, out navHit, 5f, NavMesh.AllAreas))
-                {
-                    currentPosition = Vector3.Lerp(currentPosition, navHit.position, Vector3.Distance(currentPosition, navHit.position) / 2f);
-
-                    int num = Physics.SphereCastNonAlloc(new Ray(currentPosition, Vector3.up), 1f, raycastHits, 1f, ROCK_MASK);
-                    if (num == 0)
-                    {
-                        Animal.Npc.ServerPosition = currentPosition;
-                        return;
-                    }
-                }
-
-                currentSpeed = 0;
-            }
+                Animal.Npc.UpdateDestination(targetPosition);
+            }           
 
             public void LateUpdate()
             {
@@ -424,7 +344,7 @@ namespace Oxide.Plugins
                 if (Player != null)
                 {
                     if (Player.isMounted)
-                        Player.DismountObject();
+                        Player.DismountObject();                    
                     Player.EnsureDismounted();
                     Player.SetPlayerFlag(BasePlayer.PlayerFlags.ThirdPersonViewmode, false);
                     Player.MovePosition(Animal.transform.position + (Animal.transform.right * 1.5f));
@@ -436,7 +356,7 @@ namespace Oxide.Plugins
                 Destroy(Animal);
             }
 
-            public void MountToNpc(BaseAnimalNPC baseNpc)
+            public void MountToNpc(BaseNpc baseNpc)
             {
                 Animal = baseNpc.gameObject.AddComponent<AnimalController>();
                 Animal.CreateMountable(this);
@@ -453,56 +373,47 @@ namespace Oxide.Plugins
 
             private void UpdatePosition()
             {
-                if (Player == null || Animal?.Mountable == null)
-                    return;
-
-                Player.transform.position = Animal.Mountable.transform.position;
+                Player.transform.position = Animal.Mountable.transform.position;                
             }
         }
 
         private class AnimalController : MonoBehaviour
         {
-            public BaseAnimalNPC Npc { get; private set; }
-
+            public BaseNpc Npc { get; private set; }
             public BaseMountable Mountable { get; private set; }
-
             public Controller Human { get; private set; }
 
-            public Transform Transform { get; private set; }
+            public float TargetSpeed { get; set; }
 
-            public ConfigData.SpeedSettings stats;
+            public ConfigData.SpeedSettings stats;            
 
             private void Awake()
             {
-                Npc = GetComponent<BaseAnimalNPC>();
-                Transform = Npc.transform;
-
-                Npc.GetNavAgent.autoRepath = false;
+                Npc = GetComponent<BaseNpc>();
                 enabled = false;
                 Npc.Pause();
                 Npc.NewAI = false;
 
                 Npc.CancelInvoke(Npc.TickAi);
-
-                AIThinkManager.RemoveAnimal(Npc);               
+                AnimalSensesLoadBalancer.animalSensesLoadBalancer.Remove(Npc);
 
                 stats = ins.configData.Speeds[Npc.ShortPrefabName];
+
+                Npc.InvokeRandomized(new Action(this.TickAi), 0.1f, 0.1f, 0.00500000035f);
             }
 
             public void CreateMountable(Controller controller)
             {
                 this.Human = controller;
 
-                Mountable = GameManager.server.CreateEntity(CHAIR_PREFAB, Npc.transform.position, new Quaternion()) as BaseMountable;
+                Mountable = GameManager.server.CreateEntity(chairPrefab, Npc.transform.position, new Quaternion()) as BaseMountable;
                 Mountable.enableSaving = false;
                 Mountable.isMobile = true;
-                Mountable.pickup.enabled = false;
                 Mountable.skinID = 1169930802;
                 Mountable.maxMountDistance = 1.5f;
 
                 Mountable.Spawn();
                 Mountable.isMobile = true;
-
                 Destroy(Mountable.GetComponent<DestroyOnGroundMissing>());
                 Destroy(Mountable.GetComponent<GroundWatch>());
                 Mountable.GetComponent<MeshCollider>().convex = true;
@@ -515,10 +426,48 @@ namespace Oxide.Plugins
                     Mountable.transform.localPosition = offset.Key;
                     Mountable.transform.localEulerAngles = offset.Value;
                 }
+                Npc.Resume();
+            }
+
+            private void TickAi()
+            {
+                if (TerrainMeta.WaterMap == null)
+                {
+                    Npc.wasSwimming = false;
+                    Npc.swimming = false;
+                    Npc.waterDepth = 0f;
+                }
+                else
+                {
+                    Npc.waterDepth = TerrainMeta.WaterMap.GetDepth(Npc.ServerPosition);
+                    Npc.wasSwimming = Npc.swimming;
+                    Npc.swimming = Npc.waterDepth > Npc.Stats.WaterLevelNeck * 0.25f;
+                }
+
+                Npc.TickNavigation();
+                
+                if (Npc.GetNavAgent.enabled)
+                {
+                    TickSpeed();                    
+                }
+            }
+
+            private void TickSpeed()
+            {
+                float speed = TargetSpeed;               
+                
+                float single = Mathf.Min(Npc.NavAgent.speed / stats.Sprint, 1f);
+                Vector3 vector3 = Npc.transform.forward;
+                Vector3 navAgent = Npc.NavAgent.nextPosition - Npc.ServerPosition;
+                float single1 = 1f - 0.9f * Vector3.Angle(vector3, navAgent.normalized) / 180f * single * single;
+                speed *= single1;
+                Npc.NavAgent.speed = Mathf.Lerp(Npc.NavAgent.speed, speed, 0.5f);
+                Npc.NavAgent.angularSpeed = 1f * (1.1f - single);
+                Npc.NavAgent.acceleration = Npc.Stats.Acceleration;
             }
 
             private void OnDestroy()
-            {
+            {               
                 if (Mountable != null && !Mountable.IsDestroyed)
                 {
                     if (Mountable.IsMounted())
@@ -529,49 +478,40 @@ namespace Oxide.Plugins
 
                 if (Npc != null && !Npc.IsDestroyed)
                 {
+                    AnimalSensesLoadBalancer.animalSensesLoadBalancer.Add(Npc);
+                    Npc.CancelInvoke(TickAi);
+
+                    Npc.InvokeRandomized(Npc.TickAi, 0.1f, 0.1f, 0.00500000035f);
+
                     Npc.StopMoving();
                     Npc.Pause();
 
-                    Npc.Invoke(() =>
-                    {
-                        if (Npc == null)
-                            return;
-
-                        if (Npc.GetComponent<AnimalController>())
-                            return;
-
-                        NavMeshHit navHit;
-                        if (NavMesh.SamplePosition(Npc.ServerPosition, out navHit, 5f, NavMesh.AllAreas))
-                        {
-                            Npc.ServerPosition = navHit.position;
-
-                            AIThinkManager.AddAnimal(Npc);
-
-                            Npc.InvokeRandomized(Npc.TickAi, 0.1f, 0.1f, 0.00500000035f);
-
-                            Npc.Resume();
-                        }
-                        else Npc.DieInstantly();
-                    }, 30f);
+                    Npc.Invoke(Npc.Resume, 30f);
                 }
             }
         }
 
         private Dictionary<string, KeyValuePair<Vector3, Vector3>> mountingPositions = new Dictionary<string, KeyValuePair<Vector3, Vector3>>
         {
-            ["horse"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0.65f, -0.1f), new Vector3(0, 0, 0)),
-            ["stag"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0.3f, -0.1f), new Vector3(0, 0, 0)),
-            ["chicken"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, -0.2f, 0), new Vector3(0, 0, 0)),
-            ["wolf"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0.05f, 0.1f), new Vector3(0, 0, 0)),
+            ["horse"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0.6f, 0.2f), new Vector3(0, 0, 0)),
+            ["stag"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0.35f, 0.1f), new Vector3(0, 0, 0)),
+            ["chicken"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0, 0), new Vector3(0, 0, 0)),
+            ["wolf"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0.1f, 0.2f), new Vector3(0, 0, 0)),
             ["bear"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0.6f, 0), new Vector3(0, 0, 0)),
-            ["boar"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0.1f, 0f), new Vector3(0, 0, 0)),
+            ["boar"] = new KeyValuePair<Vector3, Vector3>(new Vector3(0, 0.1f, 0.1f), new Vector3(0, 0, 0)),
         };
         #endregion
 
         #region Commands
         [ChatCommand("spawnhorse")]
         private void cmdSpawn(BasePlayer player, string command, string[] args)
-        {            
+        {
+            if (!permission.UserHasPermission(player.UserIDString, "tsunhorse.spawnhorse"))
+            {
+                SendReply(player, msg("Error.NoPermission", player.UserIDString));
+                return;
+            }
+
             if (args.Length == 0)
             {
                 SendReply(player, msg("Help.Spawn", player.UserIDString));
@@ -583,12 +523,6 @@ namespace Oxide.Plugins
             if (!configData.Settings.AllowedTypes.Contains(type))
             {
                 SendReply(player, msg("Error.InvalidAnimal", player.UserIDString) + " " + string.Format(msg("Help.AvailableTypes", player.UserIDString), configData.Settings.AllowedTypes.ToSentence()));
-                return;
-            }
-
-            if (!permission.UserHasPermission(player.UserIDString, "tsunhorse.spawnhorse") && !permission.UserHasPermission(player.UserIDString, $"tsunhorse.spawnhorse.{type}"))
-            {
-                SendReply(player, msg("Error.NoPermission", player.UserIDString));
                 return;
             }
 
@@ -609,43 +543,22 @@ namespace Oxide.Plugins
                 }
             }
 
-            if (type == "horse")
+            BaseNpc baseNpc;
+            if (!SpawnAnimal(type, player.transform.position, out baseNpc))
             {
-                RidableHorse ridableHorse;
-                if (!SpawnRideableHorse(player.transform.position + (Quaternion.Euler(0, player.serverInput.current.aimAngles.y, 0) * Vector3.forward), out ridableHorse))
-                {
-                    SendReply(player, msg("Error.InvalidPosition", player.UserIDString));
-                    return;
-                }
-
-                ridableHorse.walkSpeed = configData.Speeds["horse"].Walk;
-                ridableHorse.runSpeed = configData.Speeds["horse"].Sprint;
+                SendReply(player, msg("Error.InvalidPosition", player.UserIDString));
+                return;
             }
-            else
+
+            baseNpc.Resume();
+            timer.In(2f, () =>
             {
-                BaseNpc baseNpc;
-                if (!SpawnAnimal(type, player.transform.position, out baseNpc))
+                if (baseNpc != null)
                 {
-                    SendReply(player, msg("Error.InvalidPosition", player.UserIDString));
-                    return;
-                }
-
-                baseNpc.StopMoving();
-                baseNpc.Pause();
-
-                Timer t = null;
-                t = timer.Repeat(1f, configData.Command.StopTime, () =>
-                {
-                    if (baseNpc == null || baseNpc.GetComponent<AnimalController>())
-                    {
-                        t?.Destroy();
-                        return;
-                    }
-
                     baseNpc.StopMoving();
                     baseNpc.Pause();
-                });
-            }
+                }
+            });
 
             if (storedData.cooldowns.ContainsKey(player.userID))
                 storedData.cooldowns[player.userID].Spawn = current + configData.Command.SpawnCooldown;
@@ -697,13 +610,7 @@ namespace Oxide.Plugins
                     baseNpc.StopMoving();
                     baseNpc.Pause();
 
-                    timer.In(configData.Command.StopTime, () => 
-                    {
-                        if (baseNpc == null || baseNpc.GetComponent<AnimalController>())                        
-                            return;                        
-                        
-                        baseNpc.Resume();
-                    });
+                    timer.In(configData.Command.StopTime, () => baseNpc?.Resume());
                 }
             }
             Pool.FreeList(ref entities);
@@ -716,126 +623,6 @@ namespace Oxide.Plugins
                 SendReply(player, string.Format(msg("Help.StoppedAnimals", player.UserIDString), count));
             }
             else SendReply(player, msg("Help.NoStoppedAnimals", player.UserIDString));
-        }
-
-        [ConsoleCommand("spawnhorse")]
-        private void ccmdSpawn(ConsoleSystem.Arg arg)
-        {
-            if (arg.Connection != null)
-                return;
-
-            if (arg.Args == null || arg.Args.Length == 0)
-            {
-                SendReply(arg, "spawnhorse <type> <x> <z> - Spawn the specified animal at the target coordinates");
-                SendReply(arg, "spawnhorse <type> <playername or id> - Spawn the specified animal at the target players position");
-                return;
-            }
-
-            string type = arg.Args[0].ToLower();
-            if (!configData.Settings.AllowedTypes.Contains(type))
-            {
-                SendReply(arg, "Invalid animal type selected. Options are: " + configData.Settings.AllowedTypes.ToSentence());
-                return;
-            }
-
-            Vector3 position = Vector3.zero;
-            if (arg.Args.Length == 3)
-            {
-                float x, z;
-                if (!float.TryParse(arg.Args[1], out x) || !float.TryParse(arg.Args[2], out z))
-                {
-                    SendReply(arg, "Invalid co-ordinates set. You must enter number values for X and Z");
-                    return;
-                }
-                else
-                {
-                    position = new Vector3(x, 0, z);
-                    position.y = TerrainMeta.HeightMap.GetHeight(position) + 0.25f;
-                }
-            }
-            else if (arg.Args.Length == 2)
-            {
-                List<BasePlayer> players = FindPlayer(arg.Args[1]);
-                if (players.Count > 1)
-                {
-                    SendReply(arg, "Multiple players found");
-                    return;
-                }
-                else if (players.Count == 0)
-                {
-                    SendReply(arg, "No players found");
-                    return;
-                }
-                else position = players[0].transform.position;
-            }
-
-            if (position == Vector3.zero)
-            {
-                SendReply(arg, "Invalid spawn position set");
-                return;
-            }
-
-            if (type == "horse")
-            {
-                RidableHorse ridableHorse;
-                if (!SpawnRideableHorse(position, out ridableHorse))
-                {
-                    SendReply(arg, "Unable to spawn a animal at the specified position");
-                    return;
-                }
-
-                ridableHorse.walkSpeed = configData.Speeds["horse"].Walk;
-                ridableHorse.runSpeed = configData.Speeds["horse"].Sprint;
-            }
-            else
-            {
-                BaseNpc baseNpc;
-                if (!SpawnAnimal(type, position, out baseNpc))
-                {
-                    SendReply(arg, "Unable to spawn a animal at the specified position");
-                    return;
-                }
-
-                baseNpc.StopMoving();
-                baseNpc.Pause();
-
-                Timer t = null;
-                t = timer.Repeat(1f, configData.Command.StopTime, () =>
-                {
-                    if (baseNpc == null || baseNpc.GetComponent<AnimalController>())
-                    {
-                        t?.Destroy();
-                        return;
-                    }
-
-                    baseNpc.StopMoving();
-                    baseNpc.Pause();
-                });
-            }
-        }
-
-        private List<BasePlayer> FindPlayer(string arg)
-        {
-            List<BasePlayer> foundPlayers = new List<BasePlayer>();
-
-            ulong steamid;
-            ulong.TryParse(arg, out steamid);
-
-            foreach (BasePlayer player in BasePlayer.activePlayerList)
-            {
-                if (steamid != 0L)
-                {
-                    if (player.userID == steamid)
-                    {
-                        foundPlayers.Clear();
-                        foundPlayers.Add(player);
-                        return foundPlayers;
-                    }
-                }
-                if (player.displayName.ToLower().Contains(arg.ToLower()))
-                    foundPlayers.Add(player);
-            }
-            return foundPlayers;
         }
         #endregion
 

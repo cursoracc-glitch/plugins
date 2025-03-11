@@ -18,7 +18,6 @@ using Console = System.Console;
 namespace Oxide.Plugins
 {
 	[Info("UIConnect", "A1M41K", "1.2.2")]
-      //  Слив плагинов server-rust by Apolo YouGame
 	class UIConnect : RustPlugin
 	{
 		#region Значения

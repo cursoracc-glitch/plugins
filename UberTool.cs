@@ -1,24 +1,25 @@
-using Facepunch;
-using Network;
-using Oxide.Core;
-using Oxide.Core.Libraries.Covalence;
-using Oxide.Core.Plugins;
-using Oxide.Game.Rust.Cui;
-using Oxide.Game.Rust.Libraries.Covalence;
-using ProtoBuf;
 using System;
-using System.Collections;
 using System.Collections.Generic;
+using System.Collections;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
+using Oxide.Core;
+using Oxide.Core.Plugins;
+using Oxide.Core.Libraries.Covalence;
 using UnityEngine;
+using Network;
+using Facepunch;
+using System.Text.RegularExpressions;
+using ProtoBuf;
+using Oxide.Game.Rust.Cui;
+using Oxide.Game.Rust.Libraries.Covalence;
+using static System.Math;
 using BTN = BUTTON;
 
 namespace Oxide.Plugins
 {
-    [Info("UberTool", "FuJiCuRa", "1.4.18")]
-    [Description("Куплено в России - GPROJEX.RU")]
+    [Info("UberTool", "FuJiCuRa", "1.4.14", ResourceId = 78)]
+    [Description("The ultimative build'n'place solution without any borders or other known limits")]
     internal class UberTool : RustPlugin
     {
         [PluginReference]
@@ -106,7 +107,7 @@ namespace Oxide.Plugins
             private string fontType = r("EbobgbPbaqrafrq-Erthyne.ggs");
             private float lastPosRotUpdate = 0f;
 
-
+            
             private void Awake()
             {
                 player = GetComponent<BasePlayer>();
@@ -120,7 +121,7 @@ namespace Oxide.Plugins
                 construction.canBypassBuildingPermission = true;
                 lastAimAngles = player.lastReceivedTick.inputState.aimAngles;
                 lastSocketBase =
-            default(Socket_Base); //
+            default(Socket_Base);
                 lastSocketPos = Vector3.zero;
                 lastSocketEntity =
             default(BaseEntity);
@@ -154,8 +155,7 @@ namespace Oxide.Plugins
                     }
 
                     player.inventory.UpdateContainer(0f, PlayerInventory.Type.Belt, player.inventory.containerBelt, false, 0f);
-                    Instance.timer.Once(0.15f, () =>
-                    {
+                    Instance.timer.Once(0.15f, () =>{
                         if (item == null) return;
                         item.MoveToContainer(player.inventory.containerBelt, slot, true);
                         item.MarkDirty();
@@ -218,7 +218,7 @@ namespace Oxide.Plugins
                 isLightDeployer = false;
                 DestroyInfo();
                 if (heldItem is Planner)
-                {
+                {                    
                     plnnr = heldItem as Planner;
                     isPlanner = true;
                     sTpDplybl = plnnr.isTypeDeployable;
@@ -341,7 +341,7 @@ namespace Oxide.Plugins
                         if (isPlanner)
                         {
                             if (sTpDplybl) DoPlannerUpdate(PType.Mode, ctvtmLnk.info.displayName.english);
-                            else DoPlannerUpdate(PType.Mode, $"{construction.info.name.english} ({((BuildingGrade.Enum)dfltGrd).ToString()})");
+                            else DoPlannerUpdate(PType.Mode, $"{construction.info.name.english} ({((BuildingGrade.Enum) dfltGrd).ToString()})");
                         }
                         else
                         {
@@ -526,7 +526,7 @@ namespace Oxide.Plugins
                                 }
 
                                 DoHammerUpdate(HType.Mode, "Modify");
-                                DoHammerUpdate(HType.Building, rayEntity is DecayEntity ? $"ID {(rayEntity as DecayEntity).buildingID}" : "None");
+                                DoHammerUpdate(HType.Building, rayEntity is DecayEntity? $"ID {(rayEntity as DecayEntity).buildingID}": "None");
 
                                 if (rayDefinition)
                                 {
@@ -667,7 +667,7 @@ namespace Oxide.Plugins
                                 {
                                     return;
                                 }
-
+                               
                                 if (Vector3.Distance(raycastHit.point, player.eyes.position) > 5f)
                                 {
                                     player.ChatMessage("Too far away!");
@@ -677,9 +677,9 @@ namespace Oxide.Plugins
                                 int amountToUse = 1;
                                 if (lightsDeployer.active != null)
                                 {
-                                    if (lightsDeployer.active.IsFinalized())
+                                    if (lightsDeployer.active.IsFinalized())                                    
                                         return;
-
+                                    
                                     float length = 0f;
                                     Vector3 position = lightsDeployer.active.transform.position;
                                     if (lightsDeployer.active.points.Count > 0)
@@ -715,7 +715,7 @@ namespace Oxide.Plugins
                     else if (isWireTool)
                     {
                         if (player.serverInput.WasJustPressed(BTN.FIRE_SECONDARY))
-                        {
+                        {                            
                             source = null;
                             sourceSlot = null;
 
@@ -724,7 +724,7 @@ namespace Oxide.Plugins
                                 isWiring = false;
                                 player.ChatMessage("Cancelled current IO connection");
                             }
-
+                            
                             return;
                         }
 
@@ -763,7 +763,7 @@ namespace Oxide.Plugins
                                             source = ioEntity;
                                             sourceSlot = target;
                                             isWiring = true;
-
+                                            
                                             player.ChatMessage($"Begin Wiring - From {source.ShortPrefabName} (Slot {sourceSlot.niceName})");
                                             player.SendConsoleCommand("ddraw.sphere", 30f, Color.green, source.transform.TransformPoint(sourceSlot.handlePosition), 0.025f);
                                             Effect.server.Run(WIRE_EFFECT, ioEntity.transform.position);
@@ -773,7 +773,7 @@ namespace Oxide.Plugins
                                 }
                                 else
                                 {
-                                    if (ioEntity == null)
+                                    if (ioEntity == null)                                    
                                         player.ChatMessage("Select another IO slot to make a connection");
                                     else
                                     {
@@ -830,7 +830,7 @@ namespace Oxide.Plugins
 
                                             source = null;
                                             sourceSlot = null;
-                                            isWiring = false;
+                                            isWiring = false;                                            
                                         }
                                         else player.ChatMessage("Failed to make a connection");
                                     }
@@ -938,8 +938,7 @@ namespace Oxide.Plugins
                     }
 
                     mvTrgt.entity.transform.position = Vector3.Lerp(mvTrgt.entity.transform.position, mvTrgt.position, Time.deltaTime * 10f);
-                    if (mvTrgtSnp == null || mvTrgtSnp && !(mvTrgtSnp is BuildingBlock))
-                        mvTrgt.entity.transform.rotation = Quaternion.Lerp(mvTrgt.entity.transform.rotation, Quaternion.Euler(mvTrgt.rotation), Time.deltaTime * 10f);
+                    if (mvTrgtSnp == null || mvTrgtSnp && !(mvTrgtSnp is BuildingBlock)) mvTrgt.entity.transform.rotation = Quaternion.Lerp(mvTrgt.entity.transform.rotation, Quaternion.Euler(mvTrgt.rotation), Time.deltaTime * 10f);
                     DMvmntSnc(mvTrgt.entity);
                     return;
                 }
@@ -1026,7 +1025,7 @@ namespace Oxide.Plugins
                         if (mvTrgtSnp)
                         {
                             mvTrgt.rotation = mvTrgt.entity.transform.rotation.eulerAngles;
-                            DoHammerUpdate(HType.Building, rayEntity is DecayEntity ? $"ID {(rayEntity as DecayEntity).buildingID}" : "None");
+                            DoHammerUpdate(HType.Building, rayEntity is DecayEntity? $"ID {(rayEntity as DecayEntity).buildingID}": "None");
                         }
                         else
                         {
@@ -1039,7 +1038,8 @@ namespace Oxide.Plugins
                 }
                 else
                 {
-                    mvTrgt = default(Construction.Target);
+                    mvTrgt =
+                default(Construction.Target);
                     ctvTrgt = false;
                     isPlacing = false;
                     return;
@@ -1057,7 +1057,8 @@ namespace Oxide.Plugins
                 if (entity == null)
                 {
                     DoCrosshair("1 1 1 0.75");
-                    mvTrgt = default(Construction.Target);
+                    mvTrgt =
+                default(Construction.Target);
                     isPlacing = false;
                     ctvTrgt = false;
                     return;
@@ -1091,23 +1092,17 @@ namespace Oxide.Plugins
                     {
                         Net.sv.write.PacketID(Message.Type.EntityPosition);
                         Net.sv.write.EntityID(entity.net.ID);
-
-                        Net.sv.write.WriteObject(entity.GetNetworkPosition());
-                        Net.sv.write.WriteObject(entity.GetNetworkRotation().eulerAngles);
-
+                        Net.sv.write.Vector3(entity.GetNetworkPosition());
+                        Net.sv.write.Vector3(entity.GetNetworkRotation().eulerAngles);
                         Net.sv.write.Float(entity.GetNetworkTime());
-                        SendInfo info = new SendInfo(entity.net.group.subscribers)
-                        {
-                            method = SendMethod.ReliableUnordered,
-                            priority = Priority.Immediate
-                        };
+                        SendInfo info = new SendInfo(entity.net.group.subscribers);
+                        info.method = SendMethod.ReliableUnordered;
+                        info.priority = Priority.Immediate;
                         Net.sv.write.Send(info);
                     }
                 }
 
-                if (force2 && entity && entity.children != null)
-                    foreach (BaseEntity current in entity.children)
-                        DMvmntSnc(current, true);
+                if (force2 && entity && entity.children != null) foreach (BaseEntity current in entity.children) DMvmntSnc(current, true);
             }
 
             public void DoTick()
@@ -1126,8 +1121,7 @@ namespace Oxide.Plugins
                         else if (serverInput.WasJustPressed(controlButtons[CmdType.PlannerRotate]))
                         {
                             Vector3 vector = Vector3.zero;
-                            if (construction && construction.canRotateBeforePlacement)
-                                vector = construction.rotationAmount;
+                            if (construction && construction.canRotateBeforePlacement) vector = construction.rotationAmount;
                             rttnOffst.x = Mathf.Repeat(rttnOffst.x + vector.x, 360f);
                             rttnOffst.y = Mathf.Repeat(rttnOffst.y + vector.y, 360f);
                             rttnOffst.z = Mathf.Repeat(rttnOffst.z + vector.z, 360f);
@@ -1142,7 +1136,7 @@ namespace Oxide.Plugins
                             BldMnUI(Instance.playerPrefs.playerData[player.userID].SF);
                             return;
                         }
-
+                        
                         if (serverInput.IsDown(controlButtons[CmdType.PlannerTierChange]))
                         {
                             if (serverInput.WasJustPressed(controlButtons[CmdType.PlannerTierNext]))
@@ -1150,7 +1144,7 @@ namespace Oxide.Plugins
                                 dfltGrd++;
                                 if (dfltGrd > 4) dfltGrd = 0;
                                 Instance.playerPrefs.playerData[player.userID].DBG = dfltGrd;
-                                DoPlannerUpdate(PType.Mode, $"{construction.info.name.english} ({((BuildingGrade.Enum)dfltGrd).ToString()})");
+                                DoPlannerUpdate(PType.Mode, $"{construction.info.name.english} ({((BuildingGrade.Enum) dfltGrd).ToString()})");
                                 return;
                             }
                             else if (serverInput.WasJustPressed(controlButtons[CmdType.PlannerTierPrev]))
@@ -1158,7 +1152,7 @@ namespace Oxide.Plugins
                                 dfltGrd--;
                                 if (dfltGrd < 0) dfltGrd = 4;
                                 Instance.playerPrefs.playerData[player.userID].DBG = dfltGrd;
-                                DoPlannerUpdate(PType.Mode, $"{construction.info.name.english} ({((BuildingGrade.Enum)dfltGrd).ToString()})");
+                                DoPlannerUpdate(PType.Mode, $"{construction.info.name.english} ({((BuildingGrade.Enum) dfltGrd).ToString()})");
                                 return;
                             }
                         }
@@ -1316,12 +1310,12 @@ namespace Oxide.Plugins
                                 StringBuilder sb = new StringBuilder();
                                 rayEntityName = (rayEntity as BaseCombatEntity).repair.itemTarget?.displayName?.english;
                                 sb.Append(
-                                $">\nBuilding privilege authorized users for <color=#ffa500>{rayEntityName}</color> (<color=#00ffff>{rayEntity.net.ID}</color>)");
+								$">\nBuilding privilege authorized users for <color=#ffa500>{rayEntityName}</color> (<color=#00ffff>{rayEntity.net.ID}</color>)");
                                 IPlayer iPlayer = Instance.covalence.Players.FindPlayerById(rayEntity.OwnerID.ToString());
                                 if (iPlayer != null)
                                 {
                                     sb.Append(
-                                    $" | Owner: <color=#ffa500>{iPlayer.Name}</color> (<color=#00ffff>{iPlayer.Id}</color>) | ");
+									$" | Owner: <color=#ffa500>{iPlayer.Name}</color> (<color=#00ffff>{iPlayer.Id}</color>) | ");
                                     if (iPlayer.IsConnected) sb.AppendLine($"Status: <color=#008000>Online</color>");
                                     else sb.AppendLine($"Status: <color=#ffffff>Offline</color>");
                                 }
@@ -1369,18 +1363,18 @@ namespace Oxide.Plugins
                                 StringBuilder sb = new StringBuilder();
                                 rayEntityName = (rayEntity as BaseCombatEntity).repair.itemTarget?.displayName.english;
                                 sb.Append(
-                                $">\nCodeLock authorized users attached to <color=#ffa500>{rayEntityName}</color> (<color=#00ffff>{rayEntity.net.ID}</color>)");
+								$">\nCodeLock authorized users attached to <color=#ffa500>{rayEntityName}</color> (<color=#00ffff>{rayEntity.net.ID}</color>)");
                                 IPlayer iPlayer = Instance.covalence.Players.FindPlayerById(rayEntity.OwnerID.ToString());
                                 if (iPlayer != null)
                                 {
                                     sb.Append(
-                                    $" | Owner: <color=#ffa500>{iPlayer.Name}</color> (<color=#00ffff>{iPlayer.Id}</color>) | ");
+									$" | Owner: <color=#ffa500>{iPlayer.Name}</color> (<color=#00ffff>{iPlayer.Id}</color>) | ");
                                     if (iPlayer.IsConnected) sb.AppendLine($"Status: <color=#008000>Online</color>");
                                     else sb.AppendLine($"Status: <color=#ffffff>Offline</color>");
                                 }
 
-                                string code = codeLock.hasCode ? $"<color=#00ffff>{codeLock.code}</color>" : "<color=#00ffff>Not set</color>";
-                                string guest = codeLock.hasGuestCode ? $"<color=#00ffff>{codeLock.guestCode}</color>" : "<color=#00ffff>Not set</color>";
+                                string code = codeLock.hasCode ? $"<color=#00ffff>{codeLock.code}</color>": "<color=#00ffff>Not set</color>";
+                                string guest = codeLock.hasGuestCode ? $"<color=#00ffff>{codeLock.guestCode}</color>": "<color=#00ffff>Not set</color>";
                                 sb.AppendLine($"Lock code:  {code} | Guest code: {guest}");
                                 if (codeLock.whitelistPlayers != null && codeLock.whitelistPlayers.Count > 0)
                                 {
@@ -1519,7 +1513,7 @@ namespace Oxide.Plugins
                 construction = PrefabAttribute.server.Find<Construction>(p);
                 rttnOffst = Vector3.zero;
                 lstPrfb = p;
-                DoPlannerUpdate(PType.Mode, $"{construction.info.name.english} ({((BuildingGrade.Enum)dfltGrd).ToString()})");
+                DoPlannerUpdate(PType.Mode, $"{construction.info.name.english} ({((BuildingGrade.Enum) dfltGrd).ToString()})");
                 lastPlacement = null;
                 lastSocketForce = true;
             }
@@ -2401,9 +2395,9 @@ namespace Oxide.Plugins
                     element.Add(BuildButtonUI(mainName, center, i, -0.030f * scaled, 0.030f * scaled, color, factor), mainName);
                     element.Add(BuildButtonUI(mainName, Vector2.MoveTowards(center, mC, -0.02f), i, -0.035f * scaled, 0.035f * scaled, color, factor), mainName);
                 }
-
+                
                 element.Add(CustomIconUI(mainName, new Vector2(0.85f, 0.5f), r("nffrgf/vpbaf/rkvg.cat"), -0.025f, 0.025f, "1 1 1 1", factor));
-                element.Add(CustomButtonUI(mainName, new Vector2(0.85f, 0.5f), "ut.prefab 6666", -0.025f, 0.025f, color, factor), mainName);
+                element.Add( CustomButtonUI(mainName, new Vector2(0.85f, 0.5f), "ut.prefab 6666", -0.025f, 0.025f, color, factor), mainName);
                 CuiHelper.AddUi(player, element);
             }
 
@@ -2550,7 +2544,7 @@ namespace Oxide.Plugins
         private bool Changed = false;
         private static UberTool Instance;
 
-        private string[] iconFileNames = new string[]
+        private string[] iconFileNames = new string[] 
         {
             "wall.low",
             "block.stair.ushape",
@@ -2575,7 +2569,7 @@ namespace Oxide.Plugins
         };
 
         private List<uint> constructionIds = new List<uint>();
-
+        
 
         private Dictionary<uint, string> prefabIdToImage = new Dictionary<uint, string>();
 
@@ -2894,7 +2888,7 @@ namespace Oxide.Plugins
             {
                 string shortname = iconFileNames[i];
                 string prefabPath = string.Empty;
-                foreach (string s in GameManifest.Current.entities)
+                foreach(string s in GameManifest.Current.entities)
                 {
                     if (ToShortName(s).Equals(shortname))
                     {
@@ -3335,7 +3329,7 @@ namespace Oxide.Plugins
                 }
             };
         }
-
+        
         private static CuiElement BuildIconUI(string panel, Vector2 center, string sprite, float min, float max, string color, float factor, bool b)
         {
             return new CuiElement
@@ -3343,8 +3337,8 @@ namespace Oxide.Plugins
                 Parent = panel,
                 Components = {
                     new CuiImageComponent {
-                        //Color = "0 0 0 0"
-                        Sprite = sprite,
+						//Color = "0 0 0 0"
+						Sprite = sprite,
                         Color = color,
                         Material = b ? r("nffrgf/pbagrag/zngrevnyf/vgrzzngrevny.zng") : r("nffrgf/vpbaf/vpbazngrevny.zng")
                     },
@@ -3367,8 +3361,8 @@ namespace Oxide.Plugins
                 Parent = panel,
                 Components = {
                     new CuiRawImageComponent {
-                        //Color = "0 0 0 0"
-                        Png = png,
+						//Color = "0 0 0 0"
+						Png = png,
                         Color = color,
                         Material = b ? r("nffrgf/pbagrag/zngrevnyf/vgrzzngrevny.zng") : r("nffrgf/vpbaf/vpbazngrevny.zng")
                     },

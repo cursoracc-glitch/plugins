@@ -12,12 +12,10 @@ using Facepunch;
 
 namespace Oxide.Plugins
 {
-    [Info("DeepWater", "Colon Blow", "1.0.24")]
+    [Info("DeepWater", "Colon Blow", "1.0.22")]
     class DeepWater : RustPlugin
     {
-        // fix for null errors for loot spawn
-        // changed base prefab back to visualization sphere
-        // fix for Helipad H half not showing
+        // fix for grid location
 
         #region Load
 
@@ -299,8 +297,8 @@ namespace Oxide.Plugins
         Dictionary<string, string> messages = new Dictionary<string, string>()
         {
             ["notauthorized"] = "You are not authorized to use that command!",
-            ["rigspawn"] = "[Буровая вышка] заспавнена в квадрате : ",
-            ["rigdespawn"] = "[Буровая вышка] уничтожена"
+            ["rigspawn"] = "DeepWater Rig Event at grid : ",
+            ["rigdespawn"] = "Deepwater Rig Event has Ended !!"
         };
 
         #endregion
@@ -558,7 +556,7 @@ namespace Oxide.Plugins
             var onlineplayers = BasePlayer.activePlayerList.Count;
             if (onlineplayers < MinPlayersForEventSpawn)
             {
-                PrintWarning("[Буровая вышка] не хватает игроков для начала ивента");
+                PrintWarning("Minimum Player count not reached, Deepwater Event did not spawn !!!");
                 DoRandomRespawn = true;
                 return;
             }
@@ -641,7 +639,7 @@ namespace Oxide.Plugins
 
         public void BuildRandomDeepWater(bool eventstarted, bool autospawned = false)
         {
-            string prefabpumpjack = "assets/prefabs/visualization/sphere.prefab";
+            string prefabpumpjack = "assets/prefabs/deployable/large wood storage/box.wooden.large.prefab";
             var spawnpos = FindSpawnPoint();
             BaseEntity newrig = GameManager.server.CreateEntity(prefabpumpjack, new Vector3(spawnpos.x, spawnpos.y, spawnpos.z), Quaternion.identity, true);
             newrig.OwnerID = 0;
@@ -659,14 +657,14 @@ namespace Oxide.Plugins
             if ((!eventstarted && BroadcastSpawn) || (eventstarted && BroadcastEventSpawn))
             {
                 if (eventstarted) PrintWarning(TOD_Sky.Instance.Cycle.Hour + " : DeepWater Event Started at Grid : " + getgrid);
-                if (eventstarted) { ConVar.Chat.Broadcast("ивент начался в координате : " + getgrid, "[Буровая вышка]", "#5e99f7"); return; }
-                ConVar.Chat.Broadcast("ивент начался в координате : " + getgrid, "[Буровая вышка]", "#5e99f7");
+                if (eventstarted) { ConVar.Chat.Broadcast("Rig Event has Spawned at Grid : " + getgrid, "DeepWater", "#4286f4"); return; }
+                ConVar.Chat.Broadcast("Rig has Spawned at Grid : " + getgrid, "DeepWater", "#4286f4");
             }
         }
 
         public void BuildLocalDeepWater(BasePlayer player, bool eventstarted, int compound = 0)
         {
-            string prefabpumpjack = "assets/prefabs/visualization/sphere.prefab";
+            string prefabpumpjack = "assets/prefabs/deployable/large wood storage/box.wooden.large.prefab";
             var spawnpos = new Vector3(player.transform.position.x, RigSpawnHeight, player.transform.position.z);
             BaseEntity newrig = GameManager.server.CreateEntity(prefabpumpjack, spawnpos, new Quaternion(), true);
             newrig.OwnerID = 0;
@@ -681,15 +679,15 @@ namespace Oxide.Plugins
             {
                 if (eventstarted) PrintWarning(TOD_Sky.Instance.Cycle.Hour + " : DeepWater Event Started at Grid : " + getgrid);
 
-                if (compound == 1) { ConVar.Chat.Broadcast("Rig Compound has Spawned at Grid : " + getgrid, "[Буровая вышка]", "#5e99f7"); return; }
-                if (eventstarted) { ConVar.Chat.Broadcast("ивент начался в координате : " + getgrid, "[Буровая вышка]", "#5e99f7"); return; }
-                ConVar.Chat.Broadcast("ивент начался в координате : " + getgrid, "[Буровая вышка]", "#5e99f7");
+                if (compound == 1) { ConVar.Chat.Broadcast("Rig Compound has Spawned at Grid : " + getgrid, "DeepWater", "#4286f4"); return; }
+                if (eventstarted) { ConVar.Chat.Broadcast("Rig Event has Spawned at Grid : " + getgrid, "DeepWater", "#4286f4"); return; }
+                ConVar.Chat.Broadcast("Rig has Spawned at Grid : " + getgrid, "DeepWater", "#4286f4");
             }
         }
 
         void SpawnRig(ulong ownerid, Vector3 pos, Quaternion rot, Vector3 angle, int compound = 0)
         {
-            string prefabpumpjack = "assets/prefabs/visualization/sphere.prefab";
+            string prefabpumpjack = "assets/prefabs/deployable/large wood storage/box.wooden.large.prefab";
             BaseEntity newrig = GameManager.server.CreateEntity(prefabpumpjack, pos, rot, true);
             newrig.OwnerID = ownerid;
             newrig?.Spawn();
@@ -1524,8 +1522,8 @@ namespace Oxide.Plugins
                 helipadfence4 = SpawnPart(prefabfence, helipadfence4, setactive, 0, 0, 315, 11.1f + ShiftOffset, UDHeightOffset - 2.15f, -3f);
                 helipadfence5 = SpawnPart(prefabfence, helipadfence5, setactive, 0, 0, 315, 11.1f + ShiftOffset, UDHeightOffset - 2.15f, -6f);
 
-                helilogo1 = SpawnPart(prefabrug, helilogo1, setactive, 0, 0, 180, 12.65f + ShiftOffset, UDHeightOffset + 0.2f, 0f, HeliPadRugLogo1);
-                helilogo2 = SpawnPart(prefabrug, helilogo2, setactive, 0, 0, 0, 14.35f + ShiftOffset, UDHeightOffset + 0.1f, 0f, HeliPadRugLogo1);
+                helilogo1 = SpawnPart(prefabrug, helilogo1, setactive, 0, 0, 180, 12.65f + ShiftOffset, UDHeightOffset + 0.1f, 0f, HeliPadRugLogo1);
+                helilogo2 = SpawnPart(prefabrug, helilogo2, setactive, 0, 0, 0, 14.35f + ShiftOffset, UDHeightOffset + 0.09f, 0f, HeliPadRugLogo2);
 
             }
 
@@ -1849,10 +1847,12 @@ namespace Oxide.Plugins
 
             void SpawnRigLoot()
             {
-                count = 0;
                 if (iscompound) return;
                 if (isevent && !EventRigHasLootSpawn) return;
                 if (!isevent && !StandardRigHasLootSpawn) return;
+
+
+
                 if (DoLootCrateCount() < maxlootcrates) DoLootSpawn();
                 else return;
             }
@@ -1874,14 +1874,14 @@ namespace Oxide.Plugins
             void DoLootSpawn()
             {
                 int cratesroll = UnityEngine.Random.Range(1, 9);
-                if (cratesroll == 1 && lootspawn1 == null && deck1row3floorframe2 != null) { lootspawn1 = SpawnLootBox(lootspawn1, deck1row3floorframe2.transform.position); return; }
-                if (cratesroll == 2 && lootspawn2 == null && deck1row1floorframe3 != null) { lootspawn2 = SpawnLootBox(lootspawn2, deck1row1floorframe3.transform.position); return; }
-                if (cratesroll == 3 && lootspawn3 == null && deck2frontrowfloor1 != null) { lootspawn3 = SpawnLootBox(lootspawn3, deck2frontrowfloor1.transform.position); return; }
-                if (cratesroll == 4 && lootspawn4 == null && deck2frontrowfloor5 != null) { lootspawn4 = SpawnLootBox(lootspawn4, deck2frontrowfloor5.transform.position); return; }
-                if (cratesroll == 5 && lootspawn5 == null && deck2backrowfloor1 != null) { lootspawn5 = SpawnLootBox(lootspawn5, deck2backrowfloor1.transform.position); return; }
-                if (cratesroll == 6 && lootspawn6 == null && deck1row4floorframe2 != null) { lootspawn6 = SpawnLootBox(lootspawn6, deck1row4floorframe2.transform.position); return; }
-                if (cratesroll == 7 && lootspawn7 == null && entity != null) { lootspawn7 = SpawnLootBox(lootspawn7, entity.transform.position + new Vector3(-6f, 3f, 4f)); return; }
-                if (cratesroll == 8 && lootspawn8 == null & entity != null) { lootspawn8 = SpawnLootBox(lootspawn8, entity.transform.position + new Vector3(6.5f, 3f, -2f)); return; }
+                if (cratesroll == 1 && lootspawn1 == null) { lootspawn1 = SpawnLootBox(lootspawn1, deck1row3floorframe2.transform.position); return; }
+                if (cratesroll == 2 && lootspawn2 == null) { lootspawn2 = SpawnLootBox(lootspawn2, deck1row1floorframe3.transform.position); return; }
+                if (cratesroll == 3 && lootspawn3 == null) { lootspawn3 = SpawnLootBox(lootspawn3, deck2frontrowfloor1.transform.position); return; }
+                if (cratesroll == 4 && lootspawn4 == null) { lootspawn4 = SpawnLootBox(lootspawn4, deck2frontrowfloor5.transform.position); return; }
+                if (cratesroll == 5 && lootspawn5 == null) { lootspawn5 = SpawnLootBox(lootspawn5, deck2backrowfloor1.transform.position); return; }
+                if (cratesroll == 6 && lootspawn6 == null) { lootspawn6 = SpawnLootBox(lootspawn6, deck1row4floorframe2.transform.position); return; }
+                if (cratesroll == 7 && lootspawn7 == null) { lootspawn7 = SpawnLootBox(lootspawn7, entity.transform.position + new Vector3(-6f, 3f, 4f)); return; }
+                if (cratesroll == 8 && lootspawn8 == null) { lootspawn8 = SpawnLootBox(lootspawn8, entity.transform.position + new Vector3(6.5f, 3f, -2f)); return; }
                 else SpawnRigLoot();
             }
 
@@ -1914,7 +1914,7 @@ namespace Oxide.Plugins
             {
                 if (!BroadCastEventStages) return;
                 string getgrid = deepwater.GetGridLocation(entity.transform.position);
-                ConVar.Chat.Broadcast(str + getgrid, "[Буровая вышка]", "#5e99f7");
+                ConVar.Chat.Broadcast(str + getgrid, "DeepWater", "#4286f4");
             }
 
 
@@ -1943,20 +1943,20 @@ namespace Oxide.Plugins
                 }
                 if (stage1)
                 {
-                    if (stage1counter == stage1time) { DeepWaterStage1(); stage2 = true; stage1 = false; stage3 = false; stage4 = false; BroadcastMessage("STAGE 1 - Вертолёт приземлился на площадку для дозаправки с агресивными учёными на борту : "); }
+                    if (stage1counter == stage1time) { DeepWaterStage1(); stage2 = true; stage1 = false; stage3 = false; stage4 = false; BroadcastMessage("Rig Event Stage 1 (CH47 Landing) started at grid : "); }
                     stage1counter++;
                     despawncount = 0;
 
                 }
                 if (stage2)
                 {
-                    if (stage2counter == stage2time) { DeepWaterStage2(); stage3 = true; stage1 = false; stage2 = false; stage4 = false; BroadcastMessage("STAGE 2 - Вертолёт загорелся и закрытый контейнер выпал на нижнюю палубу.Необходимо добраться до ящика с лутом как можно быстрее : "); }
+                    if (stage2counter == stage2time) { DeepWaterStage2(); stage3 = true; stage1 = false; stage2 = false; stage4 = false; BroadcastMessage("Rig Event Stage 2 (CH47 Crash) started at grid : "); }
                     stage2counter = stage2counter + 1;
                     despawncount = 0;
                 }
                 if (stage3)
                 {
-                    if (stage3counter == stage3time) { BroadcastMessage("STAGE 3 - Пожар на вышке усилился,скоро будет взрыв! Хватайте лут и бегите! : "); stage3startfire = true; }
+                    if (stage3counter == stage3time) { BroadcastMessage("Rig Event Stage 3 (Rig Fire Started) started at grid : "); stage3startfire = true; }
                     if (stage3startfire)
                     {
                         if (stage3barrelcounter == stage3barreltime) { DeepWaterStage3(); stage3barrelcounter = 0; }
@@ -1968,7 +1968,7 @@ namespace Oxide.Plugins
                 if (stage4)
                 {
                     stage1 = false; stage2 = false; stage3 = false;
-                    if (stage4counter == 0) BroadcastMessage("STAGE 4 - Армагедон времени всё меньше, быстрее быстрее быстрее! : ");
+                    if (stage4counter == 0) BroadcastMessage("Rig Event Stage 4 (Final Countdown) started at grid : ");
                     if (stage4counter >= stage4time) { DeepWaterStage4(); stage1 = false; stage2 = false; stage3 = false; stage4 = false; return; }
                     stage4counter = stage4counter + 1;
                     despawncount = 0;
@@ -1996,7 +1996,7 @@ namespace Oxide.Plugins
             {
                 if (isevent && BroadcastEventEnd)
                 {
-                    ConVar.Chat.Broadcast("ивент окончен,установка взорвана", "[Буровая вышка]", "#5e99f7");
+                    ConVar.Chat.Broadcast("Rig Event has Ended at Grid", "DeepWater", "#4286f4");
                 }
                 else return;
             }

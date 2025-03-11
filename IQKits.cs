@@ -8,29 +8,27 @@ using UnityEngine;
 using System.Linq;
 using System.Text;
 using ConVar;
-using Oxide.Core;
 
 namespace Oxide.Plugins
 {
-    [Info("IQKits", "SkuliDropek", "0.1.5")]
+    [Info("IQKits", "Mercury", "0.0.3")]
     [Description("Лучшие наборы из всех,которые есть")]
     class IQKits : RustPlugin
     {
         /// <summary>
-        /// Обновление 0.1.0
-        /// - FIX NRE если в оружие 0 патронов
-        /// - Добавлена проверка на админа в чат командах
-        /// - Убрал дебаг
-        /// - Добавлена возможность разрешать/запрещать использовать определенные наборы во время рейдблока
-        /// - Добавлена поддержка IQRankSystem
-        /// - Добавлена возможность разрешать использовать определенные наборы с наличием ранга
-        /// Обновление 0.1.2
-        /// - Исправил неккоректную запись набора в дата файл с типами "Amount/Amount + Cooldown"
-        /// Обновление 0.1.3
-        /// /// </summary>
+        /// Обновление 0.0.2
+        /// - Добавил дополнительную проверку на юзера
+        /// - Поправил удаление набора
+        /// - Исправил шанс выпадения предмета
+        /// - Добавлена возможность открывать набор после N дня вайпа
+        /// - Добавлена возможность выдавать автоматический набор с учетом N дня вайпа
+        /// 
+        ///  /// Обновление 0.0.3
+        /// - Исправил появление наборов после N дня вайпа
+        /// </summary>
 
         #region Reference
-        [PluginReference] Plugin ImageLibrary, IQPlagueSkill, IQChat, IQRankSystem;
+        [PluginReference] Plugin ImageLibrary, IQPlagueSkill, IQChat;
 
         #region IQChat
         public void SendChat(BasePlayer player, string Message, Chat.ChatChannel channel = Chat.ChatChannel.Global)
@@ -63,62 +61,12 @@ namespace Oxide.Plugins
         int GET_SKILL_RARE_PERCENT() => (int)IQPlagueSkill?.CallHook("API_GET_RARE_IQKITS");
         #endregion
 
-        #region RaidBlocked
-        public Boolean IsRaidBlocked(BasePlayer player, Boolean Skipped)
-        {
-            if (Skipped) return false;
-
-            var ret = Interface.Call("CanTeleport", player) as String;
-            if (ret != null)
-                return true;
-            else return false;
-        }
-        #endregion
-
-        #region IQRankSystem
-        Boolean IsRank(UInt64 userID, String Key)
-        {
-            if (!IQRankSystem) return true;
-            if (String.IsNullOrWhiteSpace(Key)) return true;
-            return (Boolean)IQRankSystem?.Call("API_GET_AVAILABILITY_RANK_USER", userID, Key);
-        }
-        String GetRankName(String Key)
-        {
-            String Rank = string.Empty;
-            if (!IQRankSystem) return Rank;
-            return (String)IQRankSystem?.Call("API_GET_RANK_NAME", Key);
-        }
-        #endregion
-
         #endregion
 
         #region Vars 
         public static DateTime TimeCreatedSave = SaveRestore.SaveCreatedTime.Date;
         public static DateTime RealTime = DateTime.Now.Date;
         public static int WipeTime = RealTime.Subtract(TimeCreatedSave).Days;
-
-        enum BiomeType
-        {
-            None,
-            Arid,
-            Temperate,
-            Tundra,
-            Arctic
-        }
-
-        enum TypeContent
-        {
-            Ammo,
-            Contents
-        }
-
-        enum TypeAutoKit
-        {
-            Single,
-            List,
-            PriorityList,
-            BiomeList,
-        }
 
         enum TypeKits
         {
@@ -145,7 +93,7 @@ namespace Oxide.Plugins
             [JsonProperty("Настройки интерфейса")]
             public InterfaceSettings InterfaceSetting = new InterfaceSettings();
             [JsonProperty("Настройка наборов")]
-            public Dictionary<String, Kits> KitList = new Dictionary<String, Kits>();
+            public Dictionary<string, Kits> KitList = new Dictionary<string, Kits>();
             [JsonProperty("Настройки плагинов совместимости")]
             public ReferenceSettings ReferenceSetting = new ReferenceSettings();
             internal class ReferenceSettings
@@ -155,105 +103,76 @@ namespace Oxide.Plugins
                 internal class IQChatSettings
                 {
                     [JsonProperty("IQChat : Кастомный префикс в чате")]
-                    public String CustomPrefix;
+                    public string CustomPrefix;
                     [JsonProperty("IQChat : Кастомный аватар в чате(Если требуется)")]
-                    public String CustomAvatar;
+                    public string CustomAvatar;
                 }
             }
-
             internal class GeneralSettings
             {
-                [JsonProperty("Настройки автоматических китов")]
-                public AutoKit AutoKitSettings = new AutoKit();
-                [JsonProperty("Автоматическая очистка наборов у игроков после вайпа (true - включено/false - выключено)")]
-                public Boolean AutoWipeClearKits;
-                internal class AutoKit
+                [JsonProperty("Ключ стартового набора(Дается при возрождении)(если включен список нескольких наборов, данная функция отключается)")]
+                public string StartKitKey;
+                [JsonProperty("Использовать сразу несколько стартовых наборов(они будут выбираться случайно)")]
+                public bool UseStartedKitList;
+                [JsonProperty("Список ключей стартового набора(Дается при возрождении)")]
+                public List<KitRandom> StartedKitList = new List<KitRandom>();
+                internal class KitRandom
                 {
-                    [JsonProperty("Тип автокитов : 0 - Единый ключ, 1 - Случаный список, 2 - Приоритетный список, 3 - Биомный список")]
-                    public TypeAutoKit TypeAuto;
-                    [JsonProperty("Ключ набора (Тип 0 - Единый ключ)")]
-                    public String StartKitKey;
-                    [JsonProperty("Список ключей набора (Тип 1 - Случайный список). Дается один из случайных автокитов доступных игроку")]
-                    public List<KitSettings> KitListRandom = new List<KitSettings>();
-                    [JsonProperty("Список ключей набора (Тип 2 - Приоритетный список). Дается доступный набор игроку, который выше других")]
-                    public List<KitSettings> KitListPriority = new List<KitSettings>();
-                    [JsonProperty("Список ключей наборов по биомам (Тип 3 - Биомный список). Дается доступный набор игроку, в зависимости от биома")]
-                    public List<BiomeKits> BiomeStartedKitList = new List<BiomeKits>();
-
-                    internal class BiomeKits
-                    {
-                        [JsonProperty("Настройка набора")]
-                        public KitSettings Kits = new KitSettings();
-                        [JsonProperty("Номер биома в котором будет даваться набор ( 1 - Arid, 2 - Temperate, 3 - Tundra, 4 - Arctic )")]
-                        public BiomeType biomeType;
-                    }
-
-                    internal class KitSettings
-                    {
-                        [JsonProperty("Ключ набора")]
-                        public String StartKitKey;
-                        [JsonProperty("Права для набора(не оставляйте это поле пустым)")]
-                        public String Permissions;
-                    }
+                    [JsonProperty("Ключ набора")]
+                    public string StartKitKey;
+                    [JsonProperty("Права для набора(не оставляйте это поле пустым)")]
+                    public string Permissions;
                 }
             }
             internal class InterfaceSettings
             {
-                [JsonProperty("Использовать кнопку ЗАКРЫТЬ в UI (true - да/false - нет). Если установлено false - ui будет закрываться при нажатии в любом месте")]
-                public Boolean CloseType;
-                [JsonProperty("Закрывать интерфейс после выбора набора")]
-                public Boolean CloseUiTakeKit;
                 [JsonProperty("HEX: Цвет заднего фона")]
-                public String HEXBackground;
+                public string HEXBackground;
                 [JsonProperty("HEX: Цвет текста")]
-                public String HEXLabels;
+                public string HEXLabels;
                 [JsonProperty("HEX: Кнопки с информацией")]
-                public String HEXInfoItemButton;
+                public string HEXInfoItemButton;
                 [JsonProperty("HEX: Цвет текста на кнопке с информацией")]
-                public String HEXLabelsInfoItemButton;
+                public string HEXLabelsInfoItemButton;
                 [JsonProperty("HEX: Цвет кнопки забрать")]
-                public String HEXAccesButton;
+                public string HEXAccesButton;
                 [JsonProperty("HEX: Цвет текста на кнопке забрать")]
-                public String HEXLabelsAccesButton;
+                public string HEXLabelsAccesButton;
                 [JsonProperty("HEX: Цвет полосы перезарядки")]
-                public String HEXCooldowns;
+                public string HEXCooldowns;
                 [JsonProperty("HEX: Цвет блоков с информацией")]
-                public String HEXBlock;
+                public string HEXBlock;
                 [JsonProperty("HEX: Цвет блоков на которых будут лежать предметы")]
-                public String HEXBlockItemInfo;
+                public string HEXBlockItemInfo;
                 [JsonProperty("Время появления интерфейса(его плавность)")]
-                public Single InterfaceFadeOut;
+                public float InterfaceFadeOut;
                 [JsonProperty("Время исчезновения интерфейса(его плавность)")]
-                public Single InterfaceFadeIn;
+                public float InterfaceFadeIn;
                 [JsonProperty("PNG заднего фона с информацией о том,что находится в наборе")]
-                public String PNGInfoPanel;
+                public string PNGInfoPanel;
                 [JsonProperty("PNG заднего фона уведомления")]
-                public String PNGAlert;
+                public string PNGAlert;
             }
             internal class Kits
             {
                 [JsonProperty("Тип набора(0 - С перезарядкой, 1 - Лимитированый, 2 - Стартовый(АвтоКит), 3 - Лимитированый с перезарядкой)")]
                 public TypeKits TypeKit;
                 [JsonProperty("Отображаемое имя")]
-                public String DisplayName;
+                public string DisplayName;
                 [JsonProperty("Через сколько дней вайпа будет доступен набор")]
-                public Int32 WipeOpened;
-                [JsonProperty("Разрешить использовать этот набор во время рейдблока (true - да/false - нет)")]
-                public Boolean UseRaidBlock = true;
-                [JsonProperty("IQRankSystem : Разрешить использовать этот набор только по рангу (Впишите ключ с рангом). Если вам это не нужно - оставьте поле пустым")]
-                public String RankUser = "";
+                public int WipeOpened;
                 [JsonProperty("Права")]
-                public String Permission;
+                public string Permission;
                 [JsonProperty("PNG(128x128)")]
-                public String PNG;
+                public string PNG;
                 [JsonProperty("Sprite(Установится если отсутствует PNG)")]
-                public String Sprite;
+                public string Sprite;
                 [JsonProperty("Shortname(Установится если отсутствует PNG и Sprite)")]
-                public String Shortname;
+                public string Shortname;
                 [JsonProperty("Время перезарядки набора")]
-                public Int32 CoolDown;
+                public int CoolDown;
                 [JsonProperty("Количество сколько наборов можно взять")]
-                public Int32 Amount;
+                public int Amount;
                 [JsonProperty("Предметы , которые будут даваться в данном наборе")]
                 public List<ItemsKit> ItemKits = new List<ItemsKit>();
 
@@ -262,46 +181,21 @@ namespace Oxide.Plugins
                     [JsonProperty("Выберите контейнер в который будет перенесен предмет(0 - Одежда, 1 - Панель быстрого доступа, 2 - Рюкзак)")]
                     public ContainerItem ContainerItemType;
                     [JsonProperty("Название предмета")]
-                    public String DisplayName;
+                    public string DisplayName;
                     [JsonProperty("Shortname предмета")]
-                    public String Shortname;
+                    public string Shortname;
                     [JsonProperty("Количество(Если это команда,так-же указывайте число)")]
-                    public Int32 Amount;
-                    [JsonProperty("Настройки случайного количества выпадения предмета")]
-                    public RandomingDrop RandomDropSettings = new RandomingDrop();
+                    public int Amount;
                     [JsonProperty("Шанс на выпадения предмета(Оставьте 0 - если не нужен шанс)")]
-                    public Int32 Rare;
+                    public int Rare;
                     [JsonProperty("SkinID предмета")]
-                    public UInt64 SkinID;
+                    public ulong SkinID;
                     [JsonProperty("PNG предмета(если установлена команда)")]
-                    public String PNG;
+                    public string PNG;
                     [JsonProperty("Sprite(Если установлена команда и не установлен PNG)")]
-                    public String Sprite;
+                    public string Sprite;
                     [JsonProperty("Команда(%STEAMID% заменится на ID пользователя)")]
-                    public String Command;
-                    [JsonProperty("Содержимое внутри предмета (Пример : Вода в бутылке) не корректируйте эти значения, если не знаете для чего они. Используйте встроенные команды")]
-                    public List<ItemContents> ContentsItem = new List<ItemContents>();
-                    internal class ItemContents
-                    {
-                        [JsonProperty("Тип : 0 - Патроны | 1 - Контент")]
-                        public TypeContent ContentType;
-                        [JsonProperty("Shortname предмета")]
-                        public String Shortname = "";
-                        [JsonProperty("Количество предметов")]
-                        public Int32 Amount = 0;
-                        [JsonProperty("Целостность предмета")]
-                        public Single Condition = 0;
-                    }
-
-                    internal class RandomingDrop
-                    {
-                        [JsonProperty("Использовать случайное выпадение предмета(Действует только на предметы)")]
-                        public Boolean UseRandomItems;
-                        [JsonProperty("Минимальное количество")]
-                        public Int32 MinAmount;
-                        [JsonProperty("Максимальное количество")]
-                        public Int32 MaxAmount;
-                    }
+                    public string Command;
                 }
             }
 
@@ -315,427 +209,29 @@ namespace Oxide.Plugins
                         {
                             CustomAvatar = "",
                             CustomPrefix = "",
-                        },
-                    },
-                    KitList = new Dictionary<String, Kits>
-                    {
-                        #region Start Kits
-                        ["start1"] = new Kits
-                        {
-                            TypeKit = TypeKits.Started,
-                            Amount = 0,
-                            CoolDown = 0,
-                            WipeOpened = 0,
-                            DisplayName = "Новичок",
-                            Permission = "iqkits.start1",
-                            RankUser = "",
-                            UseRaidBlock = false,
-                            PNG = "",
-                            Shortname = "",
-                            Sprite = "",
-                            ItemKits = new List<Kits.ItemsKit>
-                            {
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak103",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                },
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak104",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                },
-                            },
-                        },
-                        ["start2"] = new Kits
-                        {
-                            TypeKit = TypeKits.Started,
-                            Amount = 0,
-                            CoolDown = 0,
-                            WipeOpened = 0,
-                            DisplayName = "Новичок #2",
-                            Permission = "iqkits.start2",
-                            RankUser = "",
-                            UseRaidBlock = false,
-                            PNG = "",
-                            Shortname = "",
-                            Sprite = "",
-                            ItemKits = new List<Kits.ItemsKit>
-                            {
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak103",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                },
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak104",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                },
-                            },
-                        },
-                        ["start3Premium"] = new Kits
-                        {
-                            TypeKit = TypeKits.Started,
-                            Amount = 0,
-                            CoolDown = 0,
-                            WipeOpened = 0,
-                            DisplayName = "Премиум новичок",
-                            Permission = "iqkits.premium",
-                            RankUser = "",
-                            UseRaidBlock = false,
-                            PNG = "",
-                            Shortname = "",
-                            Sprite = "",
-                            ItemKits = new List<Kits.ItemsKit>
-                            {
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak103",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                },
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak104",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                },
-                            },
-                        },
-                        #endregion
-
-                        #region Kits
-                        ["hunter"] = new Kits
-                        {
-                            TypeKit = TypeKits.Cooldown,
-                            Amount = 0,
-                            CoolDown = 300,
-                            WipeOpened = 2,
-                            DisplayName = "Охотник",
-                            Permission = "iqkits.default",
-                            RankUser = "",
-                            UseRaidBlock = false,
-                            PNG = "",
-                            Shortname = "rifle.ak",
-                            Sprite = "",
-                            ItemKits = new List<Kits.ItemsKit>
-                            {
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak103",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                    ContentsItem = new List<Kits.ItemsKit.ItemContents> { }
-                                },
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak104",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                    ContentsItem = new List<Kits.ItemsKit.ItemContents> { }
-                                },
-                            },
-                        },
-                        ["med"] = new Kits
-                        {
-                            TypeKit = TypeKits.Amount,
-                            Amount = 10,
-                            CoolDown = 0,
-                            WipeOpened = 1,
-                            DisplayName = "Медик",
-                            Permission = "iqkits.default",
-                            RankUser = "",
-                            UseRaidBlock = false,
-                            PNG = "",
-                            Shortname = "",
-                            Sprite = "assets/icons/broadcast.png",
-                            ItemKits = new List<Kits.ItemsKit>
-                            {
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak103",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                    ContentsItem = new List<Kits.ItemsKit.ItemContents> { }
-                                },
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak104",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                    ContentsItem = new List<Kits.ItemsKit.ItemContents> { }
-                                },
-                            },
-                        },
-                        ["food"] = new Kits
-                        {
-                            TypeKit = TypeKits.AmountCooldown,
-                            Amount = 10,
-                            CoolDown = 300,
-                            DisplayName = "Еда",
-                            WipeOpened = 2,
-                            Permission = "iqkits.default",
-                            RankUser = "",
-                            UseRaidBlock = false,
-                            PNG = "https://i.imgur.com/rSWlSlN.png",
-                            Shortname = "",
-                            Sprite = "",
-                            ItemKits = new List<Kits.ItemsKit>
-                            {
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak103",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                    ContentsItem = new List<Kits.ItemsKit.ItemContents> { }
-                                },
-                                new Kits.ItemsKit
-                                {
-                                    ContainerItemType = ContainerItem.containerMain,
-                                    RandomDropSettings = new Kits.ItemsKit.RandomingDrop
-                                    {
-                                        UseRandomItems = false,
-                                        MinAmount = 1,
-                                        MaxAmount = 1
-                                    },
-                                    DisplayName = "Ak104",
-                                    Amount = 1,
-                                    Command = "",
-                                    PNG = "",
-                                    Shortname = "rifle.ak",
-                                    Rare = 0,
-                                    Sprite = "",
-                                    SkinID = 0,
-                                    ContentsItem = new List<Kits.ItemsKit.ItemContents> { }
-                                },
-                            },
-                        },
-                        #endregion
+                        }
                     },
                     GeneralSetting = new GeneralSettings
                     {
-                        AutoWipeClearKits = true,
-                        AutoKitSettings = new GeneralSettings.AutoKit
+                        UseStartedKitList = false,
+                       
+                        StartedKitList = new List<GeneralSettings.KitRandom>
                         {
-                            TypeAuto = TypeAutoKit.Single,
-                            StartKitKey = "start1",
-                            KitListRandom = new List<GeneralSettings.AutoKit.KitSettings>
+                            new GeneralSettings.KitRandom
                             {
-                                new GeneralSettings.AutoKit.KitSettings
-                                {
-                                    Permissions = "iqkits.vip",
-                                    StartKitKey = "start1"
-                                },
-                                new GeneralSettings.AutoKit.KitSettings
-                                {
-                                    Permissions = "iqkits.hunter",
-                                    StartKitKey = "food"
-                                },
+                                Permissions = "iqkits.default",
+                                StartKitKey = "start1"
                             },
-                            KitListPriority = new List<GeneralSettings.AutoKit.KitSettings>
+                            new GeneralSettings.KitRandom
                             {
-                                new GeneralSettings.AutoKit.KitSettings
-                                {
-                                    Permissions = "iqkits.vip",
-                                    StartKitKey = "start1"
-                                },
-                                new GeneralSettings.AutoKit.KitSettings
-                                {
-                                    Permissions = "iqkits.hunter",
-                                    StartKitKey = "food"
-                                },
+                                Permissions = "iqkits.vip",
+                                StartKitKey = "hunter"
                             },
-                            BiomeStartedKitList = new List<GeneralSettings.AutoKit.BiomeKits>
-                            {
-                                   new GeneralSettings.AutoKit.BiomeKits
-                                   {
-                                       biomeType = BiomeType.Arctic,
-                                       Kits = new GeneralSettings.AutoKit.KitSettings
-                                       {
-                                           Permissions = "iqkits.default",
-                                           StartKitKey = "start1"
-                                       }
-                                   },
-                                   new GeneralSettings.AutoKit.BiomeKits
-                                   {
-                                       biomeType = BiomeType.Arid,
-                                       Kits = new GeneralSettings.AutoKit.KitSettings
-                                       {
-                                           Permissions = "iqkits.default",
-                                           StartKitKey = "start1"
-                                       }
-                                   },
-                                   new GeneralSettings.AutoKit.BiomeKits
-                                   {
-                                       biomeType = BiomeType.None,
-                                       Kits = new GeneralSettings.AutoKit.KitSettings
-                                       {
-                                           Permissions = "iqkits.default",
-                                           StartKitKey = "start1"
-                                       }
-                                   },
-                                   new GeneralSettings.AutoKit.BiomeKits
-                                   {
-                                       biomeType = BiomeType.Temperate,
-                                       Kits = new GeneralSettings.AutoKit.KitSettings
-                                       {
-                                           Permissions = "iqkits.default",
-                                           StartKitKey = "start1"
-                                       }
-                                   },
-                                   new GeneralSettings.AutoKit.BiomeKits
-                                   {
-                                       biomeType = BiomeType.Tundra,
-                                       Kits = new GeneralSettings.AutoKit.KitSettings
-                                       {
-                                           Permissions = "iqkits.default",
-                                           StartKitKey = "start1"
-                                       }
-                                   },
-                            },                      
                         },
+                        StartKitKey = "start1",
                     },
                     InterfaceSetting = new InterfaceSettings
                     {
-                        CloseType = true,
-                        CloseUiTakeKit = false,
                         HEXBackground = "#0000006A",
                         HEXBlock = "#646361A6",
                         HEXAccesButton = "#708a47",
@@ -777,7 +273,7 @@ namespace Oxide.Plugins
 
         #region Data
         [JsonProperty("Дата с информацией о игроках")]
-        public Hash<ulong, DataKitsUser> DataKitsUserList = new Hash<ulong, DataKitsUser>();
+        public Dictionary<ulong, DataKitsUser> DataKitsUserList = new Dictionary<ulong, DataKitsUser>();
 
         public class DataKitsUser
         {
@@ -789,13 +285,7 @@ namespace Oxide.Plugins
                 public int Cooldown;
             }
         }  
-        private void ClearData()
-        {
-            if (!config.GeneralSetting.AutoWipeClearKits) return;
-            DataKitsUserList.Clear();
-            WriteData();
-        }
-        void ReadData() => DataKitsUserList = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<Hash<ulong, DataKitsUser>>("IQKits/KitsData");
+        void ReadData() => DataKitsUserList = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, DataKitsUser>>("IQKits/KitsData");
         void WriteData() => Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQKits/KitsData", DataKitsUserList);
         void RegisteredDataUser(BasePlayer player)
         {
@@ -805,8 +295,9 @@ namespace Oxide.Plugins
                     InfoKitsList = new Dictionary<string, DataKitsUser.InfoKits> { }
                 });
 
-            foreach (var Kit in config.KitList.Where(x => !DataKitsUserList[player.userID].InfoKitsList.ContainsKey(x.Key) && (String.IsNullOrWhiteSpace(x.Value.Permission) || permission.UserHasPermission(player.UserIDString, x.Value.Permission))))
+            foreach(var Kit in config.KitList.Where(x => !DataKitsUserList[player.userID].InfoKitsList.ContainsKey(x.Key)))
                 DataKitsUserList[player.userID].InfoKitsList.Add(Kit.Key, new DataKitsUser.InfoKits { Amount = Kit.Value.Amount, Cooldown = 0 });
+            
         }
 
         #endregion
@@ -843,7 +334,7 @@ namespace Oxide.Plugins
                 foreach (var img in Kit.Value.ItemKits.Where(i => !String.IsNullOrWhiteSpace(i.Shortname)))
                 {
                     if (!HasImage($"{img.Shortname}_128px"))
-                        AddImage($"https://api.skyplugins.ru/api/getimage/{img.Shortname}/128", $"{img.Shortname}_128px");
+                        AddImage($"http://rust.skyplugins.ru/getimage/{img.Shortname}/128", $"{img.Shortname}_128px");
                 }
             yield return new WaitForSeconds(0.04f);
             PrintError("AddImages SkyPlugins.ru - completed..");
@@ -874,17 +365,9 @@ namespace Oxide.Plugins
             var GeneralSettings = config.GeneralSetting;
             var KitList = config.KitList;
 
-            foreach(var PermissionGeneral in GeneralSettings.AutoKitSettings.KitListRandom)
+            foreach(var PermissionGeneral in GeneralSettings.StartedKitList)
                 if (!permission.PermissionExists(PermissionGeneral.Permissions, this))
                     permission.RegisterPermission(PermissionGeneral.Permissions, this);
-
-            foreach (var PermissionGeneral in GeneralSettings.AutoKitSettings.KitListPriority)
-                if (!permission.PermissionExists(PermissionGeneral.Permissions, this))
-                    permission.RegisterPermission(PermissionGeneral.Permissions, this);
-
-            foreach (var PermissionGeneral in GeneralSettings.AutoKitSettings.BiomeStartedKitList)
-                if (!permission.PermissionExists(PermissionGeneral.Kits.Permissions, this))
-                    permission.RegisterPermission(PermissionGeneral.Kits.Permissions, this);
 
             foreach (var PermissionKits in KitList)
                 if (!permission.PermissionExists(PermissionKits.Value.Permission, this))
@@ -896,42 +379,27 @@ namespace Oxide.Plugins
         void AutoKitGive(BasePlayer player)
         {
             if (player == null) return;
-            Configuration.GeneralSettings.AutoKit AutoKit = config.GeneralSetting.AutoKitSettings;
-            Dictionary<String, Configuration.Kits> KitList = config.KitList;
+            var GeneralSettings = config.GeneralSetting;
+            var KitList = config.KitList;
 
-            switch(AutoKit.TypeAuto)
+            if (GeneralSettings.UseStartedKitList)
             {
-                case TypeAutoKit.Single:
-                    {
-                        if (String.IsNullOrWhiteSpace(AutoKit.StartKitKey) || !KitList.ContainsKey(AutoKit.StartKitKey))
-                        {
-                            PrintWarning("У вас не верно указан стартовый ключ, такого набора не существует! Игрок не получил его автоматически");
-                            return;
-                        }
-                        ParseAndGive(player, AutoKit.StartKitKey);
-                        break;
-                    }
-                case TypeAutoKit.List:
-                    {
-                        Configuration.GeneralSettings.AutoKit.KitSettings RandomKit = AutoKit.KitListRandom.Where(k => permission.UserHasPermission(player.UserIDString, k.Permissions) && KitList.ContainsKey(k.StartKitKey) && WipeTime >= KitList[k.StartKitKey].WipeOpened).ToList().GetRandom();
-                        if (RandomKit == null) return;
-                        ParseAndGive(player, RandomKit.StartKitKey);
-                        break;
-                    }
-                case TypeAutoKit.PriorityList:
-                    {
-                        Configuration.GeneralSettings.AutoKit.KitSettings Kit = AutoKit.KitListPriority.FirstOrDefault(k => permission.UserHasPermission(player.UserIDString, k.Permissions) && KitList.ContainsKey(k.StartKitKey) && WipeTime >= KitList[k.StartKitKey].WipeOpened);
-                        if (Kit == null) return;
-                        ParseAndGive(player, Kit.StartKitKey);
-                        break;
-                    }
-                case TypeAutoKit.BiomeList:
-                    {
-                        Configuration.GeneralSettings.AutoKit.BiomeKits BiomeKit = AutoKit.BiomeStartedKitList.FirstOrDefault(k => GetBiome(player) == k.biomeType && permission.UserHasPermission(player.UserIDString, k.Kits.Permissions) && KitList.ContainsKey(k.Kits.StartKitKey) && WipeTime >= KitList[k.Kits.StartKitKey].WipeOpened);
-                        if (BiomeKit == null) return;
-                        ParseAndGive(player, BiomeKit.Kits.StartKitKey);
-                        break;
-                    }
+                List<Configuration.GeneralSettings.KitRandom> RandomingKit = new List<Configuration.GeneralSettings.KitRandom>();
+                foreach (var StartedKitList in GeneralSettings.StartedKitList.Where(k => permission.UserHasPermission(player.UserIDString, k.Permissions) && KitList.ContainsKey(k.StartKitKey) && WipeTime >= KitList[k.StartKitKey].WipeOpened))
+                    RandomingKit.Add(StartedKitList);
+                
+                var RandomKit = RandomingKit.GetRandom();
+                if (RandomKit == null) return;
+                ParseAndGive(player, RandomKit.StartKitKey);
+            }
+            else
+            {
+                if (!KitList.ContainsKey(GeneralSettings.StartKitKey))
+                {
+                    PrintWarning("У вас не верно указан стартовый ключ, такого набора не существует! Игрок не получил его автоматически");
+                    return;
+                }
+                ParseAndGive(player, GeneralSettings.StartKitKey);
             }
         }
         #endregion
@@ -979,15 +447,10 @@ namespace Oxide.Plugins
                     }
             }
             ParseAndGive(player, KitKey);
-            if (!config.InterfaceSetting.CloseUiTakeKit)
-            {
-                DestroyKits(player);
-                Interface_Loaded_Kits(player);
-                Interface_Alert_Kits(player, GetLang("UI_ALERT_ACCES_KIT", player.UserIDString, Kit.DisplayName));
-            }
-            else DestroyAll(player);
+            DestroyKits(player);
+            Interface_Loaded_Kits(player);
+            Interface_Alert_Kits(player, GetLang("UI_ALERT_ACCES_KIT", player.UserIDString, Kit.DisplayName));
         }
-
         void ParseAndGive(BasePlayer player, string KitKey)
         {
             var Kit = config.KitList[KitKey];
@@ -1004,35 +467,9 @@ namespace Oxide.Plugins
                     rust.RunServerCommand(Item.Command.Replace("%STEAMID%", player.UserIDString));
                 else
                 {
-                    Int32 Amount = Item.RandomDropSettings.UseRandomItems ? UnityEngine.Random.Range(Item.RandomDropSettings.MinAmount, Item.RandomDropSettings.MaxAmount) : (Item.Amount > 1 ? Item.Amount : 1);
-                    Item item = ItemManager.CreateByName(Item.Shortname, Amount, Item.SkinID);
+                    Item item = ItemManager.CreateByName(Item.Shortname, Item.Amount > 1 ? Item.Amount : 1, Item.SkinID);
                     if (!String.IsNullOrWhiteSpace(Item.DisplayName))
                         item.name = Item.DisplayName;
-
-                    foreach(var Content in Item.ContentsItem)
-                    {
-                        Item ItemContent = ItemManager.CreateByName(Content.Shortname, Content.Amount);
-                        ItemContent.condition = Content.Condition;
-                        switch(Content.ContentType)
-                        {
-                            case TypeContent.Contents:
-                                {
-                                    ItemContent.MoveToContainer(item.contents);
-                                    break;
-                                }
-                            case TypeContent.Ammo:
-                                {
-                                    BaseProjectile Weapon = item.GetHeldEntity() as BaseProjectile;
-                                    if (Weapon != null)
-                                    {
-                                        Weapon.primaryMagazine.contents = ItemContent.amount;
-                                        Weapon.primaryMagazine.ammoType = ItemManager.FindItemDefinition(Content.Shortname);
-                                    }
-                                    break;
-                                }
-                        }
-                    }
-
                     GiveItem(player, item, Item.ContainerItemType == ContainerItem.containerBelt ? player.inventory.containerBelt : Item.ContainerItemType == ContainerItem.containerWear ? player.inventory.containerWear : player.inventory.containerMain);
                 }
             }
@@ -1077,12 +514,9 @@ namespace Oxide.Plugins
                 Permission = "iqkits.setting",
                 PNG = "",
                 Shortname = "",
-                UseRaidBlock = false,
-                RankUser = "",
                 Sprite = "assets/icons/gear.png",
                 TypeKit = TypeKits.Cooldown,
-                ItemKits = GetPlayerItems(player),
-                WipeOpened = 0,
+                ItemKits = GetPlayerItems(player)
             });
 
             SaveConfig();
@@ -1131,43 +565,8 @@ namespace Oxide.Plugins
             ItemsKit.Sprite = "";
             ItemsKit.Command = "";
             ItemsKit.DisplayName = "";
-            ItemsKit.RandomDropSettings = new Configuration.Kits.ItemsKit.RandomingDrop
-            {
-                MinAmount = 0,
-                MaxAmount = 0,
-                UseRandomItems = false,
-            };
-            ItemsKit.ContentsItem = GetContentItem(item);
 
             return ItemsKit;
-        }
-
-        private List<Configuration.Kits.ItemsKit.ItemContents> GetContentItem(Item Item)
-        {
-            List<Configuration.Kits.ItemsKit.ItemContents> Contents = new List<Configuration.Kits.ItemsKit.ItemContents>();
-
-            if (Item.contents != null)
-                foreach (Item Content in Item.contents.itemList)
-                {
-                    Configuration.Kits.ItemsKit.ItemContents ContentItem = new Configuration.Kits.ItemsKit.ItemContents();
-                    ContentItem.ContentType = TypeContent.Contents;
-                    ContentItem.Shortname = Content.info.shortname;
-                    ContentItem.Amount = Content.amount;
-                    ContentItem.Condition = Content.condition;
-                    Contents.Add(ContentItem);
-                }
-            BaseProjectile Weapon = Item.GetHeldEntity() as BaseProjectile;
-            if (Weapon != null)
-            {
-                Configuration.Kits.ItemsKit.ItemContents ContentItem = new Configuration.Kits.ItemsKit.ItemContents();
-                ContentItem.ContentType = TypeContent.Ammo;
-                ContentItem.Shortname = Weapon.primaryMagazine.ammoType.shortname;
-                ContentItem.Amount = Weapon.primaryMagazine.contents == 0 ? 1 : Weapon.primaryMagazine.contents;
-                ContentItem.Condition = Weapon.primaryMagazine.ammoType.condition.max;
-                Contents.Add(ContentItem);
-            }
-
-            return Contents;
         }
         #endregion
 
@@ -1189,53 +588,33 @@ namespace Oxide.Plugins
 
         #endregion
 
-        #region Kit Edit
-        void KitEdit(BasePlayer player, String NameKit)
-        {
-            if (!player.IsAdmin) return;
-
-            if (!config.KitList.ContainsKey(NameKit))
-            {
-                SendChat(player, "Ключ данного набора не существует!");
-                return;
-            }
-
-            var Kit = config.KitList[NameKit];
-            Kit.ItemKits = GetPlayerItems(player);
-
-            SaveConfig();
-            SendChat(player, $"Предметы набора с ключем {NameKit} успешно изменены, настройки сохранены");
-        }
         #endregion
-
-        #endregion
-
         public bool IsRareDrop(int Rare) => UnityEngine.Random.Range(0, 100) >= (100 - (Rare > 100 ? 100 : Rare));
         #endregion
 
         #region Hooks
-        void OnNewSave(string filename) => ClearData();
         object OnPlayerRespawned(BasePlayer player)
         {
             player.inventory.Strip();
             AutoKitGive(player);
             return null;
         }
-        void Init() => ReadData();
         private void OnServerInitialized()
         {
             RegisteredPermissions();
+            ReadData();
             LoadedImage();
 
             foreach (BasePlayer p in BasePlayer.activePlayerList)
                 OnPlayerConnected(p);
+
+            WriteData();
         }
         void OnPlayerConnected(BasePlayer player)
         {
             CachingImage(player);
-            RegisteredDataUser(player);            
+            RegisteredDataUser(player);
         }
-        void OnPlayerDisconnected(BasePlayer player, string reason) => player.SetFlag(BaseEntity.Flags.Reserved3, false);
         void Unload()
         {
             foreach (BasePlayer player in BasePlayer.activePlayerList)
@@ -1243,7 +622,6 @@ namespace Oxide.Plugins
 
             ServerMgr.Instance.StopCoroutine(DownloadImages());
 
-            CheckKit();
             WriteData();
         }
         #endregion
@@ -1266,7 +644,6 @@ namespace Oxide.Plugins
                 case "add":
                 case "new":
                     {
-                        if (!player.IsAdmin) return;
                         string NameKit = arg[1];
                         if(string.IsNullOrWhiteSpace(NameKit))
                         {
@@ -1280,7 +657,6 @@ namespace Oxide.Plugins
                 case "delete":
                 case "revoke":
                     {
-                        if (!player.IsAdmin) return;
                         string NameKit = arg[1];
                         if (string.IsNullOrWhiteSpace(NameKit))
                         {
@@ -1288,133 +664,6 @@ namespace Oxide.Plugins
                             return;
                         }
                         KitRemove(player, NameKit);
-                        break;
-                    }
-                case "copy":
-                case "edit":
-                    {
-                        if (!player.IsAdmin) return;
-                        string NameKit = arg[1];
-                        if (string.IsNullOrWhiteSpace(NameKit))
-                        {
-                            SendChat(player, "Введите корректное название!");
-                            return;
-                        }
-                        KitEdit(player,NameKit);
-                        break;
-                    }
-                case "give":
-                    {
-                        if (!player.IsAdmin) return;
-                        String IDarName = arg[1];
-                        if(String.IsNullOrWhiteSpace(IDarName))
-                        {
-                            SendChat(player, "Введите корректное имя или ID");
-                            return;
-                        }
-                        BasePlayer TargetUser = BasePlayer.Find(IDarName);
-                        if(TargetUser == null)
-                        {
-                            SendChat(player, "Такого игрока нет на сервере");
-                            return;
-                        }
-                        String KitKey = arg[2];
-                        if(String.IsNullOrWhiteSpace(KitKey))
-                        {
-                            SendChat(player, "Введите корректный ключ набора");
-                            return;
-                        }
-                        if(!config.KitList.ContainsKey(KitKey))
-                        {
-                            SendChat(player, "Набора с данным ключем не существует");
-                            return;
-                        }
-                        ParseAndGive(TargetUser, KitKey);
-                        break;
-                    }
-            }
-        }
-        [ConsoleCommand("kit")]
-        void IQKITS_ConsoleCommand(ConsoleSystem.Arg arg)
-        {
-            BasePlayer player = arg.Player();
-            if (player != null || !player.IsAdmin)
-                if (arg.Args.Length < 2 || arg == null || arg == null)
-                {
-                    PagePlayers[player] = 0;
-                    Interface_IQ_Kits(player);
-                    return;
-                }
-
-            switch (arg.Args[0])
-            {
-                case "create":
-                case "createkit":
-                case "add":
-                case "new":
-                    {
-                        if (player == null || !player.IsAdmin) return;
-                        string NameKit = arg.Args[1];
-                        if (string.IsNullOrWhiteSpace(NameKit))
-                        {
-                            PrintToConsole(player, "Введите корректное название!");
-                            return;
-                        }
-                        CreateNewKit(player, NameKit);
-                        break;
-                    }
-                case "remove":
-                case "delete":
-                case "revoke":
-                    {
-                        if (player == null || !player.IsAdmin) return;
-                        string NameKit = arg.Args[1];
-                        if (string.IsNullOrWhiteSpace(NameKit))
-                        {
-                            PrintToConsole(player, "Введите корректное название!");
-                            return;
-                        }
-                        KitRemove(player, NameKit);
-                        break;
-                    }
-                case "give":
-                    {
-                        if (player != null && !player.IsAdmin) return;
-
-                        String IDarName = arg.Args[1];
-                        if (String.IsNullOrWhiteSpace(IDarName))
-                        {
-                            if (player != null)
-                                PrintToConsole(player, "Введите корректное имя или ID");
-                            PrintError("Введите корректное имя или ID");
-                            return;
-                        }
-                        BasePlayer TargetUser = BasePlayer.Find(IDarName);
-                        if (TargetUser == null)
-                        {
-                            if (player != null)
-                                PrintToConsole(player, "Такого игрока нет на сервере");
-                            PrintError("Такого игрока нет на сервере");
-                            return;
-                        }
-                        String KitKey = arg.Args[2];
-                        if (String.IsNullOrWhiteSpace(KitKey))
-                        {
-                            if (player != null)
-                                PrintToConsole(player, "Введите корректный ключ набора");
-                            PrintError("Введите корректный ключ набора");
-                            return;
-                        }
-                        if (!config.KitList.ContainsKey(KitKey))
-                        {
-                            if (player != null)
-                                PrintToConsole(player, "Набора с данным ключем не существует");
-                            PrintError("Набора с данным ключем не существует");
-                            return;
-                        }
-                        ParseAndGive(TargetUser, KitKey);
-                        if (player != null)
-                            PrintToConsole(player, "Успешно выдан набор");
                         break;
                     }
             }
@@ -1545,37 +794,24 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 FadeOut = FadeOut,
-                RectTransform = { AnchorMin = "0 0.9149", AnchorMax = "1 1" },
+                RectTransform = { AnchorMin = "0 0.915", AnchorMax = "1 1" },
                 Text = { FadeIn = FadeIn, Text = GetLang("UI_TITLE", player.UserIDString), Color = HexToRustFormat(Interface.HEXLabels), Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
             },  IQKITS_OVERLAY, "TITLE");
 
             container.Add(new CuiLabel
             {
                 FadeOut = FadeOut,
-                RectTransform = { AnchorMin = "0 0.9", AnchorMax = "1 0.94" },
+                RectTransform = { AnchorMin = "0 0.8925912", AnchorMax = "1 0.9351871" },
                 Text = { FadeIn = FadeIn, Text = GetLang("UI_DESCRIPTION", player.UserIDString), Color = HexToRustFormat(Interface.HEXLabels), Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
             }, IQKITS_OVERLAY, "DESCRIPTION");
 
-            if (Interface.CloseType)
+            container.Add(new CuiButton
             {
-                container.Add(new CuiButton
-                {
-                    FadeOut = FadeOut - 0.2f,
-                    RectTransform = { AnchorMin = "0.87 0.94", AnchorMax = "1 1" },
-                    Button = { FadeIn = FadeIn, Command = $"kit_ui_func close.ui", Color = "0 0 0 0" },
-                    Text = { FadeIn = FadeIn, Text = GetLang("UI_CLOSE_BTN", player.UserIDString), Color = HexToRustFormat(Interface.HEXLabels), Align = TextAnchor.MiddleCenter }
-                }, IQKITS_OVERLAY, "CLOSE_BTN");
-            }
-            else
-            {
-                container.Add(new CuiButton
-                {
-                    FadeOut = FadeOut - 0.2f,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { FadeIn = FadeIn, Command = $"kit_ui_func close.ui", Color = "0 0 0 0" },
-                    Text = { FadeIn = FadeIn, Text = "" }
-                }, IQKITS_OVERLAY, "CLOSE_BTN");
-            }
+                FadeOut = FadeOut - 0.2f,
+                RectTransform = { AnchorMin = "0.8718751568 0.9388889", AnchorMax = "1 1" },
+                Button = { FadeIn = FadeIn, Command = $"kit_ui_func close.ui", Color = "0 0 0 0" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CLOSE_BTN", player.UserIDString), Color = HexToRustFormat(Interface.HEXLabels), Align = TextAnchor.MiddleCenter }
+            }, IQKITS_OVERLAY, "CLOSE_BTN");
 
 
             CuiHelper.AddUi(player, container);
@@ -1586,32 +822,17 @@ namespace Oxide.Plugins
         #region LoadedKits
         void Interface_Loaded_Kits(BasePlayer player)
         {
-            RegisteredDataUser(player);
-            if (config.KitList.Where(k => ((k.Value.TypeKit != TypeKits.Started && WipeTime >= k.Value.WipeOpened) 
-                                      && (((k.Value.TypeKit == TypeKits.Amount || k.Value.TypeKit == TypeKits.AmountCooldown) && (DataKitsUserList[player.userID].InfoKitsList.ContainsKey(k.Key) && DataKitsUserList[player.userID].InfoKitsList[k.Key].Amount > 0)) || k.Value.TypeKit == TypeKits.Cooldown)
-                                      && (String.IsNullOrWhiteSpace(k.Value.Permission) || permission.UserHasPermission(player.UserIDString, k.Value.Permission))
-                                      && !IsRaidBlocked(player, k.Value.UseRaidBlock)
-                                      && IsRank(player.userID, k.Value.RankUser)
-                                      )).Skip(4 * PagePlayers[player]).Take(4).Count() == 0) return;
+            if(!DataKitsUserList.ContainsKey(player.userID))
+                RegisteredDataUser(player);
 
             CuiElementContainer container = new CuiElementContainer();
             var Interface = config.InterfaceSetting;
             float FadeIn = Interface.InterfaceFadeIn;
             float FadeOut = Interface.InterfaceFadeOut;
-            int CountKitPage = config.KitList.Where(k => ((k.Value.TypeKit != TypeKits.Started && WipeTime >= k.Value.WipeOpened) 
-                                                     && (((k.Value.TypeKit == TypeKits.Amount || k.Value.TypeKit == TypeKits.AmountCooldown) && (DataKitsUserList[player.userID].InfoKitsList.ContainsKey(k.Key) && DataKitsUserList[player.userID].InfoKitsList[k.Key].Amount > 0)) || k.Value.TypeKit == TypeKits.Cooldown)
-                                                     && (String.IsNullOrWhiteSpace(k.Value.Permission) || permission.UserHasPermission(player.UserIDString, k.Value.Permission))
-                                                     && !IsRaidBlocked(player, k.Value.UseRaidBlock)
-                                                     && IsRank(player.userID, k.Value.RankUser)
-                                                     )).Skip(4 * (PagePlayers[player] + 1)).Take(4).Count();
+            int CountKitPage = config.KitList.Where(k => (k.Value.TypeKit != TypeKits.Started && WipeTime >= k.Value.WipeOpened) && (((k.Value.TypeKit == TypeKits.Amount || k.Value.TypeKit == TypeKits.AmountCooldown) && DataKitsUserList[player.userID].InfoKitsList[k.Key].Amount > 0) || k.Value.TypeKit == TypeKits.Cooldown && permission.UserHasPermission(player.UserIDString, k.Value.Permission))).Skip(4 * (PagePlayers[player] + 1)).Take(4).Count();
 
             int x = 0, y = 0, i = 0;
-            foreach (var Kit in config.KitList.Where(k => ((k.Value.TypeKit != TypeKits.Started && WipeTime >= k.Value.WipeOpened) 
-                                                      && (((k.Value.TypeKit == TypeKits.Amount || k.Value.TypeKit == TypeKits.AmountCooldown) && (DataKitsUserList[player.userID].InfoKitsList.ContainsKey(k.Key) && DataKitsUserList[player.userID].InfoKitsList[k.Key].Amount > 0)) || k.Value.TypeKit == TypeKits.Cooldown) 
-                                                      && (String.IsNullOrWhiteSpace(k.Value.Permission) || permission.UserHasPermission(player.UserIDString, k.Value.Permission))
-                                                      && !IsRaidBlocked(player, k.Value.UseRaidBlock) 
-                                                      && IsRank(player.userID, k.Value.RankUser)
-                                                      )).Skip(4 * PagePlayers[player]).Take(4))
+            foreach (var Kit in config.KitList.Where(k => (k.Value.TypeKit != TypeKits.Started && WipeTime >= k.Value.WipeOpened) && (((k.Value.TypeKit == TypeKits.Amount || k.Value.TypeKit == TypeKits.AmountCooldown) && DataKitsUserList[player.userID].InfoKitsList[k.Key].Amount > 0) || k.Value.TypeKit == TypeKits.Cooldown && permission.UserHasPermission(player.UserIDString, k.Value.Permission))).Skip(4 * PagePlayers[player]).Take(4))
             {
                 var Data = DataKitsUserList[player.userID].InfoKitsList[Kit.Key];
 
@@ -1619,7 +840,7 @@ namespace Oxide.Plugins
                 {
                     FadeOut = FadeOut,
                     CursorEnabled = true,
-                    RectTransform = { AnchorMin = $"{0.08 + (x * 0.52)} {0.5839 - (y * 0.3419)}", AnchorMax = $"{0.39159 + (x * 0.52)} {0.82 - (y * 0.3419)}" },
+                    RectTransform = { AnchorMin = $"{0.08385417 + (x * 0.52)} {0.5842593 - (y * 0.342)}", AnchorMax = $"{0.3916667 + (x * 0.52)} {0.8231534 - (y * 0.342)}" },
                     Image = { FadeIn = FadeIn, Color = "0 0 0 0" }
                 }, IQKITS_OVERLAY, $"KIT_PANEL_{i}");
 
@@ -1628,7 +849,7 @@ namespace Oxide.Plugins
                 {
                     FadeOut = FadeOut,
                     CursorEnabled = true,
-                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"0.4359 1" }, 
+                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"0.43654821568 1" },
                     Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HEXBlock) }
                 }, $"KIT_PANEL_{i}", $"AVATAR_PANEL_{i}");
 
@@ -1643,7 +864,7 @@ namespace Oxide.Plugins
                         Components =
                     {
                         ComponentAvatar,
-                        new CuiRectTransformComponent{ AnchorMin = "0.077 0.073", AnchorMax = $"0.92 0.91"},
+                        new CuiRectTransformComponent{ AnchorMin = "0.0775194 0.07364181", AnchorMax = $"0.9224806 0.9185845"},
                     }
                     });
                 }
@@ -1657,7 +878,7 @@ namespace Oxide.Plugins
                         Components =
                     {
                         new CuiImageComponent { FadeIn = FadeIn, Sprite = Kit.Value.Sprite },
-                        new CuiRectTransformComponent{ AnchorMin = "0.077 0.073", AnchorMax = $"0.92 0.91"},
+                        new CuiRectTransformComponent{ AnchorMin = "0.0775194 0.07364181", AnchorMax = $"0.9224806 0.9185845"},
                     }
                     });
                 }
@@ -1669,14 +890,14 @@ namespace Oxide.Plugins
                 {
                     FadeOut = FadeOut,
                     CursorEnabled = true,
-                    RectTransform = { AnchorMin = $"0.46 0.64", AnchorMax = $"1 1" },
+                    RectTransform = { AnchorMin = $"0.4602368 0.6472726", AnchorMax = $"1 1" },
                     Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HEXBlock) }
                 }, $"KIT_PANEL_{i}", $"DISPLAY_NAME_PANEL_{i}");
 
                 container.Add(new CuiLabel
                 {
                     FadeOut = FadeOut,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "0.9649 0.945" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "0.965517 0.9449963" },
                     Text = { FadeIn = FadeIn, Text = GetLang("UI_DISPLAY_NAME_KIT", player.UserIDString, Kit.Value.DisplayName.ToUpper()), Color = HexToRustFormat(Interface.HEXLabels), Font = "robotocondensed-bold.ttf", Align = TextAnchor.UpperRight }
 
                 }, $"DISPLAY_NAME_PANEL_{i}", $"TITLE_KIT_{i}");
@@ -1687,7 +908,7 @@ namespace Oxide.Plugins
                 {
                     FadeOut = FadeOut,
                     CursorEnabled = true,
-                    RectTransform = { AnchorMin = $"0.46 0.25", AnchorMax = $"1 0.6" },
+                    RectTransform = { AnchorMin = $"0.4602368 0.2519316", AnchorMax = $"1 0.6046609" },
                     Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HEXBlock) }
                 }, $"KIT_PANEL_{i}", $"COOLDOWN_PANEL_{i}");
 
@@ -1704,7 +925,7 @@ namespace Oxide.Plugins
                 container.Add(new CuiLabel
                 {
                     FadeOut = FadeOut,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "0.96 0.94" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "0.965517 0.9449963" },
                     Text = { FadeIn = FadeIn, Text = InfoAmountAndCooldown, Color = HexToRustFormat(Interface.HEXLabels), Font = "robotocondensed-bold.ttf", Align = TextAnchor.UpperRight }
                 }, $"COOLDOWN_PANEL_{i}", $"COOLDOWN_TITLE{i}");
                 #endregion
@@ -1714,7 +935,7 @@ namespace Oxide.Plugins
                 container.Add(new CuiButton
                 {
                     FadeOut = FadeOut - 0.2f,
-                    RectTransform = { AnchorMin = "0.46 0", AnchorMax = "0.72 0.21" },  //
+                    RectTransform = { AnchorMin = "0.4653131568 0", AnchorMax = "0.7258883 0.2170733" },
                     Button = { FadeIn = FadeIn, Command = $"kit_ui_func information {Kit.Key}", Color = HexToRustFormat(Interface.HEXInfoItemButton), },
                     Text = { FadeIn = FadeIn, Text = GetLang("UI_BTN_WHAT_INFO", player.UserIDString), Color = HexToRustFormat(Interface.HEXLabelsInfoItemButton), Align = TextAnchor.MiddleCenter }
                 }, $"KIT_PANEL_{i}", $"WHAT_INFO_{i}");
@@ -1726,7 +947,7 @@ namespace Oxide.Plugins
                 container.Add(new CuiButton
                 {
                     FadeOut = FadeOut - 0.2f,
-                    RectTransform = { AnchorMin = "0.73 0", AnchorMax = "1 0.21" },
+                    RectTransform = { AnchorMin = "0.7394261 0", AnchorMax = "1 0.2170733" },
                     Button = { FadeIn = FadeIn, Command = CommandButtonTake, Color = HexToRustFormat(HexButtonTake) },
                     Text = { FadeIn = FadeIn, Text = KeyLangTake, Color = HexToRustFormat(HexButtonLabelTake), Align = TextAnchor.MiddleCenter }
                 }, $"KIT_PANEL_{i}", $"TAKE_KIT_{i}");
@@ -1748,17 +969,17 @@ namespace Oxide.Plugins
                 container.Add(new CuiButton
                 {
                     FadeOut = FadeOut - 0.2f,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "0.10 0.054" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "0.1015625 0.05462963" },
                     Button = { FadeIn = FadeIn, Command = "kit_ui_func back.page", Color = "0 0 0 0" },
                     Text = { FadeIn = FadeIn, Text = GetLang("UI_BACK_BTN", player.UserIDString), Color = HexToRustFormat(Interface.HEXLabels), Align = TextAnchor.MiddleCenter }
-                }, IQKITS_OVERLAY, $"BTN_BACK_BUTTON");
+                },  IQKITS_OVERLAY, $"BTN_BACK_BUTTON");
             }
-            if (CountKitPage != 0)
+            if(CountKitPage != 0)
             {
                 container.Add(new CuiButton
                 {
                     FadeOut = FadeOut - 0.2f,
-                    RectTransform = { AnchorMin = "0.89 0", AnchorMax = "1 0.054" },
+                    RectTransform = { AnchorMin = "0.89895 0", AnchorMax = "1 0.05462963" },
                     Button = { FadeIn = FadeIn, Command = $"kit_ui_func next.page", Color = "0 0 0 0" },
                     Text = { FadeIn = FadeIn, Text = GetLang("UI_NEXT_BTN", player.UserIDString), Color = HexToRustFormat(Interface.HEXLabels), Align = TextAnchor.MiddleCenter }
                 }, IQKITS_OVERLAY, $"BTN_NEXT_BUTTON");
@@ -1776,12 +997,7 @@ namespace Oxide.Plugins
             while (player.HasFlag(BaseEntity.Flags.Reserved3))
             {
                 int i = 0;
-                foreach (var Kit in config.KitList.Where(k => ((k.Value.TypeKit != TypeKits.Started && WipeTime >= k.Value.WipeOpened) 
-                                                          && (((k.Value.TypeKit == TypeKits.Amount || k.Value.TypeKit == TypeKits.AmountCooldown) && (DataKitsUserList[player.userID].InfoKitsList.ContainsKey(k.Key) && DataKitsUserList[player.userID].InfoKitsList[k.Key].Amount > 0)) || k.Value.TypeKit == TypeKits.Cooldown)
-                                                          && permission.UserHasPermission(player.UserIDString, k.Value.Permission)
-                                                          && !IsRaidBlocked(player, k.Value.UseRaidBlock)
-                                                          && IsRank(player.userID, k.Value.RankUser)
-                                                          )).Skip(4 * PagePlayers[player]).Take(4))
+                foreach (var Kit in config.KitList.Where(k => k.Value.TypeKit != TypeKits.Started && (((k.Value.TypeKit == TypeKits.Amount || k.Value.TypeKit == TypeKits.AmountCooldown) && DataKitsUserList[player.userID].InfoKitsList[k.Key].Amount > 0) || k.Value.TypeKit == TypeKits.Cooldown && permission.UserHasPermission(player.UserIDString, k.Value.Permission))).Skip(4 * PagePlayers[player]).Take(4))
                 {
                     CuiElementContainer container = new CuiElementContainer();
 
@@ -1801,7 +1017,7 @@ namespace Oxide.Plugins
                     string InfoAmountAndCooldown = Data.Cooldown >= CurrentTime() ? GetLang("UI_COOLDONW_KIT", player.UserIDString, FormatTime(TimeSpan.FromSeconds(Data.Cooldown - CurrentTime()))) : Data.Amount != 0 ? GetLang("UI_AMOUNT_KIT", player.UserIDString, Data.Amount) : GetLang("UI_COOLDONW_KIT_NO", player.UserIDString);
                     container.Add(new CuiLabel
                     {
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "0.96 0.94" },
+                        RectTransform = { AnchorMin = "0 0", AnchorMax = "0.965517 0.9449963" },
                         Text = { Text = InfoAmountAndCooldown, Color = HexToRustFormat(Interface.HEXLabels), Font = "robotocondensed-bold.ttf", Align = TextAnchor.UpperRight }
                     }, $"COOLDOWN_PANEL_{i}", $"COOLDOWN_TITLE{i}");
 
@@ -1830,14 +1046,14 @@ namespace Oxide.Plugins
                 Components =
                     {
                         new CuiRawImageComponent { FadeIn = FadeIn, Png = GetImage($"INFO_BACKGROUND_{Interface.PNGInfoPanel}"),Color = HexToRustFormat(Interface.HEXBlock) },
-                        new CuiRectTransformComponent{ AnchorMin = "0.40 0.24", AnchorMax = $"0.59 0.8249"},
+                        new CuiRectTransformComponent{ AnchorMin = "0.4005208 0.2416667", AnchorMax = $"0.5958334 0.825"},
                     }
             });
 
             container.Add(new CuiButton
             {
                 FadeOut = FadeOut - 0.2f,
-                RectTransform = { AnchorMin = "0.029 0.012689", AnchorMax = "0.97 0.11" },
+                RectTransform = { AnchorMin = "0.02933349 0.01269239", AnchorMax = "0.9706663 0.1111111" },
                 Button = { FadeIn = FadeIn, Command = $"kit_ui_func hide.info", Color = HexToRustFormat(Interface.HEXInfoItemButton) },
                 Text = { FadeIn = FadeIn, Text = GetLang("UI_HIDE_BTN", player.UserIDString), Color = HexToRustFormat(Interface.HEXLabelsInfoItemButton), Align = TextAnchor.MiddleCenter }
             }, $"INFO_BACKGROUND", $"HIDE_INFO_BTN");
@@ -1845,7 +1061,7 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 FadeOut = FadeOut,
-                RectTransform = { AnchorMin = "0.39 0.14", AnchorMax = "0.6 0.2" },
+                RectTransform = { AnchorMin = "0.3916669 0.1444444", AnchorMax = "0.60625 0.237037" },
                 Text = { FadeIn = FadeIn, Text = GetLang("UI_WHAT_INFO_TITLE", player.UserIDString, Kit.DisplayName.ToUpper()), Color = HexToRustFormat(Interface.HEXLabels), Font = "robotocondensed-bold.ttf", Align = TextAnchor.UpperCenter }
             }, IQKITS_OVERLAY, $"TITLE_KIT_INFO");
 
@@ -1936,7 +1152,7 @@ namespace Oxide.Plugins
                 container.Add(new CuiLabel
                 {
                     FadeOut = FadeOut,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "0.93 0.268" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "0.930693 0.2688163" },
                     Text = { FadeIn = FadeIn, Text = $"x{Item.Amount}", FontSize = 10, Color = HexToRustFormat(Interface.HEXLabels), Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleRight }
                 }, $"KIT_ITEM_{i}", $"KIT_ITEM_AMOUNT_{i}");
 
@@ -1979,7 +1195,7 @@ namespace Oxide.Plugins
                 Components =
                     {
                         new CuiRawImageComponent { FadeIn = FadeIn, Png = GetImage(AlertBackground), Color = HexToRustFormat(Interface.HEXBlock) },
-                        new CuiRectTransformComponent{ AnchorMin = "0.32 0.01", AnchorMax = $"0.69 0.11"},
+                        new CuiRectTransformComponent{ AnchorMin = "0.3213542 0.01018518", AnchorMax = $"0.6958333 0.1101852"},
                     }
             });
 
@@ -2067,32 +1283,6 @@ namespace Oxide.Plugins
         #endregion
 
         #region Util
-        void CheckKit()
-        {
-            foreach (var Data in DataKitsUserList)
-            {
-                UInt64 PlayerID = Data.Key;
-
-                foreach (var kitList in config.KitList.Where(k => DataKitsUserList[PlayerID].InfoKitsList.ContainsKey(k.Key)))
-                {
-                    String KitKey = kitList.Key;
-                    var DataPlayer = Data.Value.InfoKitsList[KitKey];
-
-                    if (!permission.UserHasPermission(PlayerID.ToString(), kitList.Value.Permission))
-                        DataKitsUserList[PlayerID].InfoKitsList.Remove(KitKey);
-                }
-            }
-        }
-
-        BiomeType GetBiome(BasePlayer player)
-        {
-            if (TerrainMeta.BiomeMap.GetBiome(player.transform.position, 1) > 0.5) return BiomeType.Arid;
-            if (TerrainMeta.BiomeMap.GetBiome(player.transform.position, 2) > 0.5) return BiomeType.Temperate;
-            if (TerrainMeta.BiomeMap.GetBiome(player.transform.position, 4) > 0.5) return BiomeType.Tundra;
-            if (TerrainMeta.BiomeMap.GetBiome(player.transform.position, 8) > 0.5) return BiomeType.Arctic;
-            return BiomeType.None;
-        }
-
         static DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0);
         static double CurrentTime() => DateTime.UtcNow.Subtract(epoch).TotalSeconds;
         public static string FormatTime(TimeSpan time)
@@ -2124,154 +1314,6 @@ namespace Oxide.Plugins
 
             return $"{units} {form3}";
         }
-        #endregion
-
-        #region API
-
-        #region API_KITS
-
-        String API_KIT_GET_AUTO_KIT() => config.GeneralSetting.AutoKitSettings.StartKitKey;
-
-        List<String> API_KIT_GET_AUTO_KIT_LIST()
-        {
-            List<String> KitList = new List<string>();
-            for(int i = 0; i < config.GeneralSetting.AutoKitSettings.KitListRandom.Count; i++)
-                KitList.Add(config.GeneralSetting.AutoKitSettings.KitListRandom[i].StartKitKey);
-            return KitList;
-        }
-
-        List<String> API_KIT_GET_ALL_KIT_LIST()
-        {
-            List<String> KitList = new List<string>();
-            foreach (var Kit in config.KitList)
-                KitList.Add(Kit.Key);
-
-            return KitList;
-        }
-
-        internal class ShortInfoKit
-        {
-            public String Shortname;
-            public Int32 Amount;
-            public UInt64 SkinID;
-        }
-
-        String API_KIT_GET_ITEMS(String KitKey)
-        {
-            Configuration.Kits Kit = config.KitList[KitKey];
-            if(Kit == null) return String.Empty;
-            List<ShortInfoKit> ShortKitList = new List<ShortInfoKit>();
-
-            foreach(Configuration.Kits.ItemsKit KitItems in Kit.ItemKits.Where(x => !String.IsNullOrWhiteSpace(x.Shortname)))
-                ShortKitList.Add(new ShortInfoKit { Shortname = KitItems.Shortname, Amount = KitItems.Amount, SkinID = KitItems.SkinID });
-
-            return JsonConvert.SerializeObject(ShortKitList);
-        }
-        String API_KIT_GET_NAME(String KitKey)
-        {
-            if (String.IsNullOrWhiteSpace(KitKey)) return "NONE";
-            if (!config.KitList.ContainsKey(KitKey)) return "NONE";
-            return config.KitList[KitKey].DisplayName;
-        }
-
-        Boolean API_IS_KIT(String KitKey)
-        {
-            if (String.IsNullOrWhiteSpace(KitKey)) return false;
-            return (Boolean)config.KitList.ContainsKey(KitKey);
-        }
-
-        Int32 API_KIT_GET_MAX_AMOUNT(String KitKey)
-        {
-            if (String.IsNullOrWhiteSpace(KitKey)) return 0;
-            if (!config.KitList.ContainsKey(KitKey))
-            {
-                PrintError($"API_KIT_GET_MAX_AMOUNT : Ключа {KitKey} не существует!");
-                return 0;
-            }
-            return config.KitList[KitKey].Amount;
-        }
-
-        Int32 API_KIT_GET_MAX_COOLDOWN(String KitKey)
-        {
-            if (String.IsNullOrWhiteSpace(KitKey)) return 0;
-            if (!config.KitList.ContainsKey(KitKey))
-            {
-                PrintError($"API_KIT_GET_MAX_COOLDOWN : Ключа {KitKey} не существует!");
-                return 0;
-            }
-            return config.KitList[KitKey].CoolDown;
-        }
-
-        #endregion
-
-        #region PLAYERS_API
-
-        void API_KIT_GIVE(BasePlayer player, String KitKey)
-        {
-            if (player == null) return;
-            if (!config.KitList.ContainsKey(KitKey))
-            {
-                PrintError($"Ключа {KitKey} не существует, набор не выдан!");
-                return;
-            }
-            ParseAndGive(player, KitKey);
-        }
-
-        Boolean API_IS_KIT_PLAYER(BasePlayer player, String KitKey)
-        {
-            if (player == null) return false;
-            if (String.IsNullOrWhiteSpace(KitKey)) return false;
-            if (!DataKitsUserList.ContainsKey(player.userID)) return false;
-            if (!config.KitList.ContainsKey(KitKey)) return false;
-            return DataKitsUserList[player.userID].InfoKitsList.ContainsKey(KitKey);
-        }
-
-        Int32 API_KIT_PLAYER_GET_COOLDOWN(BasePlayer player, String KitKey)
-        {
-            if (player == null) return 0;
-            if (String.IsNullOrWhiteSpace(KitKey)) return 0;
-            if (!DataKitsUserList.ContainsKey(player.userID))
-            {
-                PrintError($"API_KIT_PLAYER_GET_COOLDOWN : Такого игрока не существует в дата-файле");
-                return 0;
-            }
-            if (!config.KitList.ContainsKey(KitKey))
-            {
-                PrintError($"API_KIT_PLAYER_GET_COOLDOWN : Ключа {KitKey} не существует");
-                return 0;
-            }
-            if(!DataKitsUserList[player.userID].InfoKitsList.ContainsKey(KitKey))
-            {
-                PrintError($"API_KIT_PLAYER_GET_COOLDOWN : У игрока нет данного набора {KitKey}");
-                return 0;
-            }
-            return DataKitsUserList[player.userID].InfoKitsList[KitKey].Cooldown;
-        }
-
-        Int32 API_KIT_PLAYER_GET_AMOUNT(BasePlayer player, String KitKey)
-        {
-            if (player == null) return 0;
-            if (String.IsNullOrWhiteSpace(KitKey)) return 0;
-            if (!DataKitsUserList.ContainsKey(player.userID))
-            {
-                PrintError($"API_KIT_PLAYER_GET_AMOUNT : Такого игрока не существует в дата-файле");
-                return 0;
-            }
-            if (!config.KitList.ContainsKey(KitKey))
-            {
-                PrintError($"API_KIT_PLAYER_GET_AMOUNT : Ключа {KitKey} не существует");
-                return 0;
-            }
-            if (!DataKitsUserList[player.userID].InfoKitsList.ContainsKey(KitKey))
-            {
-                PrintError($"API_KIT_PLAYER_GET_AMOUNT : У игрока нет данного набора {KitKey}");
-                return 0;
-            }
-            return DataKitsUserList[player.userID].InfoKitsList[KitKey].Amount;
-        }
-
-        #endregion
-
         #endregion
     }
 }

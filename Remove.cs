@@ -11,7 +11,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Remove", "Ryamkk", "1.2.42")]
+    [Info("Remove", "Ryamkk", "1.2.43")]
     class Remove : RustPlugin
     {
 		[PluginReference]
@@ -172,7 +172,7 @@ namespace Oxide.Plugins
 		
 		private Dictionary<BasePlayer, DateTime> Cooldowns = new Dictionary<BasePlayer, DateTime>();
         private double Cooldown = 30f;
-        private void OnPlayerActiveItemChanged(BasePlayer player, Item newItem)
+        private void OnActiveItemChanged(BasePlayer player, Item newItem)
         {
             Item activeItem = player.GetActiveItem();
             if (activeItem == null || activeItem.info.shortname != "building.planner")

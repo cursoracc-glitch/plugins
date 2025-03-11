@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RustShop", "topplugin.ru", "1.0.4")]
+    [Info("RustShop", "OxideBro", "1.0.3")]
     public class RustShop : RustPlugin
     {
         [PluginReference]
@@ -42,7 +42,7 @@ namespace Oxide.Plugins
             public int Price;
             [JsonProperty("Количество предмета")]
             public int Amount;
-            [JsonProperty("Система. id предмета")]
+            [JsonProperty("Система. Короткое название предмета")]
             public string ShortName;
         }
 
@@ -168,7 +168,7 @@ namespace Oxide.Plugins
             }
             foreach (var check in BasePlayer.activePlayerList)
             {
-                OnPlayerConnected(check);
+                OnPlayerInit(check);
             }
             foreach (var check in shopElements)
             {
@@ -218,7 +218,7 @@ namespace Oxide.Plugins
                     ChangeBalance(player, "add", HourAmount);
                     data.PlayerBalance[player.userID].Time = data.PlayerBalance[player.userID].Time = 3600;
                     SaveData();
-                    SendReply(player, $"Вам начислено {HourAmount} рублей на игровой баланс магазина за активную игру на сервере\nЧто бы открыть магазин, используйте /shop");
+                    SendReply(player, $"Вам насчитано {HourAmount} рублей на игровой баланс магазина за активную игру на сервере\nЧто бы открыть магазин, используйте /shop");
                     timers.Add(player, data.PlayerBalance[player.userID].Time);
                 }
             }
@@ -243,11 +243,11 @@ namespace Oxide.Plugins
             return $"{units} {form3}";
         }
 
-        void OnPlayerConnected(BasePlayer player)
+        void OnPlayerInit(BasePlayer player)
         {
             if (player.HasPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot))
             {
-                timer.In(1f, () => OnPlayerConnected(player));
+                timer.In(1f, () => OnPlayerInit(player));
                 return;
             }
             if (!data.PlayerBalance.ContainsKey(player.userID))
@@ -388,7 +388,7 @@ namespace Oxide.Plugins
         #endregion
 
         #region Commands
-        [ConsoleCommand("balance")]
+        [ConsoleCommand("shop_changebalance")]
         void cmdChangeBalance(ConsoleSystem.Arg args)
         {
             var player = args.Player();
@@ -396,7 +396,7 @@ namespace Oxide.Plugins
                 if (!player.IsAdmin) return;
             if (args == null || args.Args.Length != 3 && args.Args[1] != "balance")
             {
-                Puts("Вы не верно ввели команду, используйте: balance Name/SteamID add/remove Count");
+                Puts("Вы не верно ввели команду, используйте: shop_changebalance Name/SteamID add/remove Count");
                 return;
             }
             var findPlayer = (BasePlayer.Find(args.Args[0]) ?? BasePlayer.FindSleeping(args.Args[0]));
@@ -744,7 +744,7 @@ namespace Oxide.Plugins
 
             if (player != null)
             {
-                SendReply(player, $"У Вас списано {Amount} рублей с игрового баланса");
+                SendReply(player, $"У Вас снято {Amount} рублей с игрового баланса");
             }
             return true;
         }
@@ -763,7 +763,6 @@ namespace Oxide.Plugins
         #endregion
 
         #region Permissions
-
         public static class PermissionService
         {
             public static Permission permission = Interface.GetMod().GetLibrary<Permission>();
@@ -794,18 +793,16 @@ namespace Oxide.Plugins
         #endregion
 
         #region Messages
-
         Dictionary<string, string> Messages = new Dictionary<string, string>()
         {
-            {"TITLE", "ИГРОВОЙ МАГАЗИН topplugin.ru" },
+            {"TITLE", "ИГРОВОЙ МАГАЗИН RUSTPLUGIN.RU" },
             {"ERROR", "Администрация допустила ошибку! Предмет не был куплен!" },
             {"BUY", "Вы успешно приобрели предмет: {0} [{1}x]" },
             {"FULLINV", "У вас недостаточно места в инвентаре, освободите место!" },
             {"NOMONEY", "У вас недостаточно бонусов на балансе!" },
-            {"MONEYADD", "Вам начислено {0} рублей на внутриигровой баланс магазина\nПроверка и использование баланса /shop" },
-            {"MONEYREMOVE", "C Вашего баланса внутриигрового магазина списано {0} рублей" }
+            {"MONEYADD", "Вам насчитано {0} рублей на внутриигровой баланс магазина\nПроверка и использование баланса /shop" },
+            {"MONEYREMOVE", "C Вашего баланса внутриигрового магазина снято {0} рублей" }
         };
         #endregion
     }
 }
-                                             

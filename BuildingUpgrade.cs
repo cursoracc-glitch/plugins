@@ -1,4 +1,4 @@
-using Oxide.Core;
+﻿using Oxide.Core;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using System;
@@ -112,7 +112,6 @@ namespace Oxide.Plugins
         private bool useNoEscape = true;
 
         private bool InfoNotice = true;
-      //  Слив плагинов server-rust by Apolo YouGame
         private int NoticeSize = 18;
         private int NoticeTime = 5;
 		private string NoticeFont = "robotocondensed-regular.ttf";
@@ -145,7 +144,6 @@ namespace Oxide.Plugins
 			CanUpgradeDamaged = GetConfig(true, "Основные настройки", "Разрешить улучшать повреждённые постройки?");
 			
 			InfoNotice = GetConfig(true, "Настройки GUI Оповещения", "Включить GUI оповещение при использование плана постройки");
-      //  Слив плагинов server-rust by Apolo YouGame
 			NoticeSize = GetConfig(18, "Настройки GUI Оповещения", "Размер текста GUI оповещения");
 			NoticeTime = GetConfig(5, "Настройки GUI Оповещения", "Время показа оповещения");
 			NoticeFont = GetConfig("robotocondensed-regular.ttf", "Настройки GUI Оповещения", "Названия шрифта");
@@ -321,9 +319,7 @@ namespace Oxide.Plugins
                 if (!grades.ContainsKey(player))
                 {
                     CuiHelper.DestroyUi(player, "InfoNotice");
-      //  Слив плагинов server-rust by Apolo YouGame
                     ShowRepairInfo(player);
-      //  Слив плагинов server-rust by Apolo YouGame
                 }
             }
         }
@@ -380,15 +376,12 @@ namespace Oxide.Plugins
         }
 
         void ShowRepairInfo(BasePlayer player)
-      //  Слив плагинов server-rust by Apolo YouGame
         {
             if (!InfoNotice) return;
-      //  Слив плагинов server-rust by Apolo YouGame
             var container = new CuiElementContainer();
             container.Add(new CuiElement
             {
                 Name = "InfoNotice",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Parent = "Hud",
                 FadeOut = 1f,
                 Components =
@@ -416,11 +409,9 @@ namespace Oxide.Plugins
             CuiHelper.AddUi(player, container);
 
             mytimer = timer.Once(NoticeTime, () => { CuiHelper.DestroyUi(player, "InfoNotice"); });
-      //  Слив плагинов server-rust by Apolo YouGame
         }
 
         void OnHammerHit(BasePlayer player, HitInfo info)
-      //  Слив плагинов server-rust by Apolo YouGame
         {
             var buildingBlock = info.HitEntity as BuildingBlock;
             if (buildingBlock == null || player == null) return;

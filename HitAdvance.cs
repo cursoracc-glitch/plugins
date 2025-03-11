@@ -1,425 +1,230 @@
 ﻿using System;
-using System.Collections;
+using System.Collections.Generic;
+using Oxide.Core.Configuration;
 using System.Globalization;
+using Oxide.Core.Plugins;
 using System.Linq;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Game.Rust.Cui;
+using Rust;
 using UnityEngine;
-using VLB;
-using WebSocketSharp;
-
-// https://server-rust.ru/resources/hitadvance.477/
 
 namespace Oxide.Plugins
 {
-    [Info("HitAdvance", "Hougan", "2.0.4")]
-    [Description("Уникальный маркер для вашего сервера. Куплено на server-rust.RU")]
+    [Info("HitAdvance", "Hougan, Ryamkk", "1.1.2")]
     public class HitAdvance : RustPlugin
     {
-        #region eNums
-
-        private enum HitType
+		float LineFadeOut = 0.3f;
+		
+		float TextFadeOut = 0.5f;
+		string TextFont = "robotocondensed-bold.ttf";
+		string TextColor = "#FFFFFFFF";
+		
+		private void LoadDefaultConfig()
         {
-            None,
-            Line,
-            Text,
-            LineAndText,
-            Icon
+            GetConfig("Настройки GUI линии дамага", "Время отображения линии дамага (0.3 секунды)", ref LineFadeOut);
+            GetConfig("Настройки GUI текста дамага", "Время отображения текста дамага (0.5 секунды)", ref TextFadeOut);
+            GetConfig("Настройки GUI текста дамага", "Шрифт текста", ref TextFont);
+			GetConfig("Настройки GUI текста дамага", "Цвет текста при попадании в тело", ref TextColor);
+            SaveConfig();
         }
 
-        #endregion
-        
-        #region Classes
-
-        private class PlayerMarker : MonoBehaviour
+        [JsonProperty("Настройки игроков")]
+        private Dictionary<ulong, int> playerMarkers = new Dictionary<ulong,int>();
+		
+        [JsonProperty("Настройка маркеров и их привлегий")]
+        private Dictionary<string, string> markerPermissions = new Dictionary<string, string>
         {
-            public BasePlayer Player;
-            
-            public void Awake()
+            ["ОТКЛЮЧЕНО"] = "",
+            ["ПОЛОСА"] = "HitAdvance.Line",
+            ["ТЕКСТ"] = "HitAdvance.Text",
+			["ОБА"] = "HitAdvance.All",
+        };        
+        
+        private string Layer = "UI_HitMarker";
+		
+		Dictionary<string, string> Messages = new Dictionary<string, string>()
+        {
+            {"HitMarkerON", "Вы <color=#81b67a>успешно</color> изменили хит-маркер!"},
+			{"HitMarkerPermission", "У вас <color=#81B67a>недостаточно прав</color> для включения этого хит-маркера!"},
+        };
+		
+        private void OnServerInitialized()
+        {
+			if (Interface.Oxide.DataFileSystem.ExistsDatafile("HitAdvance/Player"))
             {
-                Player = GetComponent<BasePlayer>();
+                playerMarkers = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, int>>("HitAdvance/Player");
             }
-
-            public void ShowHit(BaseEntity target, HitInfo info)
+			
+			if (Interface.Oxide.DataFileSystem.ExistsDatafile("HitAdvance/Permissions"))
             {
-                CuiElementContainer container = new CuiElementContainer();
-                var obj = target.GetComponent<BaseCombatEntity>();
-                if (obj == null) return;
-                
-                switch (GetSettings().CurrentType)
+                markerPermissions = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<string, string>>("HitAdvance/Permissions");
+            } 
+            else
+            {
+                Interface.Oxide.DataFileSystem.WriteObject("HitAdvance/Permissions", markerPermissions);
+                OnServerInitialized();
+                return;
+            }
+            
+            foreach (var check in markerPermissions.Where(p => p.Value != ""))
+                permission.RegisterPermission(check.Value, this);
+            
+            BasePlayer.activePlayerList.ForEach(OnPlayerInit);
+			lang.RegisterMessages(Messages, this, "en");
+            Messages = lang.GetMessages("en", this);
+        }
+
+        private void OnPlayerInit(BasePlayer player)
+        {
+            if (!playerMarkers.ContainsKey(player.userID))
+                playerMarkers.Add(player.userID, 1);
+        }
+        
+        void OnPlayerAttack(BasePlayer attacker, HitInfo info)
+        {
+            if (info != null && attacker is BasePlayer && info.HitEntity is BasePlayer)
+            {
+                if (playerMarkers[attacker.userID] == 1)
+                    DrawLine(attacker, info.HitEntity as BasePlayer);
+                else if (playerMarkers[attacker.userID] == 2)
                 {
-                    case HitType.Line:
+                    NextTick(() =>
                     {
-                        float curHealth = obj.health;
-                        float maxHealth = obj._maxHealth;
-                        if (target is BuildingBlock)
-                        {
-                            var curGrade = (target as BuildingBlock).currentGrade;
-                            if (curGrade == null) return;
-
-                            maxHealth = curGrade.maxHealth;
-                        }
-
-                        var color = GetGradientColor((int) curHealth, (int) maxHealth);
-                        float decreaseLength = (180.5f + 199.5f) / 2f * (curHealth / maxHealth); 
-                        
-                        container.Add(new CuiPanel
-                        {
-                            FadeOut = 0.5f,
-                            RectTransform = { AnchorMin = "0.5 0", AnchorMax = "0.5 0", OffsetMin = $"{-10 - decreaseLength} 80", OffsetMax = $"{-9 + decreaseLength} 85" },
-                            Image         = { Color     = color }
-                        }, "Hud", Layer); 
-                        
-                        DestroyHit();
-                        CuiHelper.AddUi(Player, container);
-                        
-                        
-                        if (IsInvoking(nameof(DestroyHit))) CancelInvoke(nameof(DestroyHit));
-                        Invoke(nameof(DestroyHit), Settings.DestroyTime); 
-                        break;
-                    }
-                    case HitType.Text:
-                    {
-                        var pos = GetRandomTextPosition();
-                        float curHealth = obj.health;
-                        float maxHealth = obj.MaxHealth();
-                        string textDamage = info.damageTypes.Total().ToString("F0");
-                        
-                        if (Mathf.FloorToInt(info.damageTypes.Total()) == 0)
-                            return;
-
-                        float division = 1 - curHealth / maxHealth;
-                        if (target is BasePlayer)
-                        {
-                            var targetPlayer = target as BasePlayer;
-                            if (info.isHeadshot)
-                                textDamage = $"<color=#DC143C>{textDamage}</color>";
-                            if (targetPlayer.IsWounded())
-                            {
-                                textDamage = "<color=#DC143C>УПАЛ</color>";
-                                if (info.isHeadshot)
-                                    textDamage += " <color=#DC143C>ГОЛОВА</color>";
-                            }
-        
-                            if (Player.currentTeam == targetPlayer.currentTeam && Player.currentTeam != 0)
-                            {
-                                textDamage = "<color=#32915a>ДРУГ</color>";
-                                division = 1;
-                            }
-                        }
-
-
-                        var hitId = CuiHelper.GetGuid();
-                        container.Add(new CuiElement()
-                        {
-                            Name = hitId,
-                            Parent = "Hud",
-                            FadeOut = 0.5f,
-                            Components =
-                            {
-                                new CuiTextComponent { Text = $"<b>{textDamage}</b>", Color = HexToRustFormat("#FFFFFFFF"), Font = "robotocondensed-bold.ttf", FontSize = (int) Mathf.Lerp(15, 30, division), Align = TextAnchor.MiddleCenter, },
-                                new CuiOutlineComponent() {Color = "0 0 0 1", Distance = "0.155004182 0.15505041812"},
-                                new CuiRectTransformComponent() { AnchorMin = $"{pos.x} {pos.y}", AnchorMax = $"{pos.x} {pos.y}", OffsetMin = "-100 -100", OffsetMax = "100 100" }
-        
-                            }
-                        });
-        
-                        CuiHelper.AddUi(Player, container);
-                        StartCoroutine(DestroyHit(hitId));
-                        break;
-                    }
-                    case HitType.Icon:
-                    {
-                        var hitId = CuiHelper.GetGuid();
-
-                        string color = "1 1 1 0.5";
-                        string image = "assets/icons/close.png";
-                        float margin = 10;
-                        
-                        if (target is BasePlayer)
-                        {
-                            var targetPlayer = target as BasePlayer;
-                            if (targetPlayer.IsWounded())
-                            {
-                                margin = 20;
-                                image = "assets/icons/fall.png";
-                            }
-                            if (targetPlayer.IsWounded() || targetPlayer.IsDead())
-                                color = "1 0.2041845 0.204181 0.5";
-                        }
-
-                        if (info.isHeadshot) color = "1 0.2 0.2 0.5";
-
-                        container.Add(new CuiButton
-                        {
-                            FadeOut = 0.3f,
-                            RectTransform = {AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = $"-{margin} -{margin}", OffsetMax = $"{margin} {margin}"},
-                            Button        = {Color     = color, Sprite = image },
-                            Text          = {Text      = ""}
-                        }, "Hud", hitId);
-        
-                        CuiHelper.AddUi(Player, container);
-                        CuiHelper.DestroyUi(Player, hitId);
-                        break;
-                    }
-                    case HitType.LineAndText:
-                    {
-                        GetSettings().CurrentType = HitType.Line;
-                        ShowHit(target, info);
-                        GetSettings().CurrentType = HitType.Text;
-                        ShowHit(target, info);
-                        GetSettings().CurrentType = HitType.LineAndText;
-                        break;
-                    }
+                        DrawText(attacker, info.HitEntity as BasePlayer, info);
+                    });
                 }
-
-                
-            }
-
-            public const string Layer = "UI_HitAdvance_Layer";
-            public void DestroyHit() => CuiHelper.DestroyUi(Player, Layer);
-            public IEnumerator DestroyHit(string ID, float delay = 0.5f)
-            {
-                yield return new WaitForSeconds(delay);
-                
-                CuiHelper.DestroyUi(Player, ID);
-            }
-            public PlayerSettings GetSettings() => PlayerSettingses[Player.userID];
-        }
-
-        private class PlayerSettings
-        {
-            public HitType CurrentType;
-            public bool BuildingHit;
-            
-            public PlayerSettings() {}
-            public static PlayerSettings Generate()
-            {
-                return new PlayerSettings
-                {
-                    CurrentType = Settings.HitSettings.FirstOrDefault(p => p.Value.IsDefault).Key,
-                    BuildingHit = Settings.DefaultBuildingDamage
-                };
-            }
-        }
-
-        private class HitSetting
-        {
-            [JsonProperty("Название маркера")]
-            public string DisplayName;
-            [JsonProperty("Разрешение, с которым его можно выбрать")]
-            public string Permission;
-
-            [JsonProperty("Включён у игроков изначально")]
-            public bool IsDefault;
-        }
-        
-        private class Configuration
-        {
-            [JsonProperty("Настройки различных маркеров")]
-            public Hash<HitType, HitSetting> HitSettings = new Hash<HitType, HitSetting>();
-
-            [JsonProperty("Включить отображение урона по постройкам изначально")]
-            public bool DefaultBuildingDamage = true; 
-            [JsonProperty("Показывать урон по НПС")]
-            public bool ShowNPCDamage = true;
-            [JsonProperty("Показывать урон по животным")]
-            public bool ShowAnimalDamage = false;
-            [JsonProperty("Время удаления маркера (если отсутвует другой урон)")]
-            public float DestroyTime = 0.25f;
-            [JsonProperty("Укажите название команды для изменения маркера")]
-            public string CommandName = "marker";
- 
-            public static Configuration LoadDefault()
-            {
-                return new Configuration
-                {
-                    HitSettings = new Hash<HitType, HitSetting>
+				else if (playerMarkers[attacker.userID] == 3)
+				{
+					NextTick(() =>
                     {
-                        [HitType.None] = new HitSetting
-                        {
-                            DisplayName = "<b><size=20>Маркер полностью отключён</size></b>\n" +
-                                    "Вы не будете понимать, когда попадаете \nпо врагу!",
-                            Permission = string.Empty,
-                            
-                            IsDefault = false
-                        },
-                        [HitType.Line] = new HitSetting
-                        {
-                            DisplayName = "<b><size=20>Полоса со здоровьем</size></b>\n" +
-                                    "Над слотами появляется полоса, она" +
-                                    "\nотображает <b>оставшееся</b> здоровье у врага",
-                            Permission = "HitAdvance.Line",
-                            
-                            IsDefault = false
-                        },
-                        [HitType.Text] = new HitSetting
-                        {
-                            DisplayName = "<b><size=20>Текст с уроном</size></b>\nПо центру экрана будут всплывать \nцифры с <b>нанесенным</b> уроном!<size=10119></size>",
-                            Permission  = "HitAdvance.Text",
-                            
-                            IsDefault = false
-                        },
-                        [HitType.LineAndText] = new HitSetting
-                        {
-                            DisplayName = "<b><size=20>Текст и полоса</size></b>\nДва предыдущих маркера срабатывают <b>одновременно</b>!",
-                            Permission  = "HitAdvance.TextAndLine",
-                            
-                            IsDefault = true
-                        },
-                        [HitType.Icon] = new HitSetting
-                        {
-                            DisplayName = "<b><size=20>Иконка попадания</size></b>\nПривычная всем иконка попадения, меняет \nцвет при выстреле <b>в голову</b>!",
-                            Permission  = "HitAdvance.Icon",
-                            
-                            IsDefault = false
-                        }
-                    }
-                };
+						DrawLine(attacker, info.HitEntity as BasePlayer);
+                        DrawText(attacker, info.HitEntity as BasePlayer, info);
+                    });
+				}
             }
         }
 
-        #endregion
-        
-        #region Variables
-
-        private static Configuration Settings = Configuration.LoadDefault();
-        private static Hash<ulong, PlayerSettings> PlayerSettingses = new Hash<ulong, PlayerSettings>();
-
-        #endregion
-
-        #region Initialization
-        
-        protected override void LoadConfig()
-        {
-            base.LoadConfig();
-            try
-            {
-                Settings = Config.ReadObject<Configuration>();
-            }
-            catch
-            {
-                PrintWarning($"Error reading config, creating one new config!");
-                LoadDefaultConfig();
-            }
-            
-            NextTick(SaveConfig);
-        }
-
-        protected override void LoadDefaultConfig() => Settings = Configuration.LoadDefault();
-        protected override void SaveConfig() => Config.WriteObject(Settings);
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
-        private void OnServerInitialized()               
-        {                         
-            if (Interface.Oxide.DataFileSystem.ExistsDatafile(Name))
-                PlayerSettingses = Interface.Oxide.DataFileSystem.ReadObject<Hash<ulong, PlayerSettings>>(Name);
-            
-            foreach (var check in Settings.HitSettings.Where(p => !p.Value.Permission.IsNullOrEmpty()))
-                permission.RegisterPermission(check.Value.Permission, this);
-            
-            cmd.AddChatCommand(Settings.CommandName, this, nameof(ChatCommandMarker)); 
-            BasePlayer.activePlayerList.ToList().ForEach(OnPlayerConnected);
-            timer.Every(60, SaveData);
-        }
-
-        private void Unload() => SaveData();
-        private void SaveData() => Interface.Oxide.DataFileSystem.WriteObject(Name, PlayerSettingses);
-
-        private void OnPlayerConnected(BasePlayer player)
-        {
-            player.GetOrAddComponent<PlayerMarker>(); 
-            
-            if (!PlayerSettingses.ContainsKey(player.userID))
-                PlayerSettingses.Add(player.userID, PlayerSettings.Generate());
-        }
-
-        private void OnPlayerDisconnected(BasePlayer player)
-        {
-            var obj = player.GetComponent<PlayerMarker>();
-            if (obj != null) UnityEngine.Object.Destroy(obj);
-        }
-
-        #endregion
-
-        #region Hooks
-
-        private void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
-        {
-            var initiator = info?.InitiatorPlayer?.GetComponent<PlayerMarker>();
-            if (initiator == null || info.damageTypes.Total() < 1) return;
-            int Max = 2742;
-
-            if (entity is BuildingBlock && initiator.GetSettings().BuildingHit)
-            {
-                NextTick(() =>
-                {
-                    if (entity != null && !entity.IsDestroyed)
-                        initiator.ShowHit(entity, info);  
-                });
-            }
-        }
-        
-        private void OnPlayerAttack(BasePlayer attacker, HitInfo info)
-        {
-            var target = info.HitEntity;
-            if (attacker.IsNpc || target == null) return;
-
-            if (target is BaseAnimalNPC && !Settings.ShowAnimalDamage || target is BuildingBlock) return;
-            if (target is HumanNPC && !Settings.ShowNPCDamage) return;
-            
-            NextTick(() =>
-            {
-                if (target != null && !target.IsDestroyed)
-                    attacker.GetComponent<PlayerMarker>().ShowHit(target, info);
-            });
-        }
-
-        #endregion
-
-        #region Commands
-
-        private void ChatCommandMarker(BasePlayer player, string command, string[] args) => UI_DrawInterface(player);
-
-        [ConsoleCommand("UI_HitAdvance")]
+		[ChatCommand("marker")]
+        private void cmdMarker(BasePlayer player)
+		{
+            DrawChangeMenu(player);
+		}
+		
+        [ConsoleCommand("changemarker")]
         private void consoleCmdChange(ConsoleSystem.Arg args)
         {
+            if (args.Player() == null)
+                return;
+
             BasePlayer player = args.Player();
-            if (player == null || !args.HasArgs(1)) return;
-
-            switch (args.Args[0].ToLower())
+            if (!args.HasArgs(1))
+                DrawChangeMenu(player);
+            else
             {
-                case "choose":
+                int newId;
+                if (int.TryParse(args.Args[0], out newId))
                 {
-                    if (!args.HasArgs(2)) return;
-
-                    HitType type = HitType.None;
-                    if (!Enum.TryParse(args.Args[1], out type)) return;
-
-                    if (!Settings.HitSettings[type].Permission.IsNullOrEmpty() && !permission.UserHasPermission(player.UserIDString, Settings.HitSettings[type].Permission)) return;
-
-                    player.GetComponent<PlayerMarker>().GetSettings().CurrentType = type;
-                    UI_DrawInterface(player);
-                    break;
-                }
-                case "toggle":
-                {
-                    var set = player.GetComponent<PlayerMarker>()?.GetSettings();
-                    if (set == null) return;
-                    
-                    set.BuildingHit = !set.BuildingHit;
-                    UI_DrawInterface(player);
-                    break;
+                    if (markerPermissions.ElementAt(newId).Value == "" || permission.UserHasPermission(player.UserIDString, markerPermissions.ElementAt(newId).Value))
+                    {
+						SendReply(player, Messages["HitMarkerON"]);
+                        playerMarkers[player.userID] = newId;
+                        DrawChangeMenu(player);
+                    }
+                    else
+                    {
+						SendReply(player, Messages["HitMarkerPermission"]);
+                    }
                 }
             }
         }
 
-        #endregion
+        private void DrawLine(BasePlayer player, BasePlayer target)
+        {
+            var id = CuiHelper.GetGuid();
+            CuiElementContainer container = new CuiElementContainer();
+            
+            string lineColor = GetGradientColor((int)(target.MaxHealth() - target.health), (int)target.MaxHealth());
+            Vector2 linePosition = GetLinePosition(target.health / target.MaxHealth());
+            
+            container.Add(new CuiPanel
+            {
+                CursorEnabled = false,
+                RectTransform = { AnchorMin = $"{linePosition[0]} 0.1101852", AnchorMax = $"{linePosition[1]} 0.1157407" },
+                Image = { Color = "0 0 0 0" }
+            }, "Hud", Layer);
+            container.Add(new CuiElement
+            {
+                FadeOut = LineFadeOut,
+                Parent = Layer,
+                Name = Layer + ".Showed",
+                Components =
+                {
+                    new CuiImageComponent { Color = lineColor },
+                    new CuiRectTransformComponent { AnchorMin = "0 0",AnchorMax = "1 1", OffsetMax = "0 0" }
+                }
+            });
 
-        #region GUI
+            CuiHelper.AddUi(player, container);
+            timer.Once(0.1f, () => { CuiHelper.DestroyUi(player, Layer + ".Showed"); });
+        }
 
-        private const string Layer = "UI_HitAdvance_Settings";
-        private void UI_DrawInterface(BasePlayer player)
+        private void DrawText(BasePlayer player, BasePlayer target, HitInfo info)
+        {
+            var id = CuiHelper.GetGuid();
+            CuiElementContainer container = new CuiElementContainer();
+            
+            float divisionDmg = info.damageTypes.Total() / target.MaxHealth();
+            float divisionHP = (target.health  / target.MaxHealth());
+            float avgDivision = (target.IsDead() ? 1 : 1 - divisionHP);
+            
+            var position = GetRandomTextPosition(divisionDmg, divisionHP);
+
+            string textDamage = info.damageTypes.Total().ToString("F0");
+            if (info.isHeadshot)
+                textDamage = "<color=#DC143C>ГОЛОВА</color>";
+            if (target.IsWounded())
+            {
+                textDamage = "<color=#DC143C>УПАЛ</color>";
+                if (info.isHeadshot)
+                    textDamage += " <color=#DC143C>ГОЛОВА</color>";
+            }
+            else if (target.IsDead())
+            {
+                textDamage = "<color=#DC143C>УМЕР</color>";
+                if (info.isHeadshot)
+                {
+                    textDamage += " <color=#DC143C>ГОЛОВА</color>";
+                }
+            }
+            
+            container.Add(new CuiElement()
+            {
+                Name = id,
+                Parent = "Hud",
+                FadeOut = TextFadeOut,
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = $"<b>{textDamage}</b>",
+                        Color = HexToCuiColor(TextColor),
+                        Font = TextFont,
+                        FontSize = (int)Mathf.Lerp(15, 30, avgDivision),
+                        Align = TextAnchor.MiddleCenter,
+                    },
+                    new CuiOutlineComponent() { Color = "0 0 0 1", Distance = "0.155 0.155"},
+                    new CuiRectTransformComponent() {AnchorMin = $"{position.x} {position.y}", AnchorMax = $"{position.x} {position.y}", OffsetMin = "-100 -100", OffsetMax = "100 100"}
+            
+                }
+            });
+
+            CuiHelper.AddUi(player, container);
+            timer.Once(0.1f, () => { CuiHelper.DestroyUi(player, id); });
+        }
+
+        private void DrawChangeMenu(BasePlayer player)
         {
             CuiHelper.DestroyUi(player, Layer);
             CuiElementContainer container = new CuiElementContainer();
@@ -427,126 +232,149 @@ namespace Oxide.Plugins
             container.Add(new CuiPanel
             {
                 CursorEnabled = true,
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                Image = { Color = "0 0 0 0.7" }
-            }, "Overlay", Layer); 
+                RectTransform = { AnchorMin = "0.3546875 0.3733796", AnchorMax = "0.3546875 0.3733796", OffsetMax = "371 182" },
+                Image = { Color = "0 0 0 0" }
+            }, "Overlay", Layer);
 
             container.Add(new CuiButton
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                RectTransform = { AnchorMin = "-100 -100", AnchorMax = "100 100" },
                 Button = { Close = Layer, Color = "0 0 0 0" },
                 Text = { Text = "" }
             }, Layer);
 
-            container.Add(new CuiLabel
+            container.Add(new CuiElement
             {
-                RectTransform = {AnchorMin = "0 0.75", AnchorMax                                                                   = "1 0.85", OffsetMax              = "0 0"},
-                Text          = {Text      = "Вы можете настроить вид хит-маркера под себя, либо полностью отключить его!", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", Color = "1 1 1 0.5", FontSize = 28}
-            }, Layer);
-
-            var obj = player.GetComponent<PlayerMarker>();
-            if (obj == null) return;
-            
-            for (int i = 0; i < 6; i += 3)
-            {
-                float leftPosition = 0 - Settings.HitSettings.Skip(i).Take(3).Count() / 2f * 300 - (Settings.HitSettings.Take(3).Count() - 1) / 2f * 20;
-
-                foreach (var check in Settings.HitSettings.Skip(i).Take(3))
+                Parent = Layer,
+                Name = Layer + ".BG",
+                Components =
                 {
-                    string text = "ВЫБРАТЬ МАРКЕР";
-                    string color = "1 1 1 0.12";
-                    if (obj.GetSettings().CurrentType == check.Key)
-                    {
-                        text = "МАРКЕР ВЫБРАН";
-                        color = "0.70418 1 0.7 0.12";  
-                    }
-                    else if (!check.Value.Permission.IsNullOrEmpty() && !permission.UserHasPermission(player.UserIDString, check.Value.Permission))
-                    {
-                        color = "1 0.7 0.7 0.12";
-                        text = "НЕДОСТУПЕН ДЛЯ ВЫБОРА";
-                    }
-                    
-                    container.Add(new CuiPanel
-                    {
-                        RectTransform = {AnchorMin = $"0.5 {0.62 - i * 0.08}", AnchorMax = $"0.5 {0.62 - i * 0.08}", OffsetMin = $"{leftPosition} -50", OffsetMax = $"{leftPosition + 300} 50"},
-                        Image         = {Color     = "1 1 1 0.03"}
-                    }, Layer, Layer + check.Key);
-
-                    container.Add(new CuiLabel
-                    {
-                        RectTransform = {AnchorMin = "0 0", OffsetMax              = "1 1", OffsetMin                        = "0 0"},
-                        Text          = {Text      = check.Value.DisplayName, Font = "robotocondensed-regular.ttf", FontSize = 14, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1"}
-                    }, Layer + check.Key);
-
-                    container.Add(new CuiButton
-                    {
-                        RectTransform = {AnchorMin = "0 0", AnchorMax = "1 0", OffsetMin = "0 -50", OffsetMax = "0 -10"},
-                        Button        = {Color     = color, Command = $"UI_HitAdvance choose {(int) check.Key}" },
-                        Text          = {Text      = text, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 22, Color = "1 1 1 0.4"}
-                    }, Layer + check.Key);
-
-                    leftPosition += 320;
+                    new CuiImageComponent { Color = HexToCuiColor("#0000003C") },
+                    new CuiRectTransformComponent { AnchorMin = "0 0.4232166", AnchorMax = "1.327 1" }
                 }
-            }
-                
-            string toggleText  = "УРОН ПО ПОСТРОЙКАМ ВЫКЛЮЧЕН";
-            string toggleColor = "1 0.7 0.7 0.17";
-            if (obj.GetSettings().BuildingHit)
-            {
-                toggleText  = "УРОН ПО ПОСТРОЙКАМ ВКЛЮЧЕН";
-                toggleColor = "0.70418 1 0.7 0.17";
-            }
-            container.Add(new CuiButton
-            {
-                RectTransform = {AnchorMin = "0.5 0.1", AnchorMax = "0.5 0.1", OffsetMin = "-210 10", OffsetMax = "190 50"},
-                Button        = {Color     = toggleColor, Command = $"UI_HitAdvance toggle" },
-                Text          = {Text      = toggleText, Align    = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 22, Color = "1 1 1 0.4"}
-            }, Layer);
+            });
 
-            CuiHelper.AddUi(player, container); 
+            container.Add(new CuiElement
+            {
+                Parent = Layer,
+                Name = Layer + ".Header",
+                Components =
+                {
+                    new CuiImageComponent { Color = HexToCuiColor("#81B67AFF") },
+                    new CuiRectTransformComponent { AnchorMin = "0 0.8145424", AnchorMax = "1.327 1" }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = Layer + ".Header",
+                Components =
+                {
+                    new CuiTextComponent { Text = "ВЫБОР ХИТ-МАРКЕРА", Color = HexToCuiColor("#476443FF"), FontSize = 20, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter },
+                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1.014 1" }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = Layer,
+                Components =
+                {
+                    new CuiTextComponent { Text = "Здесь вы можете выбрать вид хит-маркера, либо полностью отключить его.", Color = HexToCuiColor("#FFFFFFFF"), FontSize = 14, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter },
+                    new CuiRectTransformComponent { AnchorMin = "0 0.410668", AnchorMax = "1.332 1" }
+                }
+            });
+            
+            int i = 0;
+            foreach (var check in markerPermissions)
+            {
+                string color = playerMarkers[player.userID] == i ? HexToCuiColor("#518eefFF") :
+                    permission.UserHasPermission(player.UserIDString, check.Value) || check.Value == "" ? HexToCuiColor("#81B67AFF") :  HexToCuiColor("#C44B4BFF");
+                
+                container.Add(new CuiElement
+                {
+                    Parent = Layer,
+                    Name = Layer + $".{i}",
+                    Components =
+                    {
+                        new CuiImageComponent { Color = color },
+                        new CuiRectTransformComponent { AnchorMin = $"{0.01254448 + i * 0.332} 0.4561242", AnchorMax = $"{0.3243728 + i * 0.332} 0.5950636", OffsetMax = "0 0" }
+                    }
+                });
+                
+                container.Add(new CuiElement
+                {
+                    Parent = Layer + $".{i}",
+                    Components =
+                    {
+                        new CuiTextComponent { Text = check.Key, FontSize = 14, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter },
+                        new CuiRectTransformComponent { AnchorMin = $"0 0", AnchorMax = $"1 1", OffsetMax = "0 0" }
+                    }
+                });
+
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                    Button = { Command = $"changemarker {i}", Color = "0 0 0 0" },
+                    Text = { Text = "" }
+                }, Layer + $".{i}");
+                
+                i++;
+            }
+
+            CuiHelper.AddUi(player, container);
         }
-        
-        private static string HexToRustFormat(string hex)
+		
+		private static string HexToCuiColor(string hex)
         {
             if (string.IsNullOrEmpty(hex))
             {
                 hex = "#FFFFFFFF";
             }
-
+ 
             var str = hex.Trim('#');
-
+ 
             if (str.Length == 6)
                 str += "FF";
-
+ 
             if (str.Length != 8)
             {
                 throw new Exception(hex);
                 throw new InvalidOperationException("Cannot convert a wrong format.");
             }
-
+ 
             var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
             var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
             var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
             var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
-
+ 
             Color color = new Color32(r, g, b, a);
+ 
+            return $"{color.r:F2} {color.g:F2} {color.b:F2} {color.a:F2}";
+        }
 
-            return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
+        private Vector2 GetLinePosition(float divisionDmg)
+        {
+            float centerX = 0.4932292f;
+            float xMax = 0.6411458f;
+            float diff = xMax - centerX;
+            float lenght05 = diff * divisionDmg;
+            
+            float xLeft = centerX - lenght05;
+            float xRight = centerX + lenght05;
+            
+            return new Vector2(xLeft, xRight);
         }
         
-        #endregion
-
-        #region Utils
-
-        public static Vector2 GetRandomTextPosition()
+        Vector2 GetRandomTextPosition(float divisionDmg, float divisionHP)
         {
             float x = (float) Oxide.Core.Random.Range(45, 55) / 100;
-            float y = (float) Oxide.Core.Random.Range(40, 60) / 100;
+            float y = (float) Oxide.Core.Random.Range(45, 55) / 100;
             
             return new Vector2(x, y);
         }
         
-        public static string GetGradientColor(int count, int max)
+        public string GetGradientColor(int count, int max)
         {
             if (count > max)
                 count = max;
@@ -556,7 +384,7 @@ namespace Oxide.Plugins
             return ColorsGradientDB[ index ];
         }
         
-        private static string[] ColorsGradientDB = new string[100]
+        private string[] ColorsGradientDB = new string[100]
         {
             "0.2000 0.8000 0.2000 1.0000",
             "0.2471 0.7922 0.1961 1.0000",
@@ -613,7 +441,7 @@ namespace Oxide.Plugins
             "0.7255 0.3686 0.0196 1.0000",
             "0.7255 0.3608 0.0196 1.0000",
             "0.7255 0.3529 0.0196 1.0000",
-            "0.7294 0.3451 0.0157 1.0000", 
+            "0.7294 0.3451 0.0157 1.0000",
             "0.7294 0.3373 0.0157 1.0000",
             "0.7294 0.3294 0.0157 1.0000",
             "0.7294 0.3216 0.0118 1.0000",
@@ -659,7 +487,15 @@ namespace Oxide.Plugins
             "0.6314 0.0039 0.0000 1.0000",
             "0.6275 0.0000 0.0000 1.0000",
         };
+		
+		private void GetConfig<T>(string menu, string Key, ref T var)
+        {
+            if (Config[menu, Key] != null)
+            {
+                var = (T)Convert.ChangeType(Config[menu, Key], typeof(T));
+            }
 
-        #endregion
+            Config[menu, Key] = var;
+        }
     }
 }

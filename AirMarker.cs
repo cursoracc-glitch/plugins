@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("AirMarker", "Sempai#3239", "1.0.1")]
+    [Info("AirMarker", "Fierrov", "1.0.0")]
     internal class AirMarker : RustPlugin
     {
        
@@ -11,7 +11,8 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
-            PrintWarning("\n-----------------------------\n " +" Author - Sempai#3239\n " +" VK - https://vk.com/rustnastroika\n " +" Forum - https://topplugin.ru\n " +" Discord - https://discord.gg/5DPTsRmd3G\n" +"-----------------------------");
+            PrintWarning(
+                $"Was changed Fierrov");
             LoadConfig();
         }
 

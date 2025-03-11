@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Facepunch;
 using Oxide.Core;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
@@ -10,7 +9,17 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("TeleportGUI", "A0001", "0.0.0")]
+    /*
+        This plugin was written solely by PsychoTea.
+        Please do not, under any circumstances, redistribute this code.
+        If you find any bugs, please report them either directly to me at bensparkes8@gmail.com,
+        or on the chaoscode.io page.
+        The same applies for feature requests.
+        For any enquiries please also email me at bensparkes8@gmail.com
+        I do write private plugins.
+    */
+
+    [Info("TeleportGUI", "PsychoTea", "1.6.2")]
 
     class TeleportGUI : RustPlugin
     {
@@ -24,13 +33,13 @@ namespace Oxide.Plugins
 
         private static TeleportGUI Instance;
 
-        Dictionary<BasePlayer, bool> GUIOpen = new Dictionary<BasePlayer, bool>();
-        Dictionary<BasePlayer, Vector3> LastTeleport = new Dictionary<BasePlayer, Vector3>();
-        List<GameObject> GameObjects = new List<GameObject>();
+        private Dictionary<BasePlayer, bool> GUIOpen = new Dictionary<BasePlayer, bool>();
+        private Dictionary<BasePlayer, Vector3> LastTeleport = new Dictionary<BasePlayer, Vector3>();
+        private List<GameObject> GameObjects = new List<GameObject>();
 
-        bool DebuggingMode = false;
+        private bool DebuggingMode = false;
 
-        [PluginReference] Plugin Economics, ServerRewards, ZoneManager;
+        [PluginReference] private Plugin Economics, ServerRewards, NoEscape, ZoneManager;
 
         #endregion
 
@@ -54,90 +63,153 @@ namespace Oxide.Plugins
 
         class TeleportRequest : MonoBehaviour
         {
-            GameObject GameObject;
-            int Time;
-            public BasePlayer From;
-            public BasePlayer To;
+            private BasePlayer _from;
+            private BasePlayer _to;
 
-            public static void Create(BasePlayer From, BasePlayer To, int TimeoutTime)
+            private bool _tpHere;
+            private double _time;
+            private bool _playerIsPaying;
+
+            public static void Create(BasePlayer from, BasePlayer to, double timeoutTime, bool tpHere, bool playerIsPaying)
             {
-                TeleportRequest tr = new TeleportRequest();
-                tr.GameObject = new GameObject();
-                tr = tr.GameObject.AddComponent<TeleportRequest>();
-                tr.Time = TimeoutTime;
-                tr.From = From;
-                tr.To = To;
-                Instance.GameObjects.Add(tr.GameObject);
+                var gameObject = new GameObject();
+
+                var tpReq = gameObject.AddComponent<TeleportRequest>();
+                tpReq._from = from;
+                tpReq._to = to;
+                tpReq._tpHere = tpHere;
+                tpReq._time = timeoutTime;
+                tpReq._playerIsPaying = playerIsPaying;
+
+                Instance.GameObjects.Add(gameObject);
             }
 
             void Start()
             {
-                Instance.SendReply(From, Instance.GetMessage("RequestSent").Replace("{0}", To.displayName));
-                Instance.SendReply(To, Instance.GetMessage("RequestRecieved").Replace("{0}", From.displayName));
-                PendingRequest pr = To.gameObject.AddComponent<PendingRequest>();
-                pr.From = From;
+                if (_tpHere)
+                {
+                    Instance.SendReply(_from, Instance.GetMessage("HereRequestSent").Replace("{0}", _to.displayName));
+                    Instance.SendReply(_to, Instance.GetMessage("HereRequestRecieved").Replace("{0}", _from.displayName));
+                }
+                else
+                {
+                    Instance.SendReply(_from, Instance.GetMessage("RequestSent").Replace("{0}", _to.displayName));
+                    Instance.SendReply(_to, Instance.GetMessage("RequestRecieved").Replace("{0}", _from.displayName));
+                }
+
+                PendingRequest pr = _to.gameObject.AddComponent<PendingRequest>();
+                pr.From = _from;
                 pr.TeleportRequest = this;
                 InvokeRepeating("TimerTick", 0, 1.0f);
             }
 
             void TimerTick()
             {
-                if (Time == 0) RequestTimeOut();
-                Time--;
+                if (_time == 0) RequestTimeOut();
+                _time--;
             }
 
             public void RequestAccepted()
             {
-                int timeUntilTeleport = Instance.GetLowest(Instance.GetConfig<Dictionary<string, object>>("TimeUntilTeleport"), From, Instance.GetConfig<int>("DefaultTimeUntilTeleport"));
-                Instance.SendReply(From, Instance.GetMessage("RequestToAccepted").Replace("{0}", To.displayName).Replace("{1}", timeUntilTeleport.ToString()));
-                Instance.SendReply(To, Instance.GetMessage("RequestFromAccepted").Replace("{0}", From.displayName).Replace("{1}", timeUntilTeleport.ToString()));
+                int timeUntilTP = Instance.ConfigFile.DefaultTimeUntilTeleport;
 
-                Teleporter teleporter = From.gameObject.AddComponent<Teleporter>();
-                teleporter.Create(From, To, timeUntilTeleport);
-                PendingRequest pr = To.gameObject.GetComponent<PendingRequest>();
+                var lowestTimeUntilTP = Instance.ConfigFile.TimeUntilTeleport
+                    .Where(x => Instance.permission.UserHasPermission(_from.UserIDString, x.Key) &&
+                                x.Value < timeUntilTP)
+                    .OrderBy(x => x.Value)
+                    .FirstOrDefault();
+                if (!lowestTimeUntilTP.Equals(default(KeyValuePair<string, int>)))
+                {
+                    timeUntilTP = lowestTimeUntilTP.Value;
+                }
+
+                Instance.SendReply(_from, Instance.GetMessage("RequestToAccepted").Replace("{0}", _to.displayName).Replace("{1}", timeUntilTP.ToString("N1")));
+                Instance.SendReply(_to, Instance.GetMessage("RequestFromAccepted").Replace("{0}", _from.displayName).Replace("{1}", timeUntilTP.ToString("N1")));
+
+                Teleporter teleporter = _from.gameObject.AddComponent<Teleporter>();
+                teleporter.Create(_from, _to, timeUntilTP);
+
+                PendingRequest pr = _to.gameObject.GetComponent<PendingRequest>();
                 if (pr != null) GameObject.Destroy(pr);
+
                 CancelInvoke();
+
                 GameObject.Destroy(this.gameObject);
             }
 
             public void RequestDeclined()
             {
-                if (From != null)
+                if (_from != null)
                 {
-                    Instance.SendReply(From, Instance.GetMessage("RequestToDenied").Replace("{0}", To.displayName));
-                    if (Instance.EconomicsInstalled() && Instance.GetConfig<bool>("UseEconomicsPlugin"))
-                        Instance.RefundPlayerEconomics(From);
-                    if (Instance.ServerRewardsInstalled() && Instance.GetConfig<bool>("UseServerRewardsPlugin"))
-                        Instance.RefundServerRewards(From);
+                    if (_tpHere)
+                    {
+                        Instance.SendReply(_from, Instance.GetMessage("HereRequestToDenied").Replace("{0}", _to.displayName));
+                    }
+                    else
+                    {
+                        Instance.SendReply(_from, Instance.GetMessage("RequestToDenied").Replace("{0}", _to.displayName));
+                    }
+
+                    if (Instance.EconomicsInstalled() &&
+                        Instance.ConfigFile.UseEconomicsPlugin &&
+                        _playerIsPaying)
+                    {
+                        Instance.RefundPlayerEconomics(_from);
+                    }
+
+                    if (Instance.ServerRewardsInstalled() &&
+                        Instance.ConfigFile.UseServerRewardsPlugin &&
+                        _playerIsPaying)
+                    {
+                        Instance.RefundServerRewards(_from);
+                    }
                 }
-                if (To != null)
+
+                if (_to != null)
                 {
-                    Instance.SendReply(To, Instance.GetMessage("RequestFromDenied").Replace("{0}", From.displayName));
+                    if (_tpHere)
+                    {
+                        Instance.SendReply(_to, Instance.GetMessage("HereRequestFromDenied").Replace("{0}", _from.displayName));
+                    }
+                    else
+                    {
+                        Instance.SendReply(_to, Instance.GetMessage("RequestFromDenied").Replace("{0}", _from.displayName));
+                    }
                 }
-                PendingRequest pr = To?.gameObject?.GetComponent<PendingRequest>();
-                if (pr != null) GameObject.Destroy(pr);
+
+                PendingRequest pendingReq = _to?.gameObject?.GetComponent<PendingRequest>();
+                if (pendingReq != null) GameObject.Destroy(pendingReq);
+
                 GameObject.Destroy(this.gameObject);
             }
 
             public void RequestCancelled()
             {
-                if (From != null)
+                if (_from != null)
                 {
-                    Instance.SendReply(From, Instance.GetMessage("TeleportRequestToCancelled").Replace("{0}", To.displayName));
+                    Instance.SendReply(_from, Instance.GetMessage("TeleportRequestToCancelled").Replace("{0}", _to.displayName));
 
-                    if (Instance.EconomicsInstalled() && Instance.GetConfig<bool>("UseEconomicsPlugin"))
-                        Instance.RefundPlayerEconomics(From);
+                    if (Instance.EconomicsInstalled() &&
+                        Instance.ConfigFile.UseEconomicsPlugin &&
+                        _playerIsPaying)
+                    {
+                        Instance.RefundPlayerEconomics(_from);
+                    }
 
-                    if (Instance.ServerRewardsInstalled() && Instance.GetConfig<bool>("UseServerRewardsPlugin"))
-                        Instance.RefundServerRewards(From);
+                    if (Instance.ServerRewardsInstalled() &&
+                        Instance.ConfigFile.UseServerRewardsPlugin &&
+                        _playerIsPaying)
+                    {
+                        Instance.RefundServerRewards(_from);
+                    }
                 }
 
-                if (To != null)
+                if (_to != null)
                 {
-                    Instance.SendReply(To, Instance.GetMessage("TeleportRequestFromCancelled").Replace("{0}", From.displayName));
+                    Instance.SendReply(_to, Instance.GetMessage("TeleportRequestFromCancelled").Replace("{0}", _from.displayName));
                 }
 
-                PendingRequest pr = To?.gameObject?.GetComponent<PendingRequest>();
+                PendingRequest pr = _to?.gameObject?.GetComponent<PendingRequest>();
                 if (pr != null) GameObject.Destroy(pr);
 
                 GameObject.Destroy(this.gameObject);
@@ -145,34 +217,51 @@ namespace Oxide.Plugins
 
             void RequestTimeOut()
             {
-                if (From != null)
+                if (_from != null)
                 {
-                    Instance.SendReply(From, Instance.GetMessage("RequestToTimedOut").Replace("{0}", To.displayName));
-                    if (Instance.EconomicsInstalled() && Instance.GetConfig<bool>("UseEconomicsPlugin"))
-                        Instance.RefundPlayerEconomics(From);
-                    if (Instance.ServerRewardsInstalled() && Instance.GetConfig<bool>("UseServerRewardsPlugin"))
-                        Instance.RefundServerRewards(From);
+                    if (_tpHere)
+                    {
+                        Instance.SendReply(_from, Instance.GetMessage("HereRequestToTimedOut").Replace("{0}", _to.displayName));
+                    }
+                    else
+                    {
+                        Instance.SendReply(_from, Instance.GetMessage("RequestToTimedOut").Replace("{0}", _to.displayName));
+                    }
+
+                    if (Instance.EconomicsInstalled() && Instance.ConfigFile.UseEconomicsPlugin)
+                        Instance.RefundPlayerEconomics(_from);
+                    if (Instance.ServerRewardsInstalled() && Instance.ConfigFile.UseServerRewardsPlugin)
+                        Instance.RefundServerRewards(_from);
                 }
-                if (To != null)
+
+                if (_to != null)
                 {
-                    Instance.SendReply(To, Instance.GetMessage("RequestFromTimedOut").Replace("{0}", From.displayName));
+                    if (_tpHere)
+                    {
+                        Instance.SendReply(_to, Instance.GetMessage("HereRequestFromTimedOut").Replace("{0}", _from.displayName));
+                    }
+                    else
+                    {
+                        Instance.SendReply(_to, Instance.GetMessage("RequestFromTimedOut").Replace("{0}", _from.displayName));
+                    }
                 }
-                PendingRequest pr = To?.gameObject?.GetComponent<PendingRequest>();
+
+                PendingRequest pr = _to?.gameObject?.GetComponent<PendingRequest>();
                 if (pr != null) GameObject.Destroy(pr);
                 GameObject.Destroy(this.gameObject);
             }
 
             void CancelRequest()
             {
-                Instance.SendReply(From, Instance.GetMessage("BlockTPTakeDamage"));
+                Instance.SendReply(_from, Instance.GetMessage("BlockTPTakeDamage"));
 
-                if (Instance.EconomicsInstalled() && Instance.GetConfig<bool>("UseEconomicsPlugin"))
-                    Instance.RefundPlayerEconomics(From);
+                if (Instance.EconomicsInstalled() && Instance.ConfigFile.UseEconomicsPlugin)
+                    Instance.RefundPlayerEconomics(_from);
 
-                if (Instance.ServerRewardsInstalled() && Instance.GetConfig<bool>("UseServerRewardsPlugin"))
-                    Instance.RefundServerRewards(From);
+                if (Instance.ServerRewardsInstalled() && Instance.ConfigFile.UseServerRewardsPlugin)
+                    Instance.RefundServerRewards(_from);
 
-                PendingRequest pr = To.gameObject.GetComponent<PendingRequest>();
+                PendingRequest pr = _to.gameObject.GetComponent<PendingRequest>();
                 if (pr != null) GameObject.Destroy(pr);
 
                 GameObject.Destroy(this.gameObject);
@@ -181,7 +270,7 @@ namespace Oxide.Plugins
             void OnDestroy()
             {
                 CancelInvoke();
-                Instance.GameObjects.Remove(GameObject);
+                Instance.GameObjects.Remove(this.gameObject);
             }
         }
 
@@ -193,45 +282,58 @@ namespace Oxide.Plugins
 
         class Teleporter : MonoBehaviour
         {
-            GameObject GameObject;
-            int TimeUntilTeleport;
-            BasePlayer From;
-            BasePlayer To;
+            private GameObject _gameObject;
+            private BasePlayer _from;
+            private BasePlayer _to;
+            private int _timeUtilTeleport;
 
             public void Create(BasePlayer from, BasePlayer to, int timeUntilTeleport)
             {
-                this.GameObject = new GameObject();
-                this.TimeUntilTeleport = timeUntilTeleport;
-                this.From = from;
-                this.To = to;
-                Instance.GameObjects.Add(GameObject);
+                this._gameObject = new GameObject();
+                this._timeUtilTeleport = timeUntilTeleport;
+                this._from = from;
+                this._to = to;
+
+                Instance.GameObjects.Add(_gameObject);
             }
 
             void Start() => InvokeRepeating("TimerTick", 0, 1.0f);
 
             void TimerTick()
             {
-                if (TimeUntilTeleport == 0) Teleport();
-                TimeUntilTeleport--;
+                if (_timeUtilTeleport == 0) Teleport();
+                _timeUtilTeleport--;
             }
 
             void Teleport()
             {
-                Vector3 currentPos = From.transform.position;
-                Instance.RecordLastTP(From, currentPos);
+                Vector3 currentPos = _from.transform.position;
+                Instance.RecordLastTP(_from, currentPos);
 
-                Instance.Teleport(From, To);
+                Instance.Teleport(_from, _to);
 
-                Instance.SendReply(From, Instance.GetMessage("YouTeleportedTo").Replace("{0}", To.displayName));
-                Instance.SendReply(To, Instance.GetMessage("TeleportedToYou").Replace("{0}", From.displayName));
+                Instance.SendReply(_from, Instance.GetMessage("YouTeleportedTo").Replace("{0}", _to.displayName));
+                Instance.SendReply(_to, Instance.GetMessage("TeleportedToYou").Replace("{0}", _from.displayName));
 
-                int cooldown = Instance.GetLowest(Instance.GetConfig<Dictionary<string, object>>("Cooldowns"), From, Instance.GetConfig<int>("DefaultCooldown"));
-                Instance.storedData.Cooldowns.Add(From.userID, cooldown);
+                double cooldown = Instance.ConfigFile.DefaultCooldown;
 
-                if (Instance.GetConfig<int>("DefaultDailyLimit") != -1)
+                var lowestCooldown = Instance.ConfigFile.Cooldowns
+                    .Where(x => Instance.permission.UserHasPermission(_from.UserIDString, x.Key) &&
+                                x.Value < cooldown)
+                    .OrderBy(x => x.Value)
+                    .FirstOrDefault();
+                if (!lowestCooldown.Equals(default(KeyValuePair<string, double>)))
                 {
-                    int usesRemaining = Instance.IncrementUses(From);
-                    Instance.SendReply(From, Instance.GetMessage("TeleportsRemaining").Replace("{0}", usesRemaining.ToString()));
+                    cooldown = lowestCooldown.Value;
+                }
+
+                Instance.storedData.Cooldowns.Add(_from.userID, cooldown);
+
+                if (Instance.ConfigFile.DefaultDailyLimit > 0 &&
+                    !Instance.HasReachedDailyLimit(_from))
+                {
+                    int usesRemaining = Instance.IncrementUses(_from);
+                    Instance.SendReply(_from, Instance.GetMessage("TeleportsRemaining").Replace("{0}", usesRemaining.ToString()));
                 }
 
                 GameObject.Destroy(this.gameObject.GetComponent<Teleporter>());
@@ -239,14 +341,14 @@ namespace Oxide.Plugins
 
             public void CancelTeleport()
             {
-                Instance.SendReply(From, Instance.GetMessage("TeleportToCancelled").Replace("{0}", To.displayName));
-                Instance.SendReply(To, Instance.GetMessage("TeleportFromCancelled").Replace("{0}", From.displayName));
-                
-                if (Instance.EconomicsInstalled() && Instance.GetConfig<bool>("UseEconomicsPlugin"))
-                    Instance.RefundPlayerEconomics(From);
+                Instance.SendReply(_from, Instance.GetMessage("TeleportToCancelled").Replace("{0}", _to.displayName));
+                Instance.SendReply(_to, Instance.GetMessage("TeleportFromCancelled").Replace("{0}", _from.displayName));
 
-                if (Instance.ServerRewardsInstalled() && Instance.GetConfig<bool>("UseServerRewardsPlugin"))
-                    Instance.RefundServerRewards(From);
+                if (Instance.EconomicsInstalled() && Instance.ConfigFile.UseEconomicsPlugin)
+                    Instance.RefundPlayerEconomics(_from);
+
+                if (Instance.ServerRewardsInstalled() && Instance.ConfigFile.UseServerRewardsPlugin)
+                    Instance.RefundServerRewards(_from);
 
                 GameObject.Destroy(this.gameObject.GetComponent<Teleporter>());
             }
@@ -264,7 +366,7 @@ namespace Oxide.Plugins
             void OnDestory()
             {
                 CancelInvoke();
-                Instance.GameObjects.Remove(GameObject);
+                Instance.GameObjects.Remove(_gameObject);
             }
         }
 
@@ -288,12 +390,15 @@ namespace Oxide.Plugins
             void TimerTick()
             {
                 if (Instance?.storedData?.Cooldowns == null) return;
-                Dictionary<ulong, int> dict = new Dictionary<ulong, int>(Instance.storedData.Cooldowns);
-                foreach (KeyValuePair<ulong, int> kvp in dict)
+
+                foreach (KeyValuePair<ulong, double> kvp in new Dictionary<ulong, double>(Instance.storedData.Cooldowns))
                 {
                     Instance.storedData.Cooldowns[kvp.Key]--;
+
                     if (kvp.Value == 0)
+                    {
                         Instance.storedData.Cooldowns.Remove(kvp.Key);
+                    }
                 }
             }
 
@@ -307,7 +412,7 @@ namespace Oxide.Plugins
 
         class StoredData
         {
-            public Dictionary<ulong, int> Cooldowns = new Dictionary<ulong, int>();
+            public Dictionary<ulong, double> Cooldowns = new Dictionary<ulong, double>();
             public Dictionary<ulong, int> UsesToday = new Dictionary<ulong, int>();
         }
         StoredData storedData;
@@ -318,88 +423,100 @@ namespace Oxide.Plugins
 
         void Init()
         {
-            //Debugging mode should be enabled?
+            // Debugging mode should be enabled?
             if (ConVar.Server.hostname == "PsychoTea's Testing Server")
             {
                 DebuggingMode = true;
                 Puts("Debugging mode enabled.");
             }
 
-            //Register permissions
+            // Register regular permissions
             permission.RegisterPermission(permUse, this);
             permission.RegisterPermission(permCancel, this);
             permission.RegisterPermission(permBack, this);
             permission.RegisterPermission(permHere, this);
             permission.RegisterPermission(permSleepers, this);
-            foreach (string perm in GetConfig<Dictionary<string, object>>("Cooldowns").Keys)
-                permission.RegisterPermission(perm, this);
+
+            // Register config permissions
+            foreach (string perm in ConfigFile.Cooldowns.Keys)
+                if (!permission.PermissionExists(perm, this))
+                    permission.RegisterPermission(perm, this);
+
+            foreach (string perm in ConfigFile.DailyLimit.Keys)
+                if (!permission.PermissionExists(perm, this))
+                    permission.RegisterPermission(perm, this);
+
+            foreach (string perm in ConfigFile.TimeUntilTeleport.Keys)
+                if (!permission.PermissionExists(perm, this))
+                    permission.RegisterPermission(perm, this);
 
             lang.RegisterMessages(new Dictionary<string, string>()
             {
-                { "NoPermission", "У вас нет разрешения на использование этой команды." },
-                { "TeleportTitle", "Телепорт" },
-                { "RequestSent", "Запрос телепорта отправлен к {0}." },
-                { "RequestRecieved", "Запрос телепорта от {0}. Откройте графический интерфейс (/tp) чтобы принять телепорт." },
-                { "RequestToTimedOut", "Истекло время ожидания ответа {0} на ваш запрос телепорта." },
-                { "RequestFromTimedOut", "Истекло время ответа на запрос телепорт от {0}." },
-                { "HasPendingRequest", "У {0} уже есть ожидающий запрос телепорта." },
-                { "RequestFrom", "Запрос от {0}" },
-                { "RequestToAccepted", "Ваш запрос на телепорт был принят {0}. Телепортация через {1} секунд." },
-                { "RequestFromAccepted", "Запрос телепорта от {0} принят. Телепортация через {1} секунд." },
-                { "RequestToDenied", "Ваш запрос на телепорт к {0} отклонён." },
-                { "RequestFromDenied", "Запрос телепорта от {0} отменён." },
-                { "YouTeleportedTo", "Ты телепортировался к {0}." },
-                { "TeleportedToYou", "{0} телепортироваться к вам." },
-                { "OnCooldown", "Ваш телепорт откатится через {0} секунд." },
-                { "NoPendingRequests", "У вас нет запросов на телепорт." },
-                { "SyntaxTPR", "Неверная команда! Пиши: /tpr {name}" },
-                { "PlayerNotFound", "Игрок \"{0}\" не найден." },
-                { "PlayerIDNotFound", "Игрок с таким ID {0} не найден." },
-                { "MultiplePlayersFound", "Найдено несколько игроков с именем {0}." },
-                { "CantTeleportToSelf", "Ты не можешь телепортироваться сам к себе!" },
-                { "PlayerIsBuildBlocked", "Вы не можете использовать телепорт во время блокировки строительства!" },
-                { "TargetIsBuildBlocked", "Человек, к которому вы пытаетесь телепортироваться, заблокирован." },
-                { "LocationIsBuildBlocked", "Здание заблокировано в том месте, куда вы пытаетесь телепортироваться." },
-                { "PlayerIsBleeding", "Вы не можете использовать телепорт во время кровотечения." },
-                { "CantAffordEconomics", "Вы не можете себе этого позволить! Цена: ${0}" },
-                { "EconomicsYouSpent", "Вы потратили ${0} на этот телепорт." },
-                { "EconomicsRefunded", "Вам были возвращены ${0}." },
-                { "CantAffordServerRewards", "Вы не можете себе этого позволить! Цена: {0}RP" },
-                { "ServerRewardsYouSpent", "Вы потратили {0}RP на этот телепорт." },
-                { "ServerRewardsRefunded", "Вам были возвращены {0}RP." },
-                { "BlockTPCrafting", "Вы не можете использовать телепорт во время крафта." },
-                { "MaxTeleportsReached", "На сегодня ваши телепорты закончились." },
-                { "TeleportsRemaining", "{0} телепортов, осталось на сегодня." },
-                { "TeleportRequestFromCancelled", "Запрос телепортации от {0} отменен." },
-                { "TeleportRequestToCancelled", "Телепорт на {0} отменен." },
-                { "TeleportRequestCancelled", "Запрос на телепорт отменен." },
-                { "TeleportToCancelled", "Телепорт в {0} отменен." },
-                { "TeleportFromCancelled", "Телепорт к {0} отменен." },
-                { "NoBackLocation", "У вас нет предыдущего места для возврата." },
-                { "TeleportedBack", "Телепортация обратно в ваше предыдущее местоположение." },
-                { "SummonedToYou", "{0} был вызван к вам." },
-                { "SummonedTo", "Вы были вызваны {0}." },
-                { "SyntaxTPHere", "Неизвесная команда! Пиши: /tphere {name}" },
-                { "TPPos-InvalidSyntax", "Неизвесная команда! Пиши: /tp {x} {y} {z}" },
-                { "TPToPos", "Телепортация в {x}, {y}, {z}" },
-                { "NothingToCancel", "У вас нет телепортов для отмены." },
-                { "CantTeleportFromZone", "Вы не можете телепортироваться из этой зоны." },
-                { "CantTeleportToZone", "Вы не можете телепортироваться в эту зону." },
-                { "CantTPWhilstWounded", "Вы не можете телепортироваться, пока ранены." }
+                { "NoPermission", "You do not have permission to use this command." },
+                { "TeleportTitle", "Teleport" },
+                { "RequestSent", "Teleport request sent to {0}." },
+                { "HereRequestSent", "Teleport here request sent to {0}." },
+                { "RequestRecieved", "Teleport request from {0}. Open the teleport GUI (/tp) to accept." },
+                { "HereRequestRecieved", "Teleport here request from {0}. Open the teleport GUI (/tp) to accept." },
+                { "RequestToTimedOut", "Your teleport request to {0} timed out." },
+                { "HereRequestToTimedOut", "Your teleport here request to {0} timed out." },
+                { "RequestFromTimedOut", "The teleport request from {0} timed out." },
+                { "HereRequestFromTimedOut", "The teleport here request from {0} timed out." },
+                { "HasPendingRequest", "{0} already has a pending teleport request." },
+                { "RequestFrom", "Request from {0}" },
+                { "RequestToAccepted", "Your teleport request to {0} was accepted. Teleporting in {1} seconds." },
+                { "RequestFromAccepted", "Teleport request from {0} accepted. Telporting in {1} seconds." },
+                { "RequestToDenied", "Your teleport request to {0} was denied." },
+                { "HereRequestToDenied", "Your teleport here request to {0} was denied." },
+                { "RequestFromDenied", "Teleport request from {0} denied." },
+                { "HereRequestFromDenied", "Teleport here request from {0} denied." },
+                { "YouTeleportedTo", "You teleported to {0}." },
+                { "TeleportedToYou", "{0} teleported to you." },
+                { "OnCooldown", "Your teleport is on cooldown for {0} seconds." },
+                { "NoPendingRequests", "You don't have any pending requests." },
+                { "SyntaxTPR", "Incorrect usage! /tpr {name}" },
+                { "PlayerNotFound", "The player \"{0}\" was not found." },
+                { "PlayerIDNotFound", "A player with the user ID {0} was not found." },
+                { "MultiplePlayersFound", "Multiple players were found with the name {0}." },
+                { "CantTeleportToSelf", "You can't teleport to yourself, silly!" },
+                { "PlayerIsBuildBlocked", "You may not use teleport whilst building blocked!" },
+                { "TargetIsBuildBlocked", "The person you're trying to teleport to is building blocked." },
+                { "LocationIsBuildBlocked", "You are building blocked in the location you're trying to teleport to." },
+                { "PlayerIsBleeding", "You may not use teleport whilst bleeding." },
+                { "CantAffordEconomics", "You can't afford this! Price: ${0}" },
+                { "EconomicsYouSpent", "You spent ${0} on this teleport." },
+                { "EconomicsRefunded", "You were refunded ${0}." },
+                { "CantAffordServerRewards", "You can't afford this! Price: {0}RP" },
+                { "ServerRewardsYouSpent", "You spent {0}RP on this teleport." },
+                { "ServerRewardsRefunded", "You were refunded {0}RP." },
+                { "BlockTPCrafting", "You may not use teleport whilst crafting." },
+                { "MaxTeleportsReached", "You have reached your max teleports for today." },
+                { "TeleportsRemaining", "{0} teleports remaining today." },
+                { "TeleportRequestFromCancelled", "Teleport request from {0} cancelled." },
+                { "TeleportRequestToCancelled", "Teleport request to {0} cancelled." },
+                { "TeleportRequestCancelled", "Teleport request cancelled." },
+                { "TeleportToCancelled", "Teleport to {0} cancelled." },
+                { "TeleportFromCancelled", "Teleport from {0} cancelled." },
+                { "NoBackLocation", "You have no previous location to return to." },
+                { "TeleportedBack", "Teleported back to your previous location." },
+                { "SyntaxTPHere", "Incorrect usage! /tphere {name}" },
+                { "TPPos-InvalidSyntax", "Incorrect usage! /tp {x} {y} {z}" },
+                { "TPToPos", "Teleported to {x}, {y}, {z}" },
+                { "NothingToCancel", "You have no teleports to cancel." },
+                { "CantTeleportFromZone", "You may not teleport out of a ZoneManager zone." },
+                { "CantTeleportToZone", "You may not teleport into a ZoneManager zone." },
+                { "CantTPWhilstWounded", "You may not TP whilst wounded." },
+                { "IsEscapeBlocked", "You are currently escape blocked and may not teleport." }
             }, this, "en");
 
             ReadData();
 
-            foreach (string cmdAlias in GetConfig<List<object>>("TPCommandAliases"))
+            foreach (string cmdAlias in ConfigFile.TPCommandAliases)
                 cmd.AddChatCommand(cmdAlias, this, "tpCommand");
 
             timer.Once(TimeUntilMidnight(), () => ResetDailyUses());
 
-            if (DebuggingMode)
-            {
-                foreach (var check in BasePlayer.activePlayerList)
-                    ShowTeleportUI(check);
-            }
+            if (DebuggingMode) BasePlayer.activePlayerList.ForEach(x => ShowTeleportUI(x));
         }
 
         void OnServerInitialized()
@@ -408,14 +525,23 @@ namespace Oxide.Plugins
 
             CooldownManager.Create();
 
-            if (Economics == null && GetConfig<bool>("UseEconomicsPlugin"))
+            if (Economics == null && ConfigFile.UseEconomicsPlugin)
             {
                 Debug.LogError("[TeleportGUI] Error! Economics is enabled in the config but is not installed! Please install Economics or disable 'UseEconomicsPlugin' in the config!");
             }
 
-            if (ServerRewards == null && GetConfig<bool>("UseServerRewardsPlugin"))
+            if (ServerRewards == null && ConfigFile.UseServerRewardsPlugin)
             {
                 Debug.LogError("[TeleportGUI] Error! ServerRewards is enabled in the config but is not installed! Please install ServerRewards or disable 'UseServerRewardsPlugin' in the config!");
+            }
+
+            if (!ConfigFile.UseEconomicsPlugin &&
+                !ConfigFile.UseServerRewardsPlugin &&
+                ConfigFile.PayAfterUsingDailyLimits)
+            {
+                Debug.LogError("[TeleportGUI] Error! PayAfterUsingDailyLimits is set in the config, but neither UseEconomicsPlugin or UseServerRewardsPlugin is set! Please fix this error before loading TeleportGUI again. Unloading...");
+                Interface.Oxide.UnloadPlugin(this.Title);
+                return;
             }
         }
 
@@ -426,7 +552,7 @@ namespace Oxide.Plugins
             if (player == null) return;
 
             if (!HasComponent<Teleporter>(player)) return;
-            if (!GetConfig<bool>("CancelTeleportOnDamage")) return;
+            if (!ConfigFile.CancelTeleportOnDamage) return;
 
             var teleporter = player.gameObject.GetComponent<Teleporter>();
             teleporter.CancelTeleport();
@@ -450,54 +576,69 @@ namespace Oxide.Plugins
             SaveData();
         }
 
-        protected override void LoadDefaultConfig()
-        {
-            PrintWarning("Creating a new configuration file.");
+        #endregion
 
-            Config["PrefixEnabled"] = true;
-            Config["PrefixText"] = "<color=orange>TP: </color>";
-            Config["DefaultTimeUntilTeleport"] = 25;
-            Config["TimeUntilTeleport"] = new Dictionary<string, int>()
+        #region Config
+
+        ConfigData ConfigFile;
+
+        class ConfigData
+        {
+            public bool PrefixEnabled = true;
+            public string PrefixText = "<color=orange>TP: </color>";
+            public int DefaultTimeUntilTeleport = 15;
+            public Dictionary<string, int> TimeUntilTeleport = new Dictionary<string, int>()
             {
-                { "teleportgui.vip", 20 },
-                { "teleportgui.elite", 15 },
-                { "teleportgui.god", 5 },
+                { "teleportgui.vip", 10 },
+                { "teleportgui.elite", 5 },
+                { "teleportgui.god", 3 },
                 { "teleportgui.none", 0 }
             };
-            Config["TPCommandAliases"] = new List<string>() { "teleport" };
-            Config["RequestTimeoutTime"] = 30;
-            Config["DefaultCooldown"] = 180;
-            Config["Cooldowns"] = new Dictionary<string, int>()
+            public List<string> TPCommandAliases = new List<string>() { };
+            public double RequestTimeoutTime = 30;
+            public double DefaultCooldown = 180;
+            public Dictionary<string, double> Cooldowns = new Dictionary<string, double>()
             {
                 { "teleportgui.vip", 60 },
                 { "teleportgui.elite", 30 },
                 { "teleportgui.god", 15 },
                 { "teleportgui.none", 0 }
             };
-            Config["DefaultDailyLimit"] = 3;
-            Config["DailyLimit"] = new Dictionary<string, int>()
+            public int DefaultDailyLimit = 3;
+            public Dictionary<string, int> DailyLimit = new Dictionary<string, int>()
             {
                 { "teleportgui.vip", 5 },
                 { "teleportgui.elite", 8 },
                 { "teleportgui.god", 15 },
                 { "teleportgui.none", 9999 }
             };
-            Config["AdminTPSilent"] = false;
-            Config["AdminTPEnabled"] = false;
-            Config["AllowTeleportWhilstBleeding"] = false;
-            Config["AllowTeleportToBuildBlockedPlayer"] = false;
-            Config["AllowTeleportIntoBuildBlock"] = false;
-            Config["AllowTeleportFromBuildBlock"] = false;
-            Config["UseEconomicsPlugin"] = false;
-            Config["EconomicsPrice"] = 100;
-            Config["UseServerRewardsPlugin"] = false;
-            Config["ServerRewardsPrice"] = 10;
-            Config["BlockTPCrafting"] = true;
-            Config["AllowSpecialCharacters"] = false;
-            Config["CancelTeleportOnDamage"] = true;
-            Config["CanTeleportIntoZone"] = true;
-            Config["CanTeleportFromZone"] = true;
+            public bool AdminTPSilent = false;
+            public bool AdminTPEnabled = false;
+            public bool AllowTeleportWhilstBleeding = false;
+            public bool AllowTeleportToBuildBlockedPlayer = false;
+            public bool AllowTeleportFromBuildBlock = false;
+            public bool UseEconomicsPlugin = false;
+            public double EconomicsPrice = 100;
+            public bool UseServerRewardsPlugin = false;
+            public int ServerRewardsPrice = 10;
+            public bool PayAfterUsingDailyLimits = false;
+            public bool BlockTPCrafting = true;
+            public bool AllowSpecialCharacters = false;
+            public bool CancelTeleportOnDamage = true;
+            public bool CanTeleportIntoZone = true;
+            public bool CanTeleportFromZone = true;
         }
+
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            ConfigFile = Config.ReadObject<ConfigData>();
+            Config.WriteObject(ConfigFile, true);
+        }
+
+        protected override void LoadDefaultConfig() => ConfigFile = new ConfigData();
+
+        protected override void SaveConfig() => Config.WriteObject(ConfigFile, true);
 
         #endregion
 
@@ -576,7 +717,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            TPR(player, targetPlayer);
+            TPR(player, targetPlayer, false);
             return;
         }
 
@@ -646,8 +787,8 @@ namespace Oxide.Plugins
             TPB(player);
         }
 
-        [ChatCommand("tphere")]
-        void TPHereCommand(BasePlayer player, string command, string[] args)
+        [ChatCommand("tpahere")]
+        void TPAHereCommand(BasePlayer player, string command, string[] args)
         {
             if (!HasPerm(player, permHere))
             {
@@ -662,7 +803,7 @@ namespace Oxide.Plugins
             }
 
             string targetName = string.Join(" ", args);
-            
+
             List<BasePlayer> matches = FindByNameMulti(targetName);
             if (matches.Count() == 0)
             {
@@ -753,7 +894,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                TPR(player, targetPlayer);
+                TPR(player, targetPlayer, false);
                 return;
             }
             #endregion
@@ -881,14 +1022,14 @@ namespace Oxide.Plugins
             #endregion
         }
 
-        [ConsoleCommand("resetdatafile")]
+        [ConsoleCommand("tpgui.resetdatafile")]
         void ResetAllCommand(ConsoleSystem.Arg arg)
         {
             if (arg.Player() != null) return;
 
             if (!DebuggingMode)
             {
-                Debug.LogError("[TeleportGUI] Вы не можете использовать эту команду. Предупреждение: это непроверенно и небезопасно. Пожалуйста, не пропустите это предупреждение.");
+                Debug.LogError("[TeleportGUI] You may not use this command. Warning: It is highly untested and unsafe. Please to not bypass this warning.");
                 return;
             }
 
@@ -945,7 +1086,10 @@ namespace Oxide.Plugins
 
             var guiSettings = GUIManager.Get(player);
 
-            List<BasePlayer> players = new List<BasePlayer>(!guiSettings.Sleepers ? BasePlayer.allPlayerList : BasePlayer.sleepingPlayerList);
+            List<BasePlayer> players = !guiSettings.Sleepers ?
+                                       BasePlayer.activePlayerList :
+                                       BasePlayer.sleepingPlayerList;
+            players = new List<BasePlayer>(players);
 
             if (!DebuggingMode && players.Contains(player))
             {
@@ -1252,7 +1396,7 @@ namespace Oxide.Plugins
                             Color = "0 0 0 0"
                         }
                     }, playerList);
-                    
+
                     GUIElement.Add(new CuiButton
                     {
                         RectTransform =
@@ -1338,7 +1482,10 @@ namespace Oxide.Plugins
 
             var guiSettings = GUIManager.Get(player);
 
-            List<BasePlayer> players = new List<BasePlayer>(!guiSettings.Sleepers ? BasePlayer.allPlayerList : BasePlayer.sleepingPlayerList);
+            List<BasePlayer> players = !guiSettings.Sleepers ?
+                                       BasePlayer.activePlayerList :
+                                       BasePlayer.sleepingPlayerList;
+            players = new List<BasePlayer>(players);
 
             if (!DebuggingMode && players.Contains(player))
             {
@@ -1647,7 +1794,7 @@ namespace Oxide.Plugins
                             Color = "0 1 0 0"
                         }
                     }, playerList);
-                    
+
                     GUIElement.Add(new CuiButton
                     {
                         RectTransform =
@@ -1782,12 +1929,17 @@ namespace Oxide.Plugins
 
         #region TP Functions
 
-        void TPR(BasePlayer player, BasePlayer targetPlayer)
+        void TPR(BasePlayer player, BasePlayer targetPlayer, bool tpHere)
         {
-            if (player.IsAdmin && GetConfig<bool>("AdminTPEnabled"))
+            bool playerIsPaying = false;
+
+            if (player.IsAdmin && ConfigFile.AdminTPEnabled)
             {
-                if (!GetConfig<bool>("AdminTPSilent"))
+                if (!ConfigFile.AdminTPSilent)
+                {
                     SendReply(player, GetMessage("TeleportedToYou").Replace("{0}", player.displayName));
+                }
+
                 SendReply(player, GetMessage("YouTeleportedTo").Replace("{0}", targetPlayer.displayName));
 
                 Vector3 currentPos = player.transform.position;
@@ -1809,7 +1961,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (!GetConfig<bool>("AllowTeleportWhilstBleeding"))
+            if (!ConfigFile.AllowTeleportWhilstBleeding)
             {
                 if (player.metabolism.bleeding.value > 0f)
                 {
@@ -1818,7 +1970,7 @@ namespace Oxide.Plugins
                 }
             }
 
-            if (!GetConfig<bool>("AllowTeleportFromBuildBlock"))
+            if (!ConfigFile.AllowTeleportFromBuildBlock)
             {
                 if (!player.CanBuild())
                 {
@@ -1827,20 +1979,11 @@ namespace Oxide.Plugins
                 }
             }
 
-            if (!GetConfig<bool>("AllowTeleportToBuildBlockedPlayer"))
+            if (!ConfigFile.AllowTeleportToBuildBlockedPlayer)
             {
                 if (!targetPlayer.CanBuild())
                 {
                     SendReply(player, GetMessage("TargetIsBuildBlocked"));
-                    return;
-                }
-            }
-
-            if (!GetConfig<bool>("AllowTeleportIntoBuildBlock"))
-            {
-                if (IsBuildingBlocked(player, targetPlayer.transform.position))
-                {
-                    SendReply(player, GetMessage("LocationIsBuildBlocked"));
                     return;
                 }
             }
@@ -1857,41 +2000,68 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (GetConfig<bool>("UseEconomicsPlugin"))
+            if (ConfigFile.UseEconomicsPlugin &&
+                !ConfigFile.PayAfterUsingDailyLimits)
             {
                 if (EconomicsInstalled())
                 {
-                    if (!CanAffordEconomics(player))
+                    if (!PayEconomics(player))
                     {
-                        SendReply(player, GetMessage("CantAffordEconomics").Replace("{0}", GetConfig<double>("EconomicsPrice").ToString()));
+                        SendReply(player, GetMessage("CantAffordEconomics").Replace("{0}", ConfigFile.EconomicsPrice.ToString("N2")));
                         return;
                     }
-                    SendReply(player, GetMessage("EconomicsYouSpent").Replace("{0}", GetConfig<double>("EconomicsPrice").ToString()));
+
+                    SendReply(player, GetMessage("EconomicsYouSpent").Replace("{0}", ConfigFile.EconomicsPrice.ToString("N2")));
+                    playerIsPaying = true;
                 }
             }
 
-            if (GetConfig<bool>("UseServerRewardsPlugin"))
+            if (ConfigFile.UseServerRewardsPlugin &&
+                !ConfigFile.PayAfterUsingDailyLimits)
             {
                 if (ServerRewardsInstalled())
                 {
-                    if (!CanAffordServerRewards(player))
+                    if (!PayServerRewards(player))
                     {
-                        SendReply(player, GetMessage("CantAffordServerRewards").Replace("{0}", GetConfig<double>("ServerRewardsPrice").ToString()));
+                        SendReply(player, GetMessage("CantAffordServerRewards").Replace("{0}", ConfigFile.ServerRewardsPrice.ToString("N1")));
                         return;
                     }
-                    SendReply(player, GetMessage("ServerRewardsYouSpent").Replace("{0}", GetConfig<double>("ServerRewardsPrice").ToString()));
+
+                    SendReply(player, GetMessage("ServerRewardsYouSpent").Replace("{0}", ConfigFile.ServerRewardsPrice.ToString("N1")));
+                    playerIsPaying = true;
                 }
             }
 
-            if (GetConfig<int>("DefaultDailyLimit") != -1)
+            if (HasReachedDailyLimit(player))
             {
-                int maxTeleports = GetHighest(GetConfig<Dictionary<string, object>>("DailyLimit"), player, GetConfig<int>("DefaultDailyLimit"));
-                if (!storedData.UsesToday.ContainsKey(player.userID))
-                    storedData.UsesToday.Add(player.userID, 0);
-                if (storedData.UsesToday[player.userID] >= maxTeleports)
+                if (!ConfigFile.PayAfterUsingDailyLimits)
                 {
                     SendReply(player, GetMessage("MaxTeleportsReached"));
                     return;
+                }
+
+                if (ConfigFile.UseEconomicsPlugin)
+                {
+                    if (!PayEconomics(player))
+                    {
+                        SendReply(player, GetMessage("CantAffordEconomics").Replace("{0}", ConfigFile.EconomicsPrice.ToString("N1")));
+                        return;
+                    }
+
+                    SendReply(player, GetMessage("EconomicsYouSpent").Replace("{0}", ConfigFile.EconomicsPrice.ToString("N1")));
+                    playerIsPaying = true;
+                }
+
+                if (ConfigFile.UseServerRewardsPlugin)
+                {
+                    if (!PayServerRewards(player))
+                    {
+                        SendReply(player, GetMessage("CantAffordServerRewards").Replace("{0}", ConfigFile.ServerRewardsPrice.ToString("N1")));
+                        return;
+                    }
+
+                    SendReply(player, GetMessage("ServerRewardsYouSpent").Replace("{0}", ConfigFile.ServerRewardsPrice.ToString("N1")));
+                    playerIsPaying = true;
                 }
             }
 
@@ -1902,9 +2072,16 @@ namespace Oxide.Plugins
                 return;
             }
 
+            bool escapeBlocked = NoEscape?.Call<bool>("IsBlocked", player) ?? false;
+            if (escapeBlocked)
+            {
+                SendReply(player, GetMessage("IsEscapeBlocked"));
+                return;
+            }
+
             if (ZoneManager != null)
             {
-                if (!GetConfig<bool>("CanTeleportFromZone"))
+                if (!ConfigFile.CanTeleportFromZone)
                 {
                     var call = ZoneManager.Call("EntityHasFlag", player, "notp");
                     if (call is bool && (bool)call)
@@ -1914,7 +2091,7 @@ namespace Oxide.Plugins
                     }
                 }
 
-                if (!GetConfig<bool>("CanTeleportIntoZone"))
+                if (!ConfigFile.CanTeleportIntoZone)
                 {
                     var call = ZoneManager.Call("EntityHasFlag", targetPlayer, "notp");
                     if (call is bool && (bool)call)
@@ -1925,7 +2102,12 @@ namespace Oxide.Plugins
                 }
             }
 
-            TeleportRequest.Create(player, targetPlayer, GetConfig<int>("RequestTimeoutTime"));
+            TeleportRequest.Create(
+                player,
+                targetPlayer,
+                ConfigFile.RequestTimeoutTime,
+                tpHere,
+                playerIsPaying);
         }
 
         void TPC(BasePlayer player)
@@ -1968,7 +2150,8 @@ namespace Oxide.Plugins
                 return;
             }
 
-            BasePlayer target = BasePlayer.FindByID(targetID);
+            BasePlayer target = BasePlayer.FindByID(targetID) ??
+                                BasePlayer.sleepingPlayerList.FirstOrDefault(x => x.userID == targetID);
 
             if (target == null)
             {
@@ -1982,9 +2165,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            Teleport(target, player);
-            SendReply(player, GetMessage("SummonedToYou").Replace("{0}", target.displayName));
-            SendReply(target, GetMessage("SummonedTo").Replace("{0}", player.displayName));
+            TPR(target, player, true);
         }
 
         void Teleport(BasePlayer player, BasePlayer target) => Teleport(player, target.transform.position);
@@ -2028,49 +2209,62 @@ namespace Oxide.Plugins
 
         bool HasPendingTeleport(BasePlayer player) => HasComponent<PendingRequest>(player) || HasComponent<Teleporter>(player);
 
+        bool HasReachedDailyLimit(BasePlayer player)
+        {
+            int maxTeleports = ConfigFile.DefaultDailyLimit;
+
+            if (maxTeleports <= 0) return false;
+
+            var highestMaxTeleports = ConfigFile.DailyLimit
+                .Where(x => permission.UserHasPermission(player.UserIDString, x.Key) &&
+                            x.Value > maxTeleports)
+                .OrderByDescending(x => x.Value)
+                .FirstOrDefault();
+
+            if (!highestMaxTeleports.Equals(default(KeyValuePair<string, int>)))
+            {
+                maxTeleports = highestMaxTeleports.Value;
+            }
+
+            if (!storedData.UsesToday.ContainsKey(player.userID))
+            {
+                storedData.UsesToday.Add(player.userID, 0);
+            }
+
+            return storedData.UsesToday[player.userID] >= maxTeleports;
+        }
+
         int IncrementUses(BasePlayer player)
         {
             if (!storedData.UsesToday.ContainsKey(player.userID))
+            {
                 storedData.UsesToday.Add(player.userID, 0);
+            }
+
             storedData.UsesToday[player.userID]++;
             SaveData();
-            int maxTeleports = Instance.GetHighest(Instance.GetConfig<Dictionary<string, object>>("DailyLimit"), player, Instance.GetConfig<int>("DefaultDailyLimit"));
-            int usesRemaining = maxTeleports - storedData.UsesToday[player.userID];
-            return usesRemaining;
+
+            int maxTeleports = ConfigFile.DefaultDailyLimit;
+
+            var highestMaxTeleports = ConfigFile.DailyLimit
+                .Where(x => permission.UserHasPermission(player.UserIDString, x.Key) &&
+                            x.Value > maxTeleports)
+                .OrderByDescending(x => x.Value)
+                .FirstOrDefault();
+
+            if (!highestMaxTeleports.Equals(default(KeyValuePair<string, int>)))
+            {
+                maxTeleports = highestMaxTeleports.Value;
+            }
+
+            return maxTeleports - storedData.UsesToday[player.userID];
         }
 
-        int GetLowest(Dictionary<string, object> objDict, BasePlayer player, int lowest = Int32.MaxValue)
+        void ResetDailyUses()
         {
-            Dictionary<string, int> dict = new Dictionary<string, int>();
-            foreach (var kvp in objDict)
-                dict.Add(kvp.Key, Int32.Parse(kvp.Value.ToString()));
-            foreach (var kvp in dict)
-                if (kvp.Value < lowest)
-                    if (permission.UserHasPermission(player.UserIDString, kvp.Key))
-                        lowest = kvp.Value;
-            return lowest;
-        }
-
-        int GetHighest(Dictionary<string, object> objDict, BasePlayer player, int highest = Int32.MinValue)
-        {
-            Dictionary<string, int> dict = new Dictionary<string, int>();
-            foreach (var kvp in objDict)
-                dict.Add(kvp.Key, Int32.Parse(kvp.Value.ToString()));
-            foreach (var kvp in dict)
-                if (kvp.Value > highest)
-                    if (permission.UserHasPermission(player.UserIDString, kvp.Key))
-                        highest = kvp.Value;
-            return highest;
-        }
-
-        bool IsBuildingBlocked(BasePlayer player, Vector3 pos)
-        {
-            var colliders = Pool.GetList<Collider>();
-            Vis.Colliders(pos, 0.1f, colliders, LayerMask.GetMask("Trigger"));
-            var cupboard = colliders.Select(x => x.GetComponentInParent<BuildingPrivlidge>()).Where(x => x != null).FirstOrDefault();
-            Pool.FreeList(ref colliders);
-            if (cupboard == null) return false;
-            return player.userID != cupboard.OwnerID && !cupboard.IsAuthed(player);
+            storedData.UsesToday.Clear();
+            SaveData();
+            timer.Once(TimeUntilMidnight(), () => ResetDailyUses());
         }
 
         bool IsCrafting(BasePlayer player) => (player.inventory.crafting.queue.Count() > 0);
@@ -2103,22 +2297,22 @@ namespace Oxide.Plugins
 
         bool ServerRewardsInstalled() => ServerRewards != null;
 
-        bool CanAffordEconomics(BasePlayer player)
+        bool PayEconomics(BasePlayer player)
         {
-            double price = GetConfig<double>("EconomicsPrice");
-            double playerMoney = (double)Economics.Call("GetPlayerMoney", player.userID);
+            double price = ConfigFile.EconomicsPrice;
+            double playerMoney = (double)Economics.Call("Balance", player.userID);
 
             if (playerMoney - price >= 0)
             {
-                Economics?.Call("Set", player.userID, playerMoney - price);
+                Economics?.Call("Withdraw", player.userID, price);
                 return true;
             }
             return false;
         }
 
-        bool CanAffordServerRewards(BasePlayer player)
+        bool PayServerRewards(BasePlayer player)
         {
-            int price = GetConfig<int>("ServerRewardsPrice");
+            int price = ConfigFile.ServerRewardsPrice;
             int currentPoints;
             var call = ServerRewards?.Call("CheckPoints", player.userID);
             if (call == null) currentPoints = 0;
@@ -2134,27 +2328,19 @@ namespace Oxide.Plugins
 
         void RefundPlayerEconomics(BasePlayer player)
         {
-            double price = GetConfig<double>("EconomicsPrice");
-            double playerMoney = (double)Economics.Call("GetPlayerMoney", player.userID);
-            Economics?.Call("Set", player.userID, playerMoney + price);
-            SendReply(player, GetMessage("EconomicsRefunded").Replace("{0}", price.ToString()));
+            double price = ConfigFile.EconomicsPrice;
+            Economics?.Call("Deposit", player.userID, price);
+            SendReply(player, GetMessage("EconomicsRefunded").Replace("{0}", price.ToString("N2")));
         }
 
         void RefundServerRewards(BasePlayer player)
         {
-            int price = GetConfig<int>("ServerRewardsPrice");
+            int price = ConfigFile.ServerRewardsPrice;
             ServerRewards.Call("AddPoints", player.userID, price);
-            SendReply(player, GetMessage("ServerRewardsRefunded").Replace("{0}", price.ToString()));
+            SendReply(player, GetMessage("ServerRewardsRefunded").Replace("{0}", price.ToString("N1")));
         }
 
         #endregion
-
-        void ResetDailyUses()
-        {
-            storedData.UsesToday.Clear();
-            SaveData();
-            timer.Once(TimeUntilMidnight(), () => ResetDailyUses());
-        }
 
         #endregion
 
@@ -2163,27 +2349,18 @@ namespace Oxide.Plugins
         bool HasPerm(BasePlayer player) => (permission.UserHasPermission(player.UserIDString, permUse) || player.IsAdmin);
         bool HasPerm(BasePlayer player, string perm) => (permission.UserHasPermission(player.UserIDString, perm) || player.IsAdmin);
 
-        string CleanText(string text) => GetConfig<bool>("AllowSpecialCharacters") ? text : new Regex(@"[^A-Za-z0-9\/:*?<>|!@#$%^&()\[\] ]+").Replace(text, " ");
+        string CleanText(string text) => ConfigFile.AllowSpecialCharacters ? text : new Regex(@"[^A-Za-z0-9\/:*?<>|!@#$%^&()\[\] ]+").Replace(text, " ");
 
         int TimeUntilMidnight() => ((59 - DateTime.Now.Second) + ((59 - DateTime.Now.Minute) * 60) + ((23 - DateTime.Now.Hour) * 3600));
 
-        T GetConfig<T>(string key)
-        {
-            if (Config[key] == null)
-            {
-                Debug.LogError($"[TeleportGUI] Tried to grab the key \"{key}\" from the config. Either add it manually or delete the config and allow it to regenerate.");
-                return default(T);
-            }
-            return (T)Convert.ChangeType(Config[key], typeof(T));
-        }
-
-        string GetMessage(string key) => (GetConfig<bool>("PrefixEnabled") ? GetConfig<string>("PrefixText") : "") + lang.GetMessage(key, this);
+        string GetMessage(string key) => (ConfigFile.PrefixEnabled ? ConfigFile.PrefixText : string.Empty) + lang.GetMessage(key, this);
 
         bool HasComponent<T>(GameObject go) => (go.GetComponent<T>() != null);
         bool HasComponent<T>(BasePlayer player) => (player.GetComponent<T>() != null);
 
         void SaveData() => Interface.Oxide.DataFileSystem.WriteObject(this.Title, storedData);
         void ReadData() => storedData = Interface.Oxide.DataFileSystem.ReadObject<StoredData>(this.Title);
+
         #endregion
 
         #region Spare Names (For Testing)

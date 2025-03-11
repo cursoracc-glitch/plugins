@@ -10,11 +10,11 @@ using Time = Oxide.Core.Libraries.Time;
 
 namespace Oxide.Plugins
 {
-    [Info("RestartGUI", "Foxyd | topplugin.ru", "1.0.0")]
+    [Info("RestartGUI", "poof", "1.0.0")]
     public class RestartGUI : RustPlugin
     {
         private const string Layer = "RestartLayer";
-
+        
         private static class RestartConfig
         {
             public static int Time = 0;
@@ -23,25 +23,24 @@ namespace Oxide.Plugins
 
             public static bool First = true;
         }
-
+        
         #region Config
 
         private Configuration config = new Configuration();
-
+        
         private class Configuration
         {
-            [JsonProperty("Время рестарта")]
-            public string Time = "4:55";
+            [JsonProperty("Время рестарта")] 
+            public string Time = "04:00";
 
-            [JsonProperty("Время до рестарта")]
+            [JsonProperty("Время до рестарта")] 
             public int RestartTime = 300;
 
-            [JsonProperty("Сообщение о рестарте")]
-            public string RestartTimerText = "Сервер перезагрузится через {0} секунд";
-
-            [JsonProperty("Звук")]
+            [JsonProperty("Звук проигрывания")]
             public string Effect = "assets/bundled/prefabs/fx/notice/item.select.fx.prefab";
 
+            [JsonProperty("Сообщение о рестарте")] 
+            public string RestartTimerText = "Сервер перезагрузится через {0} секунд";
         }
 
         protected override void LoadConfig()
@@ -51,13 +50,13 @@ namespace Oxide.Plugins
             try
             {
                 config = Config.ReadObject<Configuration>();
-                if (config == null) throw new Exception();
+                if(config == null) throw new Exception();
             }
             catch
             {
                 Config.WriteObject(config, false, $"{Interface.Oxide.ConfigDirectory}/{Name}.jsonError");
                 PrintError("Ошибка в конфигурации плагина RestartGUI");
-
+                
                 LoadDefaultConfig();
             }
         }
@@ -68,7 +67,7 @@ namespace Oxide.Plugins
 
         #endregion
 
-        #region Hook
+        #region Hooks
 
         private void OnServerInitialized()
         {
@@ -78,105 +77,98 @@ namespace Oxide.Plugins
         private void OnTick()
         {
             if (DateTime.Now.ToString("t") != config.Time || RestartConfig.Restart) return;
-
+            
             RestartConfig.Restart = true;
             ExecuteRestart(config.RestartTime);
         }
-
+        
         #endregion
+        
+        #region Commands
 
-        #region Command
-
-        [ConsoleCommand("restart")]
+        [ConsoleCommand("reload")]
         private void ConsoleReload(ConsoleSystem.Arg arg)
         {
             if (!arg.IsServerside) return;
 
-            if (arg.Connection != null)
-            {
-                var player = arg.Connection.player as global::BasePlayer;
-                if (player != null)
-                    return;
-            }
-
             var args = arg.Args ?? new string[0];
-
+            
             switch (args.Length)
             {
                 case 0:
+                {
+                    if (RestartConfig.Restart)
                     {
-                        if (RestartConfig.Restart)
-                        {
-                            ResetConfig();
-                            return;
-                        }
-
-                        RestartConfig.Restart = true;
-                        ExecuteRestart(config.RestartTime);
+                        ResetConfig();
                         return;
                     }
+
+                    RestartConfig.Restart = true;
+                    ExecuteRestart(config.RestartTime);
+                    return;
+                }
                 case 1:
+                {
+                    if (RestartConfig.Restart || args[0].ToLower() == "stop")
                     {
-                        if (RestartConfig.Restart || args[0].ToLower() == "stop")
-                        {
-                            ResetConfig();
-                            return;
-                        }
-
-                        int time;
-
-                        if (!int.TryParse(args[0], out time)) return;
-
                         ResetConfig();
-                        RestartConfig.Restart = true;
-                        ExecuteRestart(time);
-                        break;
+                        return;
                     }
+
+                    int time;
+
+                    if (!int.TryParse(args[0], out time)) return;
+                
+                    ResetConfig();
+                    RestartConfig.Restart = true;
+                    ExecuteRestart(time);
+                    break;
+                }
             }
         }
 
-        [ChatCommand("restart")]
+        [ChatCommand("reload")]
         private void CMDReload(BasePlayer player, string cmd, string[] args)
         {
             if (!player.IsAdmin) return;
-
+            
             switch (args.Length)
             {
                 case 0:
+                {
+                    if (RestartConfig.Restart)
                     {
-                        if (RestartConfig.Restart)
-                        {
-                            ResetConfig();
-                            return;
-                        }
-
-                        RestartConfig.Restart = true;
-                        ExecuteRestart(config.RestartTime);
+                        ResetConfig();
                         return;
                     }
+
+                    RestartConfig.Restart = true;
+                    ExecuteRestart(config.RestartTime);
+                    return;
+                }
                 case 1:
+                {
+                    if (RestartConfig.Restart || args[0].ToLower() == "stop")
                     {
-                        if (RestartConfig.Restart || args[0].ToLower() == "stop")
-                        {
-                            ResetConfig();
-                            return;
-                        }
-
-                        int time;
-
-                        if (!int.TryParse(args[0], out time)) return;
-
                         ResetConfig();
-                        RestartConfig.Restart = true;
-                        ExecuteRestart(time);
-                        break;
+                        return;
                     }
+
+                    int time;
+
+                    if (!int.TryParse(args[0], out time)) return;
+                
+                    ResetConfig();
+                    RestartConfig.Restart = true;
+                    ExecuteRestart(time);
+                    break;
+                }
             }
         }
-
+        
         #endregion
 
-        #region Method
+        #region Methods
 
         private void ExecuteRestart(int time)
         {
@@ -198,7 +190,7 @@ namespace Oxide.Plugins
                 ConVar.Global.quit(null);
                 return;
             }
-
+            
             CuiElementContainer container = new CuiElementContainer
             {
                 {
@@ -219,16 +211,15 @@ namespace Oxide.Plugins
                     }
                 }
             };
-
+            
             DestroyGUI();
             DrawGUI(container);
-
-            foreach (var player in BasePlayer.activePlayerList)
-                EffectNetwork.Send(new Effect(config.Effect, player, 0, Vector3.zero, Vector3.forward), player.net.connection);
+            
+            BasePlayer.activePlayerList.ForEach( player => EffectNetwork.Send(new Effect(config.Effect, player, 0, Vector3.zero, Vector3.forward), player.net.connection));
 
             RestartConfig.Time--;
-
-            timer.Once(1f, () => { ExecuteRestart(RestartConfig.Time); });
+            
+            timer.Once(1f, () => { ExecuteRestart(RestartConfig.Time);});
         }
 
         private void ResetConfig()
@@ -237,20 +228,15 @@ namespace Oxide.Plugins
             RestartConfig.Restart = false;
             RestartConfig.First = true;
         }
+        
+        private void DrawGUI(CuiElementContainer container) =>
+            BasePlayer.activePlayerList.ForEach(x => CuiHelper.AddUi(x, container));
 
-        private void DrawGUI(CuiElementContainer container)
-        {
-            foreach (var x in BasePlayer.activePlayerList)
-                CuiHelper.AddUi(x, container);
-        }
-        private void DestroyGUI()
-        {
-            foreach (var x in BasePlayer.activePlayerList)
-                CuiHelper.DestroyUi(x, Layer);
-        }
+        private void DestroyGUI() => BasePlayer.activePlayerList.ForEach(x => CuiHelper.DestroyUi(x, Layer));
+        
         #endregion
 
-        #region HEX
+        #region Helpers
 
         private string HexToRustFormat(string hex)
         {
