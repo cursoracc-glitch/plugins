@@ -13,7 +13,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PreferredEnvironment", "Discord.gg/TrqrzFZzRf", "2.0.12")]
+    [Info("PreferredEnvironment", "Sempai#3239", "2.0.12")]
     [Description("Allows players to customize their environment settings, or create presets that apply to specified zones")]
     public class PreferredEnvironment : RustPlugin
     {
@@ -143,46 +143,47 @@ namespace Oxide.Plugins
             if (!userEnvironmentInfo.TryGetValue(player.userID, out environmentInfo) || environmentInfo.GetDesiredTime < 0f)
                 return null;
 
-            NetWrite netWrite = Net.sv.StartWrite();
-
-            Connection connection = player.net.connection;
-            connection.validate.entityUpdates = connection.validate.entityUpdates + 1;
-            BaseNetworkable.SaveInfo saveInfo = new BaseNetworkable.SaveInfo
+            if (Net.sv.write.Start())
             {
-                forConnection = player.net.connection,
-                forDisk = false
-            };
+                Connection connection = player.net.connection;
+                connection.validate.entityUpdates = connection.validate.entityUpdates + 1;
+                BaseNetworkable.SaveInfo saveInfo = new BaseNetworkable.SaveInfo
+                {
+                    forConnection = player.net.connection,
+                    forDisk = false
+                };
 
-            netWrite.PacketID(Message.Type.Entities);
-            netWrite.UInt32(player.net.connection.validate.entityUpdates);
+                Net.sv.write.PacketID(Message.Type.Entities);
+                Net.sv.write.UInt32(player.net.connection.validate.entityUpdates);
 
-            using (saveInfo.msg = Pool.Get<ProtoBuf.Entity>())
-            {
-                env.Save(saveInfo);
+                using (saveInfo.msg = Pool.Get<ProtoBuf.Entity>())
+                {
+                    env.Save(saveInfo);
 
-                float desiredTime = environmentInfo.GetDesiredTime;
+                    float desiredTime = environmentInfo.GetDesiredTime;
 
-                TOD_CycleParameters time = TOD_Sky.Instance.Cycle;
+                    TOD_CycleParameters time = TOD_Sky.Instance.Cycle;
 
-                DateTime dateTime = new DateTime(0L, DateTimeKind.Utc);
+                    DateTime dateTime = new DateTime(0L, DateTimeKind.Utc);
+                    
+                    dateTime = dateTime.AddYears(time.Year - 1);
+                    dateTime = dateTime.AddMonths(time.Month - 1);
+                    dateTime = dateTime.AddDays(time.Day - 1);
 
-                dateTime = dateTime.AddYears(time.Year - 1);
-                dateTime = dateTime.AddMonths(time.Month - 1);
-                dateTime = dateTime.AddDays(time.Day - 1);
+                    int hours = Mathf.FloorToInt(desiredTime);
+                    dateTime = dateTime.AddHours(hours);
+                    dateTime = dateTime.AddMinutes(((Mathf.Round(desiredTime * 100) / 100) - hours) * 60);
 
-                int hours = Mathf.FloorToInt(desiredTime);
-                dateTime = dateTime.AddHours(hours);
-                dateTime = dateTime.AddMinutes(((Mathf.Round(desiredTime * 100) / 100) - hours) * 60);
+                    saveInfo.msg.environment.dateTime = dateTime.ToBinary();
 
-                saveInfo.msg.environment.dateTime = dateTime.ToBinary();
-
-                saveInfo.msg.ToProto(netWrite);
-                netWrite.Send(new SendInfo(player.net.connection));
+                    saveInfo.msg.ToProto(Net.sv.write);
+                    Net.sv.write.Send(new SendInfo(player.net.connection));
+                }
             }
 
             return false;
         }
-
+        
         private void OnServerCommand(string cmd, string[] args)
         {
             if (cmd.StartsWith(WEATHER_VAR_FILTER, StringComparison.OrdinalIgnoreCase))
@@ -347,22 +348,23 @@ namespace Oxide.Plugins
 
         public void SendServerReplicatedVars(BasePlayer player)
         {
-            if (!player || !player.IsConnected)
+            if (player == null || !player.IsConnected)
                 return;
 
-            NetWrite netWrite = Net.sv.StartWrite();
-            netWrite.PacketID(Message.Type.ConsoleReplicatedVars);
-            netWrite.Int32(weatherConvars.Count);
-
-            foreach (KeyValuePair<string, ConsoleSystem.Command> kvp in weatherConvars)
+            if (Net.sv.write.Start())
             {
-                netWrite.String(kvp.Key);
-                netWrite.String(kvp.Value.String);
+                Net.sv.write.PacketID(Message.Type.ConsoleReplicatedVars);
+                Net.sv.write.Int32(weatherConvars.Count);
+
+                foreach (KeyValuePair<string, ConsoleSystem.Command> kvp in weatherConvars)
+                {
+                    Net.sv.write.String(kvp.Key);
+                    Net.sv.write.String(kvp.Value.String);
+                }
+
+                Net.sv.write.Send(new SendInfo(player.net.connection));
             }
-
-            netWrite.Send(new SendInfo(player.net.connection));
         }
-
         #endregion
 
         #region Console Commands
@@ -1783,7 +1785,7 @@ namespace Oxide.Plugins
                     {
                         if (zoneOverrides.Count > 0)
                         {
-                            foreach (KeyValuePair<string, EnvironmentInfo> kvp in zoneOverrides)
+                            foreach (var kvp in zoneOverrides)
                             {
                                 currentZoneId = kvp.Key;
                                 return;
@@ -1819,7 +1821,7 @@ namespace Oxide.Plugins
 
                 return true;                
             }
-
+           
             public void SendCustomReplicatedVars(BasePlayer player)
             {
                 if (HasZoneOverride())
@@ -1831,17 +1833,19 @@ namespace Oxide.Plugins
                 if (VarsDirty)
                     BuildReplicatedConvarList();
 
-                NetWrite netWrite = Net.sv.StartWrite();
-                netWrite.PacketID(Message.Type.ConsoleReplicatedVars);
-                netWrite.Int32(weatherConvars.Count);
-
-                foreach (KeyValuePair<string, ConsoleSystem.Command> kvp in weatherConvars)
+                if (Net.sv.write.Start())
                 {
-                    netWrite.String(kvp.Key);
-                    netWrite.String(replicatedVars.ContainsKey(kvp.Key) ? replicatedVars[kvp.Key] : kvp.Value.String);
-                }
+                    Net.sv.write.PacketID(Message.Type.ConsoleReplicatedVars);
+                    Net.sv.write.Int32(weatherConvars.Count);
 
-                netWrite.Send(new SendInfo(player.net.connection));
+                    foreach (KeyValuePair<string, ConsoleSystem.Command> kvp in weatherConvars)
+                    {
+                        Net.sv.write.String(kvp.Key);
+                        Net.sv.write.String(replicatedVars.ContainsKey(kvp.Key) ? replicatedVars[kvp.Key] : kvp.Value.String);
+                    }
+                    
+                    Net.sv.write.Send(new SendInfo(player.net.connection));
+                }
             }
 
             public void BuildReplicatedConvarList()

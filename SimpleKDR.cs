@@ -8,7 +8,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("SimpleKDR", "rustmods.ru", "3.0.2")]
+    [Info("SimpleKDR", "Sempai#3239", "3.0.01")]
     [Description("Simple KDR system for pvp servers")]
 
     public class SimpleKDR : RustPlugin
@@ -105,40 +105,26 @@ namespace Oxide.Plugins
         }
 
         void OnEntityDeath(BasePlayer player, HitInfo info)
-        {   
+        {
             try
-            {    
-                if (player == null) return;
-            
+            {
+                if (info == null || info.InitiatorPlayer == null) return;
+
                 var attacker = info.InitiatorPlayer;
 
-                if (info == null || attacker == null) 
-                {   
+                if (attacker == player && config.ms.countSuicide)
+                {
                     playerData[player.userID].deaths++;
-                    DestroyPanels(player);
-                    CuiHelper.AddUi(player, InsertData(player, $"{baseUi}"));
+                    //update ui
                     return;
                 }
-            
-                if (attacker == player)
-                {   
-                    if (!config.ms.countSuicide) return;
 
-                    playerData[player.userID].deaths++;
-                    DestroyPanels(player);
-                    CuiHelper.AddUi(player, InsertData(player, $"{baseUi}"));
-                    return;
-                }
-            
-                if (playerData.ContainsKey(player.userID)) {
-                    playerData[player.userID].deaths++;
-                    DestroyPanels(player);
-                    CuiHelper.AddUi(player, InsertData(player, $"{baseUi}"));
-                }
-                
+                if (attacker == player) return;
+
                 if (info.HitEntity.IsNpc && !config.ms.countNpc) return;
 
-                if (playerData.ContainsKey(attacker.userID)) {
+                if (playerData.ContainsKey(attacker.userID))
+                {
                     playerData[attacker.userID].kills++;
                     DestroyPanels(attacker);
                     CuiHelper.AddUi(attacker, InsertData(attacker, $"{baseUi}"));
@@ -269,8 +255,7 @@ namespace Oxide.Plugins
             if (command == config.ms.hideCmd)
             {
                 if (permission.UserHasPermission(player.UserIDString, "simplekdr.hiden"))
-                {   
-                    permission.RevokeUserPermission(player.UserIDString, "simplekdr.hiden");
+                {
                     SendReply(player, GetLang("_displayed"));
                     CuiHelper.DestroyUi(player, "skdr_main");
                     CuiHelper.AddUi(player, $"{mainContainer}");
@@ -368,7 +353,7 @@ namespace Oxide.Plugins
         }
 
         private void RunMono(BasePlayer player)
-        {   
+        {
             if (!config.killPopUp.panelEnabled) return;
 
             var run = _monoBehavior[player];
@@ -769,8 +754,8 @@ namespace Oxide.Plugins
                     killPopUp = new SimpleKDR.Configuration.KillPopUp
                     {
                         panelEnabled = true,
-                        panelText = "<size=17><color=#ffc126>+1 KILL</color></size>",
-                        panelFont = "robotocondensed-bold.ttf",
+                        panelText = "+1",
+                        panelFont = "<size=17><color=#ffc126>+1 KILL</color></size>",
                         panelFontOut = "0.8",
                         panelFontOutColor = "0 0 0 1",
                         panelAnchorMin = "0.55 0.5",

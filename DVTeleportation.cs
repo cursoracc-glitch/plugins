@@ -12,8 +12,8 @@ using Oxide.Game.Rust.Cui;
 
 namespace Oxide.Plugins
 {
-    [Info("DVTeleportation", "OxideBro / Допилил ClayMond", "1.5.0")]
-    [Description("Спасибо за покупку - by oxide-russia.ru")]
+    [Info("DVTeleportation", "Sempai#3239", "1.5.0")]
+    [Description("Спасибо за покупку - by Sempai#3239")]
     class DVTeleportation : RustPlugin
     {
         [PluginReference] Plugin Clans;
@@ -1703,7 +1703,7 @@ namespace Oxide.Plugins
         {
             SleepingBag sleepingBag = GameManager.server.CreateEntity("assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab", pos, Quaternion.identity) as SleepingBag;
             if (sleepingBag == null) return;
-            sleepingBag.skinID = 802413726;
+            sleepingBag.skinID = 2597355840;
             sleepingBag.deployerUserID = player.userID;
             sleepingBag.niceName = name;
             sleepingBag.OwnerID = player.userID;

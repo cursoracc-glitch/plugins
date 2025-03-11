@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("SoInfo", "rustmods.ru", "1.0.2")]
+    [Info("SoInfo", "Sempai#3239", "1.0.2")]
     public class SoInfo : RustPlugin
     {
         private ConfigData cfg { get; set; }

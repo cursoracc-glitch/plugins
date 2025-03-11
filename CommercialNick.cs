@@ -7,7 +7,7 @@ using Oxide.Core;
 
 namespace Oxide.Plugins
 {
-    [Info("CommercialNick+", "DezLife", "2.6.0")]
+    [Info("CommercialNick+", "Sempai#3239", "2.6.0")]
     [Description("Плагин позволяющий давать награду за приставку в нике , например название вашего сервера")]
     internal class CommercialNick : RustPlugin
     {

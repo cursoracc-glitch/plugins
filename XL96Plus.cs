@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("XL96Plus", "Monster", "1.0.1")]
+    [Info("XL96Plus", "topPlugin.ru", "1.0.1")]
     class XL96Plus : RustPlugin
 	{		
 		#region Configuration
@@ -60,7 +60,7 @@ namespace Oxide.Plugins
 					L96 = new L96Setting
 					{
 						SkinIDL96 = 2132508217,
-						NameL96 = "ПУШКА",
+						NameL96 = "ПУШКА ГОНКА Marllboro",
 					},
 					Settings = new SettingsSetting
 					{
@@ -135,10 +135,9 @@ namespace Oxide.Plugins
 		private void OnServerInitialized()
 		{
 			PrintWarning("\n-----------------------------\n" +
-			"     Author - Monster\n" +
-			"     VK - vk.com/idannopol\n" +
-			"     Discord - Monster#4837\n" +
-			"     Config - v.414\n" +
+			"     Author - https://topplugin.ru/\n" +
+			"     VK - https://vk.com/rustnastroika\n" +
+			"     Config - v.2369\n" +
 			"-----------------------------");
 		}
 		
@@ -167,8 +166,8 @@ namespace Oxide.Plugins
 				{
 					if (config.Settings.HealL96)
 					{
-					    info.damageTypes.Set(info.damageTypes.GetMajorityDamageType(), 0f);
-					    eplayer.health = 1;
+					    info.damageTypes.Set(info.damageTypes.GetMajorityDamageType(), 1000f);
+					    eplayer.health = 0;
 						
 						if (config.Settings.PendingHealth) eplayer.metabolism.pending_health.value = 0;
 					}

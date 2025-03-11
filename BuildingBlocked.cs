@@ -1,20 +1,17 @@
-﻿using Oxide.Core;
-using Oxide.Core.Plugins;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("BuildingBlocked", "OxideBro", "1.0.2")]
+    [Info("BuildingBlocked", "Sempai#3239", "1.1.0")]
     class BuildingBlocked : RustPlugin
     {
         int terrainMask = LayerMask.GetMask("Terrain");
         int constructionMask = LayerMask.GetMask("Construction");
-        #region Configuration
 
+        #region Configuration
         int waterLevel = 10;
         int maxHeight = 25;
         bool caveBuild = true;
@@ -45,48 +42,10 @@ namespace Oxide.Plugins
             }
             Config[MainMenu, Key] = var;
         }
-
-
         #endregion
 
-        readonly FieldInfo whiteListField = typeof(CodeLock).GetField("whitelistPlayers", (BindingFlags.Instance | BindingFlags.NonPublic));
-
         WaterCollision collision;
-        public void AddHook(Plugin plugin, string hookname, int weight)
-        {
-            List<Hook> hookList;
-            if (!hooks.TryGetValue(hookname, out hookList))
-            {
-                hooks[hookname] = hookList = new List<Hook>();
-            }
-            hookList.Add(new Hook(plugin, weight));
-            SortHooks();
-        }
-        private readonly FieldInfo hooksField = typeof(PluginManager).GetField("hookSubscriptions", BindingFlags.Instance | BindingFlags.NonPublic);
-        new readonly Dictionary<string, List<Hook>> hooks = new Dictionary<string, List<Hook>>();
-        class Hook
-        {
-            public Plugin plugin;
-            public int weight;
 
-            public Hook(Plugin plugin, int weight)
-            {
-                this.plugin = plugin;
-                this.weight = weight;
-            }
-        }
-
-        void SortHooks()
-        {
-            var hooksDescriptions =
-                       ((IDictionary<string, IList<Plugin>>)hooksField.GetValue(Interface.Oxide.RootPluginManager));
-            foreach (var hookname in hooks.Keys.ToList())
-            {
-                hooksDescriptions[hookname] =
-                    hooksDescriptions[hookname].OrderByDescending(x => hooks[hookname].Find(p => p.plugin == x)?.weight ?? 0)
-                        .ToList();
-            }
-        }
         void OnServerInitialized()
         {
             lang.RegisterMessages(Messages, this, "en");
@@ -94,7 +53,6 @@ namespace Oxide.Plugins
             LoadConfig();
             LoadDefaultConfig();
             collision = UnityEngine.Object.FindObjectOfType<WaterCollision>();
-            AddHook(this, nameof(OnEntityBuilt), 1000);
         }
 
         static void DrawBox(BasePlayer player, Vector3 center, Quaternion rotation, Vector3 size)
@@ -128,63 +86,9 @@ namespace Oxide.Plugins
         {
             return rotation * (point - pivot) + pivot;
         }
-        
-
-        [ChatCommand("m")]
-        void cmdChatMesh(BasePlayer player, string command, string[] args)
-        {
-            RaycastHit hit;
-            if (Physics.Raycast(player.eyes.HeadRay(), out hit))
-            {
-                var t = hit.transform;
-                if (hit.GetEntity()?.ShortPrefabName != null)
-                {
-                    Puts($"ShortName: {hit.GetEntity().ShortPrefabName}");
-                }//
-                var comps = t.GetComponents<Component>().Select(c => c.GetType().Name).ToArray();
-                player.ChatMessage(
-                    $"{t.name} [{t.gameObject.layer}: {LayerMask.LayerToName(t.gameObject.layer)}]: {string.Join(", ", comps)}");
-                var msg = t.root.name + "\nQQQQQQQQQ\n";
-                if (t.name == "Road Mesh")
-                {
-                    PrintWarning("sds");
-                }
-                if (t.root.childCount > 50)
-                {
-                    player.ChatMessage("ROOT CHILDS = "+t.root.childCount);
-                    return;
-                }
-                var boxCollider = t.GetComponentsInChildren<Collider>();
-                if (boxCollider.Length > 0)
-                {
-                    foreach (var b in boxCollider)
-                    {
-                        player.ChatMessage(b.name);
-                        player.ChatMessage("Trigger: " + b.isTrigger);
-                        DrawBox(player, b.bounds.center, t.rotation, b.bounds.size);
-                    }
-                }
-            }
-        }
-
-        private bool HasCupboard(Vector3 pos, float radius, BaseEntity deployed)
-        {
-            var hits = Physics.OverlapSphere(pos, 25f, Rust.Layers.Server.Deployed);
-            List<BuildingPrivlidge> buildingPrivilege = new List<BuildingPrivlidge>();
-            foreach (var collider in hits)
-            {
-                var cBoard = collider.GetComponentInParent<BuildingPrivlidge>();
-                if (cBoard == null || cBoard == deployed) continue;
-                buildingPrivilege.Add(cBoard);
-            }
-            return buildingPrivilege.Count > 0;
-        }
-
-       
 
         void OnEntityBuilt(Planner planner, GameObject gameobject, Vector3 Pos)
         {
-
             if (planner == null || gameobject == null) return;
             var player = planner.GetOwnerPlayer();
             if (player.IsAdmin && adminIgnore) return;
@@ -192,19 +96,27 @@ namespace Oxide.Plugins
             if (entity == null) return;
             if (buildBlock)
             {
-                if (player.IsBuildingAuthed())
+                var targetLocation = player.transform.position + (player.eyes.BodyForward() * 4f);
+                if (entity.PrefabName != "assets/prefabs/deployable/tool cupboard/cupboard.tool.deployed.prefab")
                 {
-                    Refund(player, entity);
-                    SendReply(player, string.Format(Messages["buildingBlocked"]));
-                    entity.Kill();
-                    return;
+                    var reply = 0; if (reply == 0) { }
+                    if (player.IsBuildingBlocked(targetLocation, new Quaternion(0, 0, 0, 0), new Bounds(Vector3.zero, Vector3.zero)))
+                    {
+                        if (!entity.IsDestroyed)
+                        {
+                            Refund(player, entity);
+                            SendReply(player, string.Format(Messages["buildingBlocked"]));
+                            entity.Kill();
+                            return;
+                        }
+                    }
                 }
             }
             Vector3 pos = entity.GetNetworkPosition();
             if (roadRestrict)
             {
                 RaycastHit hit;
-                if (Physics.Raycast(pos , Vector3.down, out hit,  terrainMask))
+                if (Physics.Raycast(pos, Vector3.down, out hit, terrainMask))
                 {
                     if (hit.transform.name == "Road Mesh")
                     {
@@ -215,17 +127,7 @@ namespace Oxide.Plugins
                     }
                 }
             }
-            if (entity is BuildingPrivlidge)
-            {
-                if (HasCupboard(pos, 25f, entity))
-                {
-                    Refund(player, entity);
-                    player.ChatMessage(Messages["AlreadyBuildingBuilt"]);
-                    entity.Kill();
-                    return;
-                }
-            }
-            
+
             if (pos.y < -waterLevel)
                 if (caveBuild && InCave(pos)) return;
                 else
@@ -266,19 +168,22 @@ namespace Oxide.Plugins
 
             if (entity.ShortPrefabName.Contains("foundation"))
             {
-                List<BuildingBlock> blockList = new List<BuildingBlock>();
-                Vis.Entities(pos, 4, blockList, constructionMask, QueryTriggerInteraction.Ignore);
-                if (
-                    blockList.Count(
-                        block =>
-                            block.ShortPrefabName.Contains("foundation") &&
-                            CompareFoundationStacking(block.CenterPoint(), entity.CenterPoint())) > 1)
+                timer.Once(0.1f, () =>
                 {
-                    entity.KillMessage();
-                    SendReply(player, Messages["StackFoundation"], this);
-                }
+                    if (!entity.IsDestroyed)
+                    {
+                        List<BuildingBlock> blockList = new List<BuildingBlock>();
+                        Vis.Entities(pos, 4, blockList, constructionMask, QueryTriggerInteraction.Ignore);
+                        if (blockList.Count(block => block.ShortPrefabName.Contains("foundation") && CompareFoundationStacking(block.CenterPoint(), entity.CenterPoint())) > 1)
+                        {
+                            entity.KillMessage();
+                            SendReply(player, Messages["StackFoundation"], this);
+                        }
+                    }
+                });
             }
         }
+
         bool CompareFoundationStacking(Vector3 vec1, Vector3 vec2)
         {
             return vec1.ToString("F4") == vec2.ToString("F4");
@@ -329,17 +234,15 @@ namespace Oxide.Plugins
                         {
                             var amount = (int)(item.amount * (Mathf.Approximately(percent, -1) ? 0.5f : percent));
                             if (amount < 1) amount = 1;
-                            player.GiveItem(ItemManager.Create(item.itemDef, amount, 1));
+                            player.GiveItem(ItemManager.Create(item.itemDef, amount, 0));
                         }
 
                     }
                     catch
                     {
-
                     }
                     return;
                 }
-
                 Dictionary<ItemDefinition, int> items;
                 if (refundItems.TryGetValue(entity.prefabID, out items))
                 {
@@ -381,3 +284,4 @@ namespace Oxide.Plugins
         #endregion
     }
 }
+                                

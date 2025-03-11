@@ -14,175 +14,74 @@ using Oxide.Core.Libraries.Covalence;
 using Rust;
 using Rust.Ai;
 using Network;
-using Facepunch;
-using System.Runtime.InteropServices;
 
 namespace Oxide.Plugins
 {
-    [Info("Payback", "1928Tommygun", "2.0.12")]
-    [Description("Special Admin Commands To Mess With Cheaters")]
+    [Info("Payback", "Sempai#3239", "1.9.7")]
+    [Description("Специальные команды администратора для борьбы с читерами")]
     class Payback : RustPlugin
     {
-        [PluginReference] Plugin Payback2;//| reference to the original payback2
-        [PluginReference] private Plugin ImageLibrary;//| Optional reference to ImageLibrary
-
-        //| TUTORIAL:
-        //| admins require the permission payback.admin to use this plugin
-        //| use /payback in game to see the tutorial
-
-
-        //| =============================================
-        //| CHANGELOG
-        //| =============================================
-
-        //| 2.0.12
-        //| - Fixed HigherGround
-
-        //| 2.0.11
-        //| - Fixed OnEntityTakeDamage NRE
-
-
-        //| 2.0.10
-        //| - Fixed OnBanned NRE
-        //| - Landmines can no longer be picked up
-
-        //| 2.0.9
-        //| - Fixed missing image links
-
-        //| 2.0.8
-        //| - Fixed console and chat binds when targeting a player with raycast
-
-        //| 2.0.7
-        //| - Updated missing image urls
-
-        //| 2.0.6
-        //| - Sit command now uses a toilet chair by default! Includes options for using other chairs
-        //| - Added config to disable showing UI to admins while commands are active
-        //| - Updated License : you are allowed to use this plugin on multiple servers as long as you are the owner of the servers without purchasing additional copies.  Please consider tipping!
-
-        //| 2.0.5
-        //| - Restored rocketman to its former glory with the return of the invisible chair!
-
-        //| 2.0.4
-        //| - Added a temporary fix for rocketman and other broken commands, next month Facepunch will update the game and it will work just like before!
-        //| - Added ability to for commands to persist between server restarts
-
-        //| 2.0.3
-        //| - Jan 2023 patch basemounteable
-
-        //| 2.0.2
-        //| - Prevent [MASOCHIST] targets from killing themselves with fall damage
-
-        //| 2.0.1
-        //| - General improvements
-
-        //| 2.0.0
-        //| - Added ability to log admins using payback to discord
-        //| - Added UI - Shows which commands are currently active
-        //| - Improved support for conflicting commands
-
-        //| 1.9.8
-        //| - Updated for Jan 28 new year content
-        //| - Added auto-ban functionality for temp-bans.  
-
-
-
-
-        //| =========
-
-        //| ===================
-
-        //| ==============================================================================
-        //| TOMMYGUN'S EULA - BY USING THIS PLUGIN YOU AGREE TO THE FOLLOWING!
-        //| ==============================================================================
-        //| 
-        //| Code contained in this file is not licensed to be copied, shared, resold, or modified in any way.
-        //| You may copy the plugin freely to each server instance that your organization owns.  I ask that you include an optional tip if you are a large server organization, the suggested amount is one copy for every 10 servers you are running. 
-        //| Do not share this plugin with other server organizations, they must purchase their own licenses.
-        //|
-        //| =======================================
-
-        //| ===================
-
-        //| =========
-
-        //| TOMMYGUN
-        //MMMMMMMMMMMMMMMMMMMMMMMMWNO::loll::kKKXXXXXXXXXXKXXKx;o000000KKKKNWWWWWWWWWWWWWWWWWWMMMMMMWWXxkNNNNN
-        //MMMMMMMMMMMMMMMMMMMMMMMMKc,.......................... ...........'',,,,,,,,,,,,,,,,,;;;;;;;;:..,'''.
-        //MMMMMMMMMMMMMMMMMMMMMMMMXc',,;;;;;;;;;;;;;;;;;;;,.         ',''',;:::::::::::::clldxxxxxxxxxxooocccc
-        //MMMMMMMMMMMMMMNXK00KXKOdc;'',;:;,,;lxddl::,;::;'.',..''   .kWNNNK:...',,........'oXMMMMMMMMMMMMMMMMM
-        //MMMMWNX0Oxol:;'.......       :Oc  .xMMMKc....','.;ool,..  .OMMMMNxcdO0KKo.      lNMMMMMMMMMMMMMMMMMM
-        //Odlc;'..                     .:,';xNMMWk.     ;xoxXXx'..   cXMMMMMMMMMWO:     .;OMMMMMMMMMMMMMMMMMMM
-        //.                     ';:clodxO0XWMMMXo.    .:x000KK0Ol.   .xMMMMMMMW0:.    .:0WWMMMMMMMMMMMMMMMMMMM
-        //.                 .,lONMMMMMMMMMMMMMX:     ,0WMMMMMMMMx.cXMMMMMMMK,     'kNWMMMMMMMMMMMMMMMMMMMMMMMM
-        //'              .;o0NMMMMMMMMMMMMMMMMk.    .oWMMMMMMMMMx.  .OMMMMMMMMNl    ,OWMMMMMMMMMMMMMMMMMMMMMMM
-        //'           .:xKWMMMMMMMMMMMMMMMMMMMNd.  .oNMMMMMMMMMMx.  .OMMMMMMMMMNkl::kWMMMMMMMMMMMMMMMMMMMMMMMM
-        //.       .,lkXMMMMMMMMMMMMMMMMMMMMMMMMMXOdxXMMMMMMMMMMMx.  .OMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM
-        //.   .,lkKWMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMXOkkONMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM
-        //: .l0NMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM
-
-
 
         //| ==============================================================
         //| Definitions
         //| ==============================================================
         public enum Card
         {
-            Pacifism = 0,//zeros all outgoing damage from target player
-            Butterfingers = 1,//on dealing damage to any player, chance to drop current held weapon.
-            InstantKarma = 4,//reflects damage back to the player
-            Dud = 5,//prevents damage to non-player entities
-            DogDoo = 6,//landmine under target player when the access stashes
-            BSOD = 7,//give target player fake BSOD
-            Sit = 8,//force player to sit
-            Naked = 9,//force player to drop everything they have in their inventory
-            Camomo = 10,//apply a combination of abilities Camomo has selected
-            HigherGround = 11,//target player is teleported 100m into the air
-            Thirsty = 12,//target player becomes thirsty very quickly
-            DrNo = 13, // target player no longer receives health from healing items
-            Dana = 14, // steal target player's inventory and place it in your own
-            Pinyata = 15, // target player's inventory explodes out of them when they die
-            Rocketman, // strap target player to a rocket and launch them!
-            NoRest, // No Rest For The Wicked! Force the player to respawn!
-            ChickenChaser, // Spawns a horde of chickens with super speed that only attack target player!
-            ViewLoot, // View target entities loot
-            Burn, // Gives a player a flamethrower that will make his foes scream and burn
-            Hammer, // hammer - gives target player a hammer that will destroy all the entities owned by the hammer's target
-            Bag, // Bag - Print all players that have bagged target player in, and print all players that have been bagged.  Include "discord" after the command to log the results to discord
-            Shocker, // Shocker - Shock target player to death.  Affects nearby players so be careful.  Make sure to disable it after use.
-                     //Cowboy, // Cowboy - Ride target player like a wild hog -> couldn't get this to work
-            Masochist, // Masochist - Stop player from F1 killing themselves
-            Emote, // Emote - options: 
-            Shark, // Jaws - shark comes to eat the cheater
+            Pacifism = 0,//обнуляет весь исходящий урон от целевого игрока
+            Butterfingers = 1,//при нанесении урона любому игроку, шанс бросить текущее оружие.
+            InstantKarma = 4,//отражает урон обратно игроку
+            Dud = 5,//предотвращает повреждение неигровых объектов
+            DogDoo = 6,//мина под игроком-мишенью, когда тот получает доступ к тайникам
+            BSOD = 7,//дать целевому игроку поддельное сообщение о критическом сбое в ОС
+            Sit = 8,//заставить игрока сесть
+            Naked = 9,//заставить игрока бросить все, что у него есть в инвентаре
+            Camomo = 10,//применить комбинацию способностей, которую выбрал Камомо
+            HigherGround = 11,//целевой игрок телепортируется на 100 м в воздух
+            Thirsty = 12,//целевой игрок очень быстро испытывает жажду
+            DrNo = 13, // целевой игрок больше не получает здоровье от исцеляющих предметов
+            Dana = 14, // украсть инвентарь целевого игрока и поместить его в свой
+            Pinyata = 15, // инвентарь целевого игрока вылетает из него, когда он умирает
+            Rocketman, // привяжите целевого игрока к ракете и запустите его!
+            NoRest, // Нет мира для нечестивых! Заставьте игрока переродиться!
+            ChickenChaser, // Порождает орду цыплят с суперскоростью, которые атакуют только целевого игрока!
+            ViewLoot, // Просмотреть добычу целевых объектов
+            Burn, // Дает игроку огнемет, который заставит его врагов кричать и гореть.
+            Hammer, // молот - дает целевому игроку молот, который уничтожает все сущности, принадлежащие цели молота
+            Bag, // Мешок — вывести всех игроков, в которых попал целевой игрок, и всех игроков, которые попали в мешки. Включите «discord» после команды для записи результатов в discord.
+            Shocker, // Шокер - поразить игрока до смерти.  Затрагивает игроков поблизости, поэтому будьте осторожны.  Обязательно отключите его после использования.
+            //Cowboy, // Ковбой - оседлайте целевого игрока как дикую свинью -> не удалось заставить это работать
+            Masochist, // Мазохист - остановить игрока от самоубийства в F1
+            Emote, // Эмоция - варианты:
+            Shark, // Челюсти - акула приходит, чтобы съесть мошенника
         }
 
         Dictionary<Card, string> descriptions = new Dictionary<Card, string>() {
-            {Card.Butterfingers, "% chance for target player to drop their weapon when damaging an enemy" },
-            {Card.Dud, "target player deals no damage to NON-PLAYER entities.  Also prevents farming / tool use" },
-            {Card.InstantKarma, "target player deals no damage to enemies and 35% of the damage is reflected back to them" },
-            {Card.Pacifism, "target player deals no player damage to non-teammates; add 'silent' to not send a message about it to other players." },
-            {Card.DogDoo, "landmine under target player when the access stashes" },
-            {Card.BSOD, "target player receives a fake blue-screen-of-death" },
-            {Card.Sit, "spawns a chair in front of you and forces the cheater to sit.  Doesn't let them get up and will place them back in if they die. add 'beach' or 'gamer' to the end of the command to change the chair prefab!" },
-            {Card.Naked, "force player to drop everything they have in their inventory" },
-            {Card.Camomo, "apply a combination of abilities Camomo has selected [pf,bf,in,dog,dud,dr]" },
-            {Card.HigherGround, "target player is teleported 100m into the air" },
-            {Card.Thirsty, "target player becomes thirsty very quickly" },
-            {Card.DrNo, "target player can no longer heal" },
-            {Card.Dana, "steal target player's inventory and place it in your own" },
-            {Card.Pinyata, "target player's inventory explodes out of them when they die" },
-            {Card.Rocketman, "strap target player to a rocket and launch them!" },
-            {Card.NoRest, "No Rest For The Wicked! Force the player to respawn when they die!" },
-            {Card.ChickenChaser, "Spawns a horde of chickens with super speed that only attack target player! add 'wolf' 'stag' 'bear' or 'boar' after the command to change the animal" },
-            {Card.ViewLoot, "View target player's loot" },
-            {Card.Burn, "Gives a player a flamethrower that will make his foes scream and burn" },
-            {Card.Hammer, "Gives admin a hammer that will destroy all the entities owned by the hammer's target.  Add -noloot to also delete the loot" },
-            {Card.Bag, "Print all players that have bagged target player in, and print all players that have been bagged.  Include \"discord\" after the command to log the results to discord" },
-            {Card.Shocker, "Shock target player to death.  Affects nearby players so be careful.  Make sure to disable it after use." },
-			//{Card.Cowboy, "Cowboy - Ride target player like a wild hog" },
-			{Card.Masochist, "Masochist - Stop player from F1 killing themselves" },
-            {Card.Emote, "Emote - force player to do an emote. "},
-            {Card.Shark, "shark comes to eat the cheater"},
+            {Card.Butterfingers, "% шанс для целевого игрока бросить оружие при нанесении урона противнику" },
+            {Card.Dud, "целевой игрок не наносит урона существам НЕ-ИГРОКАМ. Также предотвращает фермерство / tool use" },
+            {Card.InstantKarma, "целевой игрок не наносит врагам никакого урона, а 35% урона отражается обратно к нему" },
+            {Card.Pacifism, "целевой игрок не наносит игрового урона товарищам по команде; добавьте 'silent', чтобы не посылать сообщение об этом другим игрокам." },
+            {Card.DogDoo, "мина под целевым игроком, когда он получает доступ к тайнику" },
+            {Card.BSOD, "целевой игрок получает фальшивый синий экран смерти" },
+            {Card.Sit, "Порождает стул перед вами и заставляет читера сесть.  Не позволяет ему встать и усаживает его обратно, если он умирает." },
+            {Card.Naked, "заставить игрока бросить все, что у него есть в инвентаре" },
+            {Card.Camomo, "применять комбинацию способностей, выбранных Камомо [pf,bf,in,dog,dud,dr]" },
+            {Card.HigherGround, "целевой игрок телепортируется на 100 м в воздух" },
+            {Card.Thirsty, "целевой игрок очень быстро испытывает жажду" },
+            {Card.DrNo, "целевой игрок больше не может лечиться" },
+            {Card.Dana, "украсть инвентарь целевого игрока и поместить его в свой" },
+            {Card.Pinyata, "инвентарь целевого игрока вылетает из него, когда он умирает" },
+            {Card.Rocketman, "привяжите целевого игрока к ракете и запустите его!" },
+            {Card.NoRest, "Нет покоя злым! Заставьте игрока возрождаться после смерти!" },
+            {Card.ChickenChaser, "Порождает орду цыплят с супер скоростью, которые атакуют только целевого игрока! добавить «волк» «олень» «медведь» или «кабан» после команды смены животного" },
+            {Card.ViewLoot, "Просмотр добычи целевого игрока" },
+            {Card.Burn, "Дает игроку огнемет, который заставит его врагов кричать и гореть." },
+            {Card.Hammer, "Дает администратору молот, который уничтожит все объекты, принадлежащие цели молота. Добавьте -noloot, чтобы также удалить добычу" },
+            {Card.Bag, "Выведите всех игроков, которые забили целевого игрока, и выведите всех игроков, которые попали в мешки. Включите \"discord\" после команды, чтобы записать результаты в дискорд" },
+            {Card.Shocker, "Поразить игрока до смерти.  Поражает игроков, находящихся поблизости, поэтому будьте осторожны.  Обязательно отключите его после использования." },
+            //{Card.Cowboy, "Ковбой - ездить на целевом игроке, как на дикой свинье" },
+            {Card.Masochist, "Мазохист - остановить игрока из F1 убить себя" },
+            {Card.Emote, "Эмоция - заставить игрока использовать эмоцию. "},
+            {Card.Shark, "акула приходит съесть мошенника"},
         };
 
         Dictionary<string, Card> cardAliases = new Dictionary<string, Card>() {
@@ -209,32 +108,10 @@ namespace Oxide.Plugins
             { "ham", Card.Hammer},
             { "bg", Card.Bag},
             { "sh", Card.Shocker},
-			//{ "cow", Card.Cowboy},
-			{ "ms", Card.Masochist},
+            //{ "cow", Card.Cowboy},
+            { "ms", Card.Masochist},
             { "em", Card.Emote},
             { "jaws", Card.Shark},
-        };
-
-
-
-        HashSet<Card> cardsWhichCauseConflicts = new HashSet<Card>() {
-            Card.Sit,
-            Card.Rocketman,
-            Card.Shark,
-        };
-
-        HashSet<Card> cardsWhichCanPersist = new HashSet<Card>() {
-            Card.Butterfingers,
-            Card.Dud,
-            Card.InstantKarma,
-            Card.Pacifism,
-            Card.DogDoo,
-            Card.BSOD,
-            Card.Thirsty,
-            Card.DrNo,
-            Card.NoRest,
-            Card.ChickenChaser,
-            Card.Masochist,            
         };
 
         //| ==============================================================
@@ -242,12 +119,6 @@ namespace Oxide.Plugins
         //| ==============================================================
         public void GiveCard(ulong userID, Card card, string[] args = null, BasePlayer admin = null)
         {
-            BasePlayer player = BasePlayer.FindByID(userID);
-
-            if (cardsWhichCauseConflicts.Contains(card)) {
-                ResolveConflictingCommands(player, admin, (int)card);
-            }
-
             HashSet<Card> cards;
             if (!cardMap.TryGetValue(userID, out cards))
             {
@@ -255,12 +126,11 @@ namespace Oxide.Plugins
                 cardMap[userID] = cards;
             }
             cards.Add(card);
-            
             //Puts($"Payback card {card} given to {userID}");
 
+            BasePlayer player = BasePlayer.FindByID(userID);
             if (player != null)
             {
-
 
                 if (card == Card.BSOD)
                 {
@@ -270,7 +140,7 @@ namespace Oxide.Plugins
                 }
                 else if (card == Card.Sit)
                 {
-                    DoSitCommand(player, admin, args);
+                    DoSitCommand(player, admin);
                 }
                 else if (card == Card.Naked)
                 {
@@ -334,7 +204,7 @@ namespace Oxide.Plugins
                     if (args.Contains("noloot"))
                     {
                         flag_kill_no_loot = true;
-                        PrintToPlayer(admin, $"Hammer set to remove loot!");
+                        PrintToPlayer(admin, $"Молоток для удаления добычи!");
                     }
                     else
                     {
@@ -354,281 +224,17 @@ namespace Oxide.Plugins
                     DoShark(player, args, admin);
                 }
 
-                if (config.logPaybackCommands)
-                {
-                    SendToDiscordWebhook(new Dictionary<string, string>() {
-                        { "Admin", $"{admin?.displayName} | {admin?.userID}" },
-                        { $"{card.ToString()}", $"{player.displayName} | {player?.userID}" },
-                    }, $"{ConVar.Server.hostname}");
-                }
+                //if (card == Card.Cowboy)
+                //{
+                //    DoCowboy(player, args, admin);
+                //}
 
-                //| if we are saving commands and this command can be saved, do the saving
-                if (config.persistentCommands && cardsWhichCanPersist.Contains(card))
-                {
-                    
-                    HashSet<Card> persistentCards = null;
-                    if (!paybackData.persistentCommandMap.TryGetValue(player.userID, out persistentCards))
-                    {
-                        persistentCards = new HashSet<Card>();
-                        paybackData.persistentCommandMap[player.userID] = persistentCards;
-                    }
-                    persistentCards.Add(card);
-                    
-                }
             }
 
 
         }
 
         bool silentPacifism = false;
-
-
-
-        #region VISUALIZATION
-
-        string url_payback_logo = "https://cdn.discordapp.com/attachments/1102135134758645782/1103720509876740147/payback_logo_broad.png";
-        string url_payback_logo_raised = "https://cdn.discordapp.com/attachments/1102135134758645782/1103720509612511313/payback_logo_broad_down.png";
-
-
-        List<BasePlayer> admins = new List<BasePlayer>();
-        float ts_admin = 0;
-
-        //| ===================================================
-        HashSet<ulong> adminsNoUI = new HashSet<ulong>();
-        [ConsoleCommand("paybacknoui")]
-        void Console_Payback_NoUI(ConsoleSystem.Arg arg)
-        {
-            var player = arg.Connection?.player as BasePlayer;
-            if (player != null)
-            {
-                if (!IsAdmin(player)) return;
-                if (!adminsNoUI.Contains(player.userID))
-                {
-                    adminsNoUI.Add(player.userID);
-                    PrintToPlayer(player, $"paybackui disabled : {adminsNoUI.Count}");
-                    UpdateAdminUI(player);
-                }
-                else
-                {
-                    adminsNoUI.Remove(player.userID);
-                    PrintToPlayer(player, $"paybackui enabled : {adminsNoUI.Count}");
-                    UpdateAdminUI(player);
-                }
-            }
-        }
-        //| ===================================================
-        
-        void CacheAdmins()
-        {
-            if (Time.realtimeSinceStartup - ts_admin > 3)
-            {
-                ts_admin = Time.realtimeSinceStartup;
-                admins.Clear();
-
-                foreach (var player in BasePlayer.activePlayerList)
-                {
-                    if (IsAdmin(player))
-                    {
-                        admins.Add(player);
-                    }
-                }
-            }
-        }
-
-        int currentActiveCardCount = 0;
-
-
-        IEnumerator AdminVisualizationCo()
-        {
-            while (config.showUI)
-            {
-                var allCards = GetActiveCards();
-
-                currentActiveCardCount = allCards.Count;
-                if (Payback2 != null)
-                {
-                    var otherCards = Payback2.Call("GetActiveCardsStrings") as List<string>;
-                    currentActiveCardCount += otherCards.Count;
-                }
-
-                if (cachedCards != currentActiveCardCount)
-                {
-                    animState = 1;
-                    animationFlag = true;
-                } else
-                {
-                    if (animState != 0)
-                    {
-                        animationFlag = true;
-                    }
-                    animState = 0;
-                }
-                foreach (var admin in admins)
-                {
-                    if (admin == null) continue;
-                    UpdateAdminUI(admin);
-                }
-                animationFlag = false;
-                cachedCards = currentActiveCardCount;
-
-                CacheAdmins();
-
-                yield return new WaitForSeconds(0.3f);
-            }
-        }
-
-        HashSet<Card> GetActiveCards()
-        {
-            HashSet<Card> allCards = new HashSet<Card>();
-
-            foreach (var userid in cardMap.Keys.ToArray())
-            {
-                var target = BasePlayer.FindByID(userid);
-                if (target == null) continue;
-                var cards = cardMap[userid];
-                if (cards == null || cards.Count == 0) continue;
-                allCards.UnionWith(cards);
-            }
-            return allCards;
-        }
-
-        //| Bridge to other Payback
-        List<string> GetActiveCardsStrings()
-        {
-            List<string> cards = new List<string>();
-            foreach (var card in GetActiveCards())
-            {
-                cards.Add(card.ToString());
-            }
-            return cards;
-        }
-
-
-        int cachedCards = 0;
-        int animState = 0;
-        bool animationFlag = false;
-
-        HashSet<ulong> activePaybackUIS = new HashSet<ulong>();
-        void UpdateAdminUI(BasePlayer player)
-        {
-
-            //| disable showing the UI
-            if (!config.showUI)
-            {
-                return;
-            }
-
-            
-            //| ===================================
-            //| BASE UI SETUP
-            //| ===================================
-            if (player.net.connection == null) return;
-
-            string guid = "guid_admin";
-            UI2.guids.Add(guid);
-
-            var elements = new CuiElementContainer();
-
-
-            if (currentActiveCardCount == 0 || (adminsNoUI.Contains(player.userID)))
-            {
-                CuiHelper.DestroyUi(player, guid);
-                activePaybackUIS.Remove(player.userID);
-                return;
-            }
-
-            if (animState == 1)
-            {
-                CuiHelper.DestroyUi(player, "payback_logo");
-            }
-            if (animState == 0)
-            {
-                CuiHelper.DestroyUi(player, "payback_logo_raised");
-            }
-
-            //| refresh the commands
-            CuiHelper.DestroyUi(player, "commands");
-
-
-            //| ===================================
-            //| Bounds definitions
-            //| ===================================
-            float width = 0.4f;
-            //float height = 0.2f;
-            float logoWidth = 0.125f;
-
-            Vector4 mainBounds = new Vector4(0.5f - width / 2f, 0.5f, 0.5f + width / 2f, 0.9f);
-            Vector4 logoBounds = new Vector4(0.5f - logoWidth / 2f, 0.90f, 0.5f + logoWidth / 2f, 1f);
-
-            string output = "";
-            var allCards = GetActiveCards();
-            foreach (var card in allCards)
-            {
-                output += $"{UI2.ColorText("•", "#B00101")} {card.ToString()}" + "\n";
-            }
-
-            if (Payback2 != null)
-            {
-                var otherCards = Payback2.Call("GetActiveCardsStrings") as List<string>;
-                foreach (var card in otherCards)
-                {
-                    output += $"{UI2.ColorText("•", "#B00101")} {card.ToString()}" + "\n";
-                }
-            }
-
-
-            bool updateLogo = false;
-            if (!activePaybackUIS.Contains(player.userID))
-            {
-                UI2.CreatePanel(elements, "Under", guid, "1 1 1 0", UI2.vectorFullscreen, null, false);
-                activePaybackUIS.Add(player.userID);
-                updateLogo = true;
-            }
-            if (animationFlag)
-            {
-                updateLogo = true;
-            }
-            if (updateLogo)
-            {
-                if (ImageLibrary != null)
-                {
-                    if (animState == 0)
-                    {
-                        UI2.CreatePanel(elements, guid, "payback_logo", "1 1 1 1", logoBounds, GetImage(url_payback_logo), false, 0.0f, 0.0f, true);
-                    }
-                    else if (animState == 1)
-                    {
-                        UI2.CreatePanel(elements, guid, "payback_logo_raised", "1 1 1 1", logoBounds, GetImage(url_payback_logo_raised), false, 0.0f, 0.0f, true);
-                    }
-                }
-                else
-                {
-                    if (animState == 0)
-                    {
-                        UI2.CreatePanel(elements, guid, "payback_logo", "1 1 1 1", logoBounds, GetImage(url_payback_logo), false, 0.0f, 0.0f, false);
-                    }
-                    else if (animState == 1)
-                    {
-                        UI2.CreatePanel(elements, guid, "payback_logo_raised", "1 1 1 1", logoBounds, GetImage(url_payback_logo_raised), false, 0.0f, 0.0f, false);
-                    }
-                }
-            }
-            
-
-            UI2.CreateOutlineLabel(elements, guid, "commands", output, "1 1 1 1", 28, mainBounds, TextAnchor.UpperCenter);
-
-            //| ===================================
-            //| CONDITIONAL UI UPDATES
-            //| ===================================
-
-            //send the ui updates
-            if (elements.Count > 0)
-            {
-                CuiHelper.AddUi(player, elements);
-            }
-        }
-
-        #endregion
 
 
         //| ==============================================================
@@ -748,15 +354,12 @@ namespace Oxide.Plugins
                     }
 
 
-                    if (chair != null)
-                    {
-                        //chair.transform.position = shark.transform.position + shark.transform.forward * 0.88f + shark.transform.up * 0.15f;
-                        chair.transform.position = shark.transform.position + shark.transform.forward * 0.88f + shark.transform.up * 0.19f;
 
-                        //chair.transform.LookAt(shark.transform.up * -1 + shark.transform.position + Vector3.up * 0.25f);
-                        chair.transform.LookAt(shark.transform.position + shark.transform.up * -1 + Vector3.up * 0.15f);
-                    }
+                    //chair.transform.position = shark.transform.position + shark.transform.forward * 0.88f + shark.transform.up * 0.15f;
+                    chair.transform.position = shark.transform.position + shark.transform.forward * 0.88f + shark.transform.up * 0.19f;
 
+                    //chair.transform.LookAt(shark.transform.up * -1 + shark.transform.position + Vector3.up * 0.25f);
+                    chair.transform.LookAt(shark.transform.position + shark.transform.up * -1 + Vector3.up * 0.15f);
 
                 }
 
@@ -768,12 +371,9 @@ namespace Oxide.Plugins
                 yield return new WaitForFixedUpdate();
             }
 
-            if (shark != null)
-            {
-                shark.transform.position += Vector3.down * 100000;
-                shark.SendNetworkUpdate();
-            }
 
+            shark.transform.position += Vector3.down * 100000;
+            shark.SendNetworkUpdate();
 
             yield return null;
 
@@ -803,13 +403,13 @@ namespace Oxide.Plugins
                         output += gg.convarName + "\n";
                     }
 
-                    PrintToPlayer(admin, $"Gesture not found: {gesture}\nAvailable Gestures:{output}");
+                    PrintToPlayer(admin, $"Жест не найден: {gesture}\nДоступные жесты:{output}");
                 }
 
             }
             else
             {
-                PrintToPlayer(admin, $"to see all emotes use: /emote <target> list");
+                PrintToPlayer(admin, $"чтобы увидеть, как используются все эмоции: /emote <target> список");
             }
 
             PlayGesture(player, gesture);
@@ -823,28 +423,15 @@ namespace Oxide.Plugins
         }
 
 
-        void ResolveConflictingCommands(BasePlayer player, BasePlayer admin = null, int ignoreCard = (int)Card.NoRest, bool fromExternalPlugin = false)
+        void ResolveConflictingCommands(BasePlayer player, BasePlayer admin = null)
         {
-            //Puts($"Payback | ResolveConflictingCommands | HasAnyCard : {HasAnyCard(player.userID)} | Payback2 : {Payback2 != null} | IgnoreCard: {(int)ignoreCard}");
-
-            if (HasCard(player.userID, Card.Sit) && ignoreCard != (int)Card.Sit)
+            bool hasSit = false;
+            if (HasCard(player.userID, Card.Sit))
             {
+                hasSit = true;
                 TakeCard(player, Card.Sit);
             }
-            if (HasCard(player.userID, Card.Rocketman) && ignoreCard != (int)Card.Rocketman)
-            {
-                TakeCard(player, Card.Rocketman);
-            }
-            if (HasCard(player.userID, Card.Shark) && ignoreCard != (int)Card.Shark)
-            {
-                TakeCard(player, Card.Shark);
-            }
 
-            if (Payback2 != null && !fromExternalPlugin)
-            {
-                Payback2.CallHook("ResolveConflictingCommands", player, admin, ignoreCard, true);
-            }
-            
             if (player.isMounted)
             {
                 var car = player.GetMountedVehicle();
@@ -852,12 +439,8 @@ namespace Oxide.Plugins
                 {
                     car.Kill(BaseNetworkable.DestroyMode.Gib);
                 }
-                var mount = player.GetMounted();
-                if (mount != null)
-                {
-                    mount.DismountPlayer(player, true);
-                }
             }
+            TakeCard(player, Card.Rocketman);
 
         }
 
@@ -1046,8 +629,7 @@ namespace Oxide.Plugins
             DestroyGroundCheck(coil);
 
             Timer t = null;
-            t = timer.Every(0.2f, () =>
-            {
+            t = timer.Every(0.2f, () => {
                 if (coil == null || player == null)
                 {
                     t.Destroy();
@@ -1343,8 +925,7 @@ namespace Oxide.Plugins
             {
                 PlaySound("assets/prefabs/locks/keypad/effects/lock.code.lock.prefab", admin, true);
 
-                timer.Once(0.75f, () =>
-                {
+                timer.Once(0.75f, () => {
                     PlaySound("assets/prefabs/npc/autoturret/effects/targetacquired.prefab", admin, true);
 
                     if (!flag_kill_no_loot)
@@ -1353,7 +934,7 @@ namespace Oxide.Plugins
                         effect.Spawn();
                         var firework = effect as BaseFirework;
                         firework.fuseLength = 0;
-                        firework.Ignite(firework.transform.position - Vector3.down);
+                        firework.Ignite(new Vector3());
                     }
 
                 });
@@ -1525,16 +1106,14 @@ namespace Oxide.Plugins
                 }
 
 
-                timer.Once(120, () =>
-                {
+                timer.Once(120, () => {
                     if (chicken != null)
                     {
                         chicken.Kill();
                     }
                 });
 
-                timer.Once(130f, () =>
-                {
+                timer.Once(130f, () => {
                     chickens.RemoveWhere(x => x == null);
                 });
             }
@@ -1556,7 +1135,7 @@ namespace Oxide.Plugins
             if (entitiesWatchingForKilledMounts.Contains(entity))
             {
                 var chair = entity.GetComponentInChildren<BaseMountable>();
-                if (chair.GetMounted() != null)
+                if (chair.IsMounted())
                 {
                     var player = chair.GetMounted();
                     player.GetMounted().DismountPlayer(player, true);
@@ -1565,8 +1144,7 @@ namespace Oxide.Plugins
                 }
                 entitiesWatchingForKilledMounts.Remove(entity);
 
-                timer.Once(0.5f, () =>
-                {
+                timer.Once(0.5f, () => {
                     if (entitiesWatchingForKilledMounts.Count == 0)
                         Unsubscribe($"OnEntityKill");
                 });
@@ -1612,7 +1190,7 @@ namespace Oxide.Plugins
 
             entitiesWatchingForKilledMounts.Add(rocket as BaseNetworkable);
 
-            //| Attempt to solve instant kill sometimes-
+            //| Attempt to solve instant kill sometimes
             var collider = rocket.GetComponent<Collider>();
             if (collider != null)
             {
@@ -1622,8 +1200,7 @@ namespace Oxide.Plugins
             TimedExplosive explosive = rocket as TimedExplosive;
             explosive.SetCollisionEnabled(false);
 
-            timer.Once(1f, () =>
-            {
+            timer.Once(1f, () => {
                 explosive?.SetCollisionEnabled(false);
             });
             //|============================================
@@ -1660,17 +1237,12 @@ namespace Oxide.Plugins
             }
         }
 
-        public const string gamerChairPrefab = "assets/prefabs/deployable/toilet_a.static chair/toilet_a.static.deployed.prefab"; //параша
         public const string invisibleChairPrefab = "assets/bundled/prefabs/static/chair.invisible.static.prefab";
-        public const string toiletChairPrefab = "assets/bundled/prefabs/static/toilet_b.static.prefab";
-        public const string beachChairPrefab = "assets/prefabs/misc/summer_dlc/beach_chair/beachchair.deployed.prefab";
-        
-        public static string targetChairPrefab = invisibleChairPrefab;
 
         HashSet<BaseMountable> chairsPreventingDismount = new HashSet<BaseMountable>();
         BaseEntity InvisibleSit(BasePlayer targetPlayer)
         {
-            var chair = GameManager.server.CreateEntity(targetChairPrefab, targetPlayer.transform.position);
+            var chair = GameManager.server.CreateEntity(invisibleChairPrefab, targetPlayer.transform.position);
             var mount = chair as BaseMountable;
             chair.Spawn();
 
@@ -1685,8 +1257,7 @@ namespace Oxide.Plugins
             }
 
             Timer t = null;
-            t = timer.Every(0.25f, () =>
-            {
+            t = timer.Every(0.25f, () => {
                 if (chair == null || chair.IsDestroyed)
                 {
                     t.Destroy();
@@ -1712,16 +1283,16 @@ namespace Oxide.Plugins
             return chair;
         }
 
-        [ChatCommand("p")]
-        void CommandTestPinyata(BasePlayer player)
-        {
-            if (!IsAdmin(player)) return;
+        //[ChatCommand("p")]
+        //void CommandTestPinyata(BasePlayer player)
+        //{
+        //    if (!IsAdmin(player)) return;
 
-            timer.Once(2f, () =>
-            {
-                DoPinyataEffect(player);
-            });
-        }
+        //    timer.Once(2f, () =>
+        //    {
+        //        DoPinyataEffect(player);
+        //    });
+        //}
 
         public List<string> sounds_kill_quad = new List<string>() {
             "assets/prefabs/weapons/python/effects/close_cylinder.prefab",
@@ -1796,10 +1367,8 @@ namespace Oxide.Plugins
                 //stuff.Add(entity);
             }
 
-            timer.Once(10f, () =>
-            {
-                literalShit.ForEach(x =>
-                {
+            timer.Once(10f, () => {
+                literalShit.ForEach(x => {
                     x?.RemoveFromContainer();
                     x?.Remove();
                 });
@@ -1907,7 +1476,7 @@ namespace Oxide.Plugins
 
         void DoHigherGround(BasePlayer player)
         {
-            player.Teleport(player.transform.position + Vector3.up * 20);
+            player.Teleport(player.transform.position + Vector3.up * 100);
             TakeCard(player, Card.HigherGround);
         }
 
@@ -1996,9 +1565,12 @@ namespace Oxide.Plugins
         }
 
 
+        //string chairPrefab = "assets/prefabs/deployable/chair/chair.deployed.prefab";
+        string chairPrefab = "assets/prefabs/deployable/secretlab chair/secretlabchair.deployed.prefab";
+
         Dictionary<ulong, BaseEntity> sitChairMap = new Dictionary<ulong, BaseEntity>();
 
-        void DoSitCommand(BasePlayer targetPlayer, BasePlayer adminPlayer, string[] args = null)
+        void DoSitCommand(BasePlayer targetPlayer, BasePlayer adminPlayer)
         {
             if (targetPlayer == null) return;
 
@@ -2026,29 +1598,22 @@ namespace Oxide.Plugins
                 RaycastHit hitinfo;
                 if (Physics.Raycast(adminPlayer.eyes.HeadRay(), out hitinfo, 50))
                 {
-                    var targetPrefab = toiletChairPrefab;
-                    
-                    if (args != null && args.Contains("beach")) {
-                        targetPrefab = beachChairPrefab;
-                    } else if (args != null && args.Contains("gamer")) {
-                        targetPrefab = gamerChairPrefab;
-                    }
 
 
-                    var chair = GameManager.server.CreateEntity(targetPrefab, hitinfo.point);
+                    var chair = GameManager.server.CreateEntity(chairPrefab, hitinfo.point);
                     var mount = chair as BaseMountable;
                     chair.Spawn();
                     sitChairMap[targetPlayer.userID] = chair;
-
+                    //targetPlayer.Teleport(chair.transform.position + chair.transform.forward * 0.5f);
                     targetPlayer.EndSleeping();
 
-                    DestroyGroundCheck(chair);
+                    GameObject.DestroyImmediate(chair.GetComponentInChildren<DestroyOnGroundMissing>());
+                    GameObject.DestroyImmediate(chair.GetComponentInChildren<GroundWatch>());
 
                     Vector3 lookAtPosition = adminPlayer.transform.position;
                     lookAtPosition.y = mount.transform.position.y;
 
-                    timer.Once(0.25f, () =>
-                    {
+                    timer.Once(0.25f, () => {
 
                         if (targetPlayer != null)
                         {
@@ -2169,7 +1734,7 @@ namespace Oxide.Plugins
 
 
         string guid_BSOD = "guid_BSOD";
-        string url_bsod = "https://cdn.discordapp.com/attachments/1152305643059941509/1199803119735935058/ca15eee3492b9ffa.png";
+        string url_bsod = "https://i.imgur.com/36oaKDW.png";
         void DoBSOD(BasePlayer player, bool playPublic)
         {
             if (player.net.connection == null) return;
@@ -2199,8 +1764,7 @@ namespace Oxide.Plugins
                 CuiHelper.AddUi(player, elements);
             }
 
-            timer.Once(0.2f, () =>
-            {
+            timer.Once(0.2f, () => {
                 if (player != null)
                 {
                     CuiHelper.DestroyUi(player, "blackpreloader");
@@ -2281,18 +1845,18 @@ namespace Oxide.Plugins
 
                     paybackData.percent_butterfingers_dropchance = p;
 
-                    if (player != null) PrintToPlayer(player, $"Set percent to drop weapon with butterfingers to : %{p * 100}");
+                    if (player != null) PrintToPlayer(player, $"Установите процент выпадения оружия с пальцами-бабочками на : %{p * 100}");
                     //Puts($"Set percent to drop weapon with butterfingers to : %{p * 100}");
 
                 }
                 else
                 {
-                    if (player != null) PrintToPlayer(player, "Must enter a valid % value <0 - 100>");
+                    if (player != null) PrintToPlayer(player, "Необходимо ввести действительный % величины <0 - 100>");
                 }
             }
             else
             {
-                if (player != null) PrintToPlayer(player, "usage: setdroppercent <0-100>");
+                if (player != null) PrintToPlayer(player, "использование: setdroppercent <0-100>");
             }
 
         }
@@ -2330,14 +1894,14 @@ namespace Oxide.Plugins
                 ulong userID;
                 if (!ulong.TryParse(args[0], out userID))
                 {
-                    PrintToPlayer(admin, "usage: /bag <steamid>");
+                    PrintToPlayer(admin, "использование: /bag <steamid>");
                     return;
                 }
                 DoBagSearch(userID, args, admin);
             }
 
             //| Requires target commands
-            if ( (args.Length == 0 && admin != null) || (args.Length == 1 && args[0].ToLower() == "true"))
+            if (args.Length == 0 && admin != null)
             {
 
                 var entity = RaycastFirstEntity(admin.eyes.HeadRay(), 100);
@@ -2350,7 +1914,7 @@ namespace Oxide.Plugins
                 {
                     //raycast target in front of you
                     //SendReply(admin, "did not find player from head raycast, either look at your target or do /<cardname> <playername>");
-                    PrintToPlayer(admin, "did not find player from head raycast, either look at your target or do /<cardname> <playername>");
+                    PrintToPlayer(admin, "не нашел игрока из рейкаста головы, либо смотри на свою цель, либо делай /<cardname> <playername>");
                 }
 
                 return;
@@ -2376,7 +1940,7 @@ namespace Oxide.Plugins
                                 teamMatesPrintout += p.displayName + " ";
                             }
                         }
-                        PrintToPlayer(admin, $"Giving {card} to team {targetPlayer.displayName}  - {members.Count} team mates: {teamMatesPrintout}");
+                        PrintToPlayer(admin, $"Передача {card} команде {targetPlayer.displayName}  - {members.Count} товарищам по команде: {teamMatesPrintout}");
 
                         foreach (var member in members)
                         {
@@ -2408,7 +1972,7 @@ namespace Oxide.Plugins
                             {
 
                                 var members = GetPlayerTeam(targetPlayer.userID);
-                                PrintToPlayer(admin, $"Giving {card} to team {targetPlayer.displayName} has {members.Count} team mates");
+                                PrintToPlayer(admin, $"Передача {card} команде {targetPlayer.displayName} имеет {members.Count} товарищей по команде");
                                 foreach (var member in members)
                                 {
                                     BasePlayer p = BasePlayer.FindByID(member);
@@ -2439,7 +2003,7 @@ namespace Oxide.Plugins
 
                     }
 
-                    PrintToPlayer(admin, $"could not find player : {args[0]}");
+                    PrintToPlayer(admin, $"не смог найти игрока : {args[0]}");
                 }
             }
         }
@@ -2448,12 +2012,12 @@ namespace Oxide.Plugins
             if (HasCard(targetPlayer.userID, card))
             {
                 TakeCard(targetPlayer.userID, card, args, admin);
-                PrintToPlayer(admin, $"Removed {card} from {targetPlayer.displayName}");
+                PrintToPlayer(admin, $"Удалена {card} из {targetPlayer.displayName}");
             }
             else
             {
                 GiveCard(targetPlayer.userID, card, args, admin);
-                PrintToPlayer(admin, $"Gave {card} to {targetPlayer.displayName}");
+                PrintToPlayer(admin, $"Дал {card} to {targetPlayer.displayName}");
             }
         }
 
@@ -2474,7 +2038,7 @@ namespace Oxide.Plugins
         void ChatCommandPayback(BasePlayer player, string cmd, string[] args)
         {
             if (!IsAdmin(player)) return;
-            SendReply(player, "Check Payback output in F1 console!");
+            SendReply(player, "Проверьте вывод Payback в консоли F1!");
             CommandPayback(player, cmd, args);
         }
         void CommandPayback(BasePlayer player, string cmd, string[] args)
@@ -2491,7 +2055,7 @@ namespace Oxide.Plugins
             List<string> argsList = new List<string>(args);
             if (argsList.FirstOrDefault(x => x == "show") != null)
             {
-                string output = "Active Cards:\n";
+                string output = "Активные карты:\n";
                 // show all active cards and players
                 foreach (var userid in cardMap.Keys)
                 {
@@ -2537,7 +2101,7 @@ namespace Oxide.Plugins
                 }
 
                 cardMap.Clear();
-                PrintToPlayer(player, "removed all cards from all players");
+                PrintToPlayer(player, "удалены все карты у всех игроков");
             }
 
         }
@@ -2561,15 +2125,15 @@ namespace Oxide.Plugins
             var cards = Enum.GetValues(typeof(Card));
             string output = "";
 
-            output += "\n" + "Add \"team\" after a command to apply the effect to target player's team as well as them.  Example: /butterfingers <steamid> team";
-            output += "\n" + "/setdroppercent <1-100>% to change the chance butterfingers would drop";
-            output += "\n" + $"admins require the permisison {permission_admin} to use these commands!";
-            output += "\n" + $"use '/payback show' to see which players have which cards";
-            output += "\n" + $"use '/payback clear' to remove all cards from all players.";
-            output += "\n" + $"It is NOT necessary to remove effects from players when finished.";
-            output += "\n" + $"Whitelist temp banned players with: bancheckexception <id>";
+            output += "\n" + "Добавьте \"team\" после команды, чтобы применить эффект к команде целевого игрока, а также к нему самому.  Пример: /butterfingers <steamid> team";
+            output += "\n" + "/setdroppercent <1-100>% чтобы изменить шанс выпадения баттерфингов";
+            output += "\n" + $"администраторам требуется разрешение {permission_admin} для использования этих команд!";
+            output += "\n" + $"используйте '/payback show' чтобы узнать, у кого из игроков какие карты";
+            output += "\n" + $"используйте '/payback clear' чтобы удалить все карты у всех игроков.";
+            output += "\n" + $"НЕ обязательно снимать эффекты с игроков после завершения.";
+            output += "\n" + $"Белый список временно забаненных игроков с: bancheckexception <id>";
 
-            output += "\n\nPayback 1 Commands:";
+            output += "\n\nPayback Cards:";
 
             foreach (Card card in cards)
             {
@@ -2581,16 +2145,9 @@ namespace Oxide.Plugins
                 aliases.ForEach(x => aliasesTogether += $"[ {UI2.ColorText(x, "yellow")} ] ");
 
 
-                output += "\n\n" + $"{aliasesTogether}: {UI2.ColorText(desc, "white")}";
+                output += "\n\n" + $"{aliasesTogether}: { UI2.ColorText(desc, "white")}";
             }
-            output += "\n\n" + UI2.ColorText("you can also use /listen to cycle between players who have recently used the microphone (great to bind!)", "white");
-
-            if (Payback2 == null)
-            {
-                output += "\n\n " + UI2.ColorText("Payback2 Is Available Now! :", "red") + UI2.ColorText(" There's even more Payback available at https://payback.fragmod.com !", "white");
-            }
-
-            output += "\n\n " + UI2.ColorText("CHADIUS.IO :", "purple") + UI2.ColorText(" Are you protected by Rust's #1 AI Admin? Eliminate cheaters on autopilot at chadius.io", "white");
+            output += "\n\n" + UI2.ColorText("вы также можете использовать /listen для циклического переключения между игроками, которые недавно использовали микрофон (отлично подходит для bind!)", "white");
 
 
             PrintToPlayer(player, output);
@@ -2664,7 +2221,7 @@ namespace Oxide.Plugins
             {
                 if (player != null)
                 {
-                    DoSitCommand(player, admin, args);
+                    DoSitCommand(player, admin);
                 }
             }
             else if (card == Card.Shocker)
@@ -2673,19 +2230,6 @@ namespace Oxide.Plugins
             }
 
 
-            //| remove the card from any persistence
-            if (cardsWhichCanPersist.Contains(card))
-            {
-
-                HashSet<Card> persistentCards = null;
-                if (paybackData.persistentCommandMap.TryGetValue(player.userID, out persistentCards))
-                {
-                    persistentCards.Remove(card);
-                }
-
-            }
-
-            
             //Puts($"Payback card {card} taken from {userID}");
         }
 
@@ -2720,7 +2264,7 @@ namespace Oxide.Plugins
             if (!isListening)
             {
                 isListening = true;
-                PrintToPlayer(player, $"Payback was not listening, its starting to listen now!");
+                PrintToPlayer(player, $"Payback не слушал, теперь начинает слушать!");
                 Subscribe("OnPlayerVoice");
                 return;
             }
@@ -2730,13 +2274,12 @@ namespace Oxide.Plugins
                 {
                     listenTimer.Destroy();
                 }
-                listenTimer = timer.Once(60 * 15, () =>
-                {
+                listenTimer = timer.Once(60 * 15, () => {
                     isListening = false;
                     this.Unsubscribe("OnPlayerVoice");
                     if (player != null)
                     {
-                        PrintToPlayer(player, "Payback stopped listening for player voices.");
+                        PrintToPlayer(player, "Payback перестал прислушиваться к голосам игроков.");
                     }
                 });
             }
@@ -2763,7 +2306,7 @@ namespace Oxide.Plugins
                 }
                 else
                 {
-                    PrintToPlayer(player, "No one else has said anything in the last 60 seconds!");
+                    PrintToPlayer(player, "Никто больше ничего не сказал за последние 60 секунд!");
                 }
             }
             else
@@ -2784,13 +2327,13 @@ namespace Oxide.Plugins
                     else
                     {
                         recentPlayerVoices.Remove(playerID);
-                        PrintToPlayer(player, $"Player went offline, try again...");
+                        PrintToPlayer(player, $"Player отключился, попробуйте еще раз...");
                     }
 
                 }
                 else
                 {
-                    PrintToPlayer(player, "No one has said anything in the last 60 seconds!");
+                    PrintToPlayer(player, "Никто ничего не сказал за последние 60 секунд!");
                 }
             }
 
@@ -2829,8 +2372,7 @@ namespace Oxide.Plugins
 
                 if (HasCard(player.userID, Card.NoRest))
                 {
-                    timer.Once(3f, () =>
-                    {
+                    timer.Once(3f, () => {
                         if (player != null)
                         {
                             if (player.IsDead())
@@ -2895,8 +2437,7 @@ namespace Oxide.Plugins
                     if (oldValue < newValue)
                     {
 
-                        NextTick(() =>
-                        {
+                        NextTick(() => {
                             if (player != null)
                             {
                                 if (player.health > oldValue)
@@ -2940,9 +2481,6 @@ namespace Oxide.Plugins
             {
                 TakeCard(player, Card.Sit);
             }
-
-
-            activePaybackUIS.Remove(player.userID);
         }
 
         //Interface.CallHook("OnPlayerBanned", connection, status.ToString());        
@@ -2966,11 +2504,8 @@ namespace Oxide.Plugins
             {
                 if (sitChairMap.ContainsKey(id))
                 {
-                    if (player.GetMounted() != null)
-                    {
-                        player.GetMounted().DismountPlayer(player, true);
-                        player.Die();
-                    }
+                    player.GetMounted().DismountPlayer(player, true);
+                    player.Die();
                 }
             }
             CheckPublisherBan(name, id, address, reason);
@@ -2980,11 +2515,8 @@ namespace Oxide.Plugins
             //force the banned player dead and out of any chairs, else the model seems to stay behind
             if (sitChairMap.ContainsKey(player.userID))
             {
-                if (player.GetMounted() != null)
-                {
-                    player.GetMounted().DismountPlayer(player, true);
-                    player.Die();
-                }
+                player.GetMounted().DismountPlayer(player, true);
+                player.Die();
             }
 
             CheckPublisherBan(player?.name, player.userID, player?.net?.connection?.ipaddress, reason);
@@ -3011,9 +2543,8 @@ namespace Oxide.Plugins
 
                 var payload = new Dictionary<string, string>() {
                     { "Server", $"{serverHostName}" },
-					//{ "Banned Player", $"{name} : {id}" },
-					//{ "BM", $"https://www.battlemetrics.com/rcon/players?filter[search]={id}" },
-					{ "Banned Player", $"[Info](https://steamid.uk/profile/{id}) - {id} : [{TryGetDisplayName(id)}](https://www.battlemetrics.com/rcon/players?filter[search]={id})" },
+                    //{ "Banned Player", $"{name} : {id}" },
+                    { "Забаненный игрок", $"[Info](https://steamid.uk/profile/{id}) - {id} : [{TryGetDisplayName(id)}](https://www.battlemetrics.com/rcon/players?filter[search]={id})" },
 
                 };
 
@@ -3079,16 +2610,16 @@ namespace Oxide.Plugins
                 if (ulong.TryParse(arg.Args[0], out id))
                 {
                     paybackData.bancheck_exceptions.Add(id);
-                    PrintToPlayer(player, $"Added bancheck exception: {id} total: {paybackData.bancheck_exceptions.Count}");
+                    PrintToPlayer(player, $"Добавлено исключение банчека: {id} всего: {paybackData.bancheck_exceptions.Count}");
                 }
                 else
                 {
-                    PrintToPlayer(player, $"could not parse id");
+                    PrintToPlayer(player, $"не удалось разобрать id");
                 }
             }
             else
             {
-                PrintToPlayer(player, $"not enough args");
+                PrintToPlayer(player, $"недостаточно аргументов");
             }
         }
 
@@ -3106,25 +2637,6 @@ namespace Oxide.Plugins
 
         void OnPlayerConnected(BasePlayer player)
         {
-            
-            //| re-apply saved cards if we're using persistent data
-            if (config.persistentCommands)
-            {
-
-                HashSet<Card> persistentCards = null;
-                if (paybackData.persistentCommandMap.TryGetValue(player.userID, out persistentCards))
-                {
-                    foreach (var card in persistentCards)
-                    {
-                        timer.Once(2f, () => {
-                            if (player == null) return;
-                            GiveCard(player.userID, card, new string[0], null);
-                        });
-                    }
-                }
-                
-            }
-
             if (config.enabled_nexus_gamebancheck)
             {
                 if (paybackData.bancheck_exceptions.Contains(player.userID)) return;
@@ -3143,7 +2655,7 @@ namespace Oxide.Plugins
                         if (response == null) return;
 
                         //Puts(response);
-                        if (response.Contains("IS CURRENTLY GAME BANNED".ToLower()))
+                        if (response.Contains("В НАСТОЯЩЕЕ ВРЕМЯ ИГРА ЗАПРЕЩЕНА".ToLower()))
                         {
 
                             Regex regex = new Regex($"<a.+?<a.+?\">(.+?)<\\/a><\\/blockquote>");
@@ -3165,30 +2677,13 @@ namespace Oxide.Plugins
                                 string serverHostName = ConsoleSystem.Run(ConsoleSystem.Option.Server, $"hostname", new object[0]);
                                 if (player == null) return;
                                 //Puts($"Detected game-banned user: {player.userID} {player.displayName}");
+                                SendToDiscordWebhook(new Dictionary<string, string>() {
+                                    { "Server", $"{serverHostName}" },
+                                    //{ "Url", $"{url}" },
+                                    //{ "Player", $"{player.displayName} : {player.userID}" },
+                                    { "Player", $"[Info](https://steamid.uk/profile/{player.userID}) - {player.userID} : [{TryGetDisplayName(player.userID)}](https://www.battlemetrics.com/rcon/players?filter[search]={player.userID})" },
 
-
-                                if (config.autoban_tempbans)
-                                {
-                                    player.IPlayer.Ban($"Auto-Banned By Payback | CODE 69420 | {config.autoban_banmessage}");
-                                    SendToDiscordWebhook(new Dictionary<string, string>() {
-                                        { "Server", $"{serverHostName}" },
-										//{ "Url", $"{url}" },
-										//{ "Player", $"{player.displayName} : {player.userID}" },
-										//{ "BM", $"https://www.battlemetrics.com/rcon/players?filter[search]={player.userID}" },
-										{ "Player", $"[Info](https://steamid.uk/profile/{player.userID}) - {player.userID} : [{TryGetDisplayName(player.userID)}](https://www.battlemetrics.com/rcon/players?filter[search]={player.userID})" },
-                                    }, $"TEMP BAN DETECTED - AUTO-BANNED");
-                                }
-                                else
-                                {
-                                    SendToDiscordWebhook(new Dictionary<string, string>() {
-                                        { "Server", $"{serverHostName}" },
-										//{ "Url", $"{url}" },
-										//{ "Player", $"{player.displayName} : {player.userID}" },
-										//{ "BM", $"https://www.battlemetrics.com/rcon/players?filter[search]={player.userID}" },
-										{ "Player", $"[Info](https://steamid.uk/profile/{player.userID}) - {player.userID} : [{TryGetDisplayName(player.userID)}](https://www.battlemetrics.com/rcon/players?filter[search]={player.userID})" },
-
-                                    });
-                                }
+                                });
                             }
 
                         }
@@ -3196,18 +2691,18 @@ namespace Oxide.Plugins
                     }
                     else
                     {
-                        //PrintError($"nexusonline HTTP CODE: {code}");
+                        PrintError($"nexusonline HTTP CODE: {code}");
                     }
                 }, this);
             }
 
         }
 
-        void SendToDiscordWebhook(Dictionary<string, string> messageData, string title = "TEMP GAME BAN DETECTED")
+        void SendToDiscordWebhook(Dictionary<string, string> messageData, string title = "ОБНАРУЖЕН ВРЕМЕННЫЙ ИГРОВОЙ ЗАПРЕТ")
         {
             if (config.webhooks == null || config.webhooks.Count == 0)
             {
-                Puts($"Could not send Discord Webhook: webhook not configured");
+                Puts($"Не удалось отправить Discord Webhook: webhook не настроен");
                 return;
             }
 
@@ -3235,7 +2730,7 @@ namespace Oxide.Plugins
         {
             if (string.IsNullOrEmpty(WebhookUrl))
             {
-                Puts("Error: Someone tried to use a command but the WebhookUrl is not set!");
+                Puts("Ошибка: Кто-то пытался использовать команду, но WebhookUrl не задан!");
                 return;
             }
 
@@ -3246,7 +2741,7 @@ namespace Oxide.Plugins
             {
                 if (code == 429)
                 {
-                    Puts("Sending too many requests, please wait");
+                    Puts("Отправлено слишком много запросов, пожалуйста, подождите");
                     return;
                 }
 
@@ -3272,7 +2767,7 @@ namespace Oxide.Plugins
                         title = discordMessage,
                         fields = _fields,
                         color = EmbedColour,
-                        thumbnail = new Dictionary<object, object>() { { "url", "https://cdn.discordapp.com/attachments/1102135134758645782/1103722117272436777/payback_hammer_icon_1.png" } },
+                        thumbnail = new Dictionary<object, object>() { { "url", "https://i.imgur.com/ruy7N2Z.png" } },
                     }
                 };
                 Embeds = embed;
@@ -3319,8 +2814,7 @@ namespace Oxide.Plugins
                 var player = entity as BasePlayer;
                 var attacker = hitinfo.InitiatorPlayer;
 
-                var damageType = hitinfo.damageTypes.GetMajorityDamageType();
-                if (player != null && HasCard(player.userID, Card.Masochist) && hitinfo.damageTypes != null && (damageType == DamageType.Suicide || damageType == DamageType.Fall))
+                if (player != null && HasCard(player.userID, Card.Masochist) && hitinfo.damageTypes != null && hitinfo.damageTypes.GetMajorityDamageType() == DamageType.Suicide)
                 {
                     hitinfo.damageTypes.Clear();
                     hitinfo.DoHitEffects = false;
@@ -3479,7 +2973,7 @@ namespace Oxide.Plugins
 
                             if (config.notifyCheaterAttacking && !silentPacifism)
                             {
-                                SendPlayerLimitedMessage(player.userID, $"You are being attacked by [{UI2.ColorText(attacker.displayName, "yellow")}] a known cheater!\n{UI2.ColorText("Tommygun's Payback Plugin", "#7A2E30")} has prevented all damage to you.");
+                                SendPlayerLimitedMessage(player.userID, $"На вас напал [{UI2.ColorText(attacker.displayName, "yellow")}] a known cheater!\n{UI2.ColorText("Tommygun's Payback Plugin", "#7A2E30")} has prevented all damage to you.");
                             }
                             //Puts($"{player.displayName} attacked by [{attacker.displayName}] a known cheater! Tommygun's Payback has prevented all damage from the cheater");
 
@@ -3518,13 +3012,11 @@ namespace Oxide.Plugins
             {
 
                 PlayGesture(player, "friendly");
-                timer.Once(2f, () =>
-                {
+                timer.Once(2f, () => {
                     if (player != null)
                         PlayGesture(player, "friendly");
                 });
-                timer.Once(4f, () =>
-                {
+                timer.Once(4f, () => {
                     if (player != null)
                         PlayGesture(player, "friendly");
                 });
@@ -3545,35 +3037,21 @@ namespace Oxide.Plugins
 
                 currentlyScreamingPlayers.Add(player.userID);
 
-                timer.Once(5f, () =>
-                {
+                timer.Once(5f, () => {
                     if (player != null)
                         currentlyScreamingPlayers.Remove(player.userID);
-                });
+					});
             }
         }
 
         HashSet<BaseEntity> protectedStashes = new HashSet<BaseEntity>();
-        HashSet<Landmine> landmines = new HashSet<Landmine>();
-        object CanPickupEntity(BasePlayer player, BaseEntity entity)
-        {
-            if (entity is Landmine)
-            {
-                if (landmines.Contains(entity)) {
-                    return false;
-                }
-            }
-            return null;
-        }
         void OnStashExposed(StashContainer stash, BasePlayer player)
         {
             if (HasCard(player.userID, Card.DogDoo))
             {
-                landmines.RemoveWhere(x => x == null || x.IsDead() || x.IsDestroyed);
                 if (protectedStashes.Contains(stash)) return;//once only.
                 protectedStashes.Add(stash);
-                timer.Once(2f, () =>
-                {
+                timer.Once(2f, () => {
 
                     if (player != null)
                     {
@@ -3582,13 +3060,11 @@ namespace Oxide.Plugins
                         entity.Spawn();
                         landmine.Arm();
                         landmine.SendNetworkUpdateImmediate();
-                        landmines.Add(landmine);
                     }
 
                 });
 
-                timer.Once(120f, () =>
-                {
+                timer.Once(120f, () => {
 
                     if (stash != null && !stash.IsDead())
                     {
@@ -3652,19 +3128,6 @@ namespace Oxide.Plugins
                 cmd.AddConsoleCommand(alias, this, nameof(GenericConsoleCommand));
             }
 
-            timer.Once(0.5f, () =>
-            {
-                if (Payback2 == null)
-                {
-                    Puts($"\nCheck out the sequel to this plugin Payback 2! there's a lot more Payback to be had at https://payback.fragmod.com !\n");
-                }
-
-                Worker.StaticStartCoroutine(AdminVisualizationCo());
-
-                ImageLibrary?.CallHook("AddImage", url_payback_logo, url_payback_logo, (ulong)0);
-                ImageLibrary?.CallHook("AddImage", url_payback_logo_raised, url_payback_logo_raised, (ulong)0);
-
-            });
             //Puts("Tommygun's Payback Finished Initialization");
 
         }
@@ -3724,16 +3187,6 @@ namespace Oxide.Plugins
         {
             bool serverHasInitialized = !serverIsNOTinitialized;
             Initialize();
-
-
-            //| preload images
-            timer.Once(10, () => {
-
-                if (ImageLibrary == null)
-                {
-                    Puts($"[Payback] (Optional) Please install the ImageLibrary plugin for optimal performance in Payback [https://umod.org/plugins/image-library]");
-                }
-            });
         }
 
 
@@ -3751,10 +3204,10 @@ namespace Oxide.Plugins
             if (admin == null) return;
             if (admin.IsSpectating())
             {
-                PrintToPlayer(admin, $"{UI2.ColorText($"[PAYBACK WARNING] ", "yellow")} : {UI2.ColorText($"cannot open target's inventory while spectating! you must respawn", "white")}");
+                PrintToPlayer(admin, $"{UI2.ColorText($"[PAYBACK WARNING] ", "yellow") } : {UI2.ColorText($"cannot open target's inventory while spectating! you must respawn", "white")}");
                 return;
             }
-            PrintToPlayer(admin, $"{UI2.ColorText($"[PAYBACK WARNING] ", "yellow")} : {UI2.ColorText($"you must exit the F1 console immediately after using the command to view inventory", "white")}");
+            PrintToPlayer(admin, $"{UI2.ColorText($"[PAYBACK WARNING] ", "yellow") } : {UI2.ColorText($"you must exit the F1 console immediately after using the command to view inventory", "white")}");
 
             ViewInvCmd(admin.IPlayer, "ViewInvCmd", new string[] { $"{target.userID}" });
         }
@@ -3936,8 +3389,7 @@ namespace Oxide.Plugins
         //| ==============================================================
 
 
-        string filename_data
-        {
+        string filename_data {
             get
             {
                 return $"Payback/Payback.dat";
@@ -3953,15 +3405,11 @@ namespace Oxide.Plugins
         {
             public float percent_butterfingers_dropchance = 0.3f;
             public HashSet<ulong> bancheck_exceptions = new HashSet<ulong>();
-
-            public Dictionary<ulong, HashSet<Card>> persistentCommandMap = new Dictionary<ulong, HashSet<Card>>();
         }
 
         void Unload()
         {
             //Puts("Unload Tommygun's Payback");
-
-            SaveData();
 
             Worker.GetSingleton()?.StopAllCoroutines();
             GameObject.Destroy(Worker.GetSingleton());
@@ -3971,6 +3419,7 @@ namespace Oxide.Plugins
                 UI2.ClearUI(player);
             }
 
+            SaveData();
         }
 
 
@@ -3996,49 +3445,15 @@ namespace Oxide.Plugins
             try
             {
                 paybackData = file_payback_data.ReadObject<PaybackData>();
-
-                if (paybackData.persistentCommandMap == null)
-                {
-                    paybackData.persistentCommandMap = new Dictionary<ulong, HashSet<Card>>();
-                }
-                
             }
             catch (Exception e)
             {
                 paybackData = new PaybackData();
                 //Puts($"Creating new data {e}");
             }
-            Worker.StaticStartCoroutine(ApplyPersistentCommandsFromReloadCo());
 
         }
 
-        IEnumerator ApplyPersistentCommandsFromReloadCo()
-        {
-            if (!config.persistentCommands)
-            {
-                yield break;
-            }
-            
-            yield return null;
-
-            foreach (var player in BasePlayer.activePlayerList.ToArray())
-            {
-                if (player != null)
-                {
-
-                    HashSet<Card> persistentCards = null;
-                    if (paybackData.persistentCommandMap.TryGetValue(player.userID, out persistentCards))
-                    {
-                        foreach (var card in persistentCards)
-                        {
-                            GiveCard(player.userID, card, new string[0], null);
-                        }
-                    }
-                    yield return null;
-                }
-            }
-
-        }
 
         public const string permission_admin = "payback.admin";
 
@@ -4055,14 +3470,6 @@ namespace Oxide.Plugins
         //| ==============================================================
         //| UTILITIES
         //| ==============================================================
-        private string GetImage(string url)
-        {
-            if (ImageLibrary == null) return url;
-            var obj = ImageLibrary?.Call("GetImage", url);
-            if (obj == null || obj.ToString() == null) return url;
-            return obj?.ToString();
-        }
-
         void SetDespawnDuration(DroppedItem dropped, float seconds)
         {
             dropped.Invoke(new Action(dropped.IdleDestroy), seconds);//prevent dropped item from despawn
@@ -4103,10 +3510,6 @@ namespace Oxide.Plugins
         public HashSet<ulong> GetPlayerTeam(ulong userID)
         {
             BasePlayer player = BasePlayer.FindByID(userID);
-            if (player == null)
-            {
-                return new HashSet<ulong>();
-            }
 
             RelationshipManager.PlayerTeam existingTeam = RelationshipManager.ServerInstance.FindPlayersTeam(player.userID);
             if (existingTeam != null)
@@ -4261,16 +3664,10 @@ namespace Oxide.Plugins
         private class PluginConfig
         {
             [JsonProperty("Check temporary game bans and notify via Discord Webhook")]
-            public bool enabled_nexus_gamebancheck = false;
+            public bool enabled_nexus_gamebancheck = true;
 
             [JsonProperty("Only report temp bans younger than days")]
             public int nexus_ban_days = 60;
-
-            [JsonProperty("Automatically ban players with a temp ban")]
-            public bool autoban_tempbans = false;
-
-            [JsonProperty("Ban appeal message")]
-            public string autoban_banmessage = "";
 
             [JsonProperty("Notify Game Ban + Team")]
             public bool notify_game_ban = true;
@@ -4286,15 +3683,6 @@ namespace Oxide.Plugins
 
             [JsonProperty("notify player being attacked by cheater")]
             public bool notifyCheaterAttacking = true;
-
-            [JsonProperty("report payback command usage to discord")]
-            public bool logPaybackCommands = false;
-
-            [JsonProperty("commands persist : save commands and re-apply them players between server restarts and plugin reloads")]
-            public bool persistentCommands = false;
-
-            [JsonProperty("Show Payback UI to admins while commands are active")]
-            public bool showUI = false;
         }
 
         #endregion Config
@@ -4415,6 +3803,7 @@ namespace Oxide.Plugins
                 string c = $"{String.Format("{0:0.000}", color.r)} {String.Format("{0:0.000}", color.g)} {String.Format("{0:0.000}", color.b)} {String.Format("{0:0.000}", color.a)}";
                 return c;
             }
+
 
             //| =============================
             //| RECT FUNCTIONS
@@ -4641,7 +4030,6 @@ namespace Oxide.Plugins
 
 								new CuiRawImageComponent
                                 {
-
                                     Color = color,
                                     Png = imageUrl,
                                     FadeIn = fadeIn
@@ -4669,9 +4057,6 @@ namespace Oxide.Plugins
 
                                 new CuiRawImageComponent
                                 {
-                                                                        
-                                    Sprite = "assets/content/textures/generic/fulltransparent.tga",
-
                                     Color = color,
                                     Url = imageUrl,
                                     FadeIn = fadeIn

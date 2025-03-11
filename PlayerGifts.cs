@@ -1,452 +1,591 @@
-// Автор плагина FuzeEffect 
-// Версия плагина 1.0.214
-// Группа по разработке приватных плагинов - vk.com/skyeyeplugins
-// Слив,перепродажа,подарок,перекупка или обмен караются БАНОМ И САНКЦИЯМИ,которые будут применены к вам!
-// Уважайте разработчиков и не распространяйте данный плагин! Если такое не было обговорено!
-// Приятного пользования!
-// Плагин обфусцирован дабы защитить себя! На оптимизацию и работоспособность это не влияет!
+﻿using Oxide.Core;
 using System.Collections.Generic;
-using System;
-using Newtonsoft.Json;
-using Oxide.Game.Rust.Cui;
-using System.Globalization;
-using UnityEngine;
 using System.Linq;
-using Oxide.Core.Plugins;
-using Oxide.Core;
+using System;
+using UnityEngine;
+using Oxide.Core.Configuration;
+using Oxide.Game.Rust.Cui;
 
 namespace Oxide.Plugins
 {
-
-    [Info("PlayerGifts", "FuzeEffect", "1.0.104")]
-    public class PlayerGifts : RustPlugin
+    [Info("Player Gifts", "TopPlugin.ru", "2.0.1")]
+    class PlayerGifts : RustPlugin
     {
-        protected override void SaveConfig() => Config.WriteObject(uuu);
-        [Oxide.Core.Plugins.HookMethod("OnPlayerDisconnected")]
-        void ooo(BasePlayer players, string aaa)
+        Dictionary<BasePlayer, int> timers = new Dictionary<BasePlayer, int>();
+        List<ulong> activePlayers = new List<ulong>();
+
+        #region CONFIGURATION
+        public int GameActive = 15;
+        string EnableGUIPlayerMin = "0.01041665 0.07825926";
+        string EnableGUIPlayerMax = "0.1805 0.122";
+        string GUIEnabledColor = "0.44 0.55 0.26 0.70";
+        string GUIColor = "0.44 0.55 0.26 1";
+        string ImagesGUI = "https://i.imgur.com/w5FhWrR.png";
+
+        private void LoadDefaultConfig()
         {
-            sss(players, aaa);
-        }
-        public List<ulong> ddd = new List<ulong>();
-        public double fff = ggg();
-        static string yyy = "XCC_MAINPANELGIFT214";
-        void Gui(BasePlayer players)
-        {
-            CuiHelper.DestroyUi(players, Ui);
-            CuiElementContainer Gui = new CuiElementContainer();
-            Gui.Add(new CuiPanel { CursorEnabled = true, RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" }, Image = { Color = uuu.xxx.ccc.vvv, Sprite = "assets/content/ui/ui.background.transparent.radial.psd", Material = "assets/content/ui/uibackgroundblur.mat" } }, "Overlay", Ui);
-            Gui.Add(new CuiButton { RectTransform = { AnchorMin = "-100 -100", AnchorMax = "100 100" }, Button = { Close = Ui, Color = "0 0 0 0" }, Text = { FadeIn = 0.8f, Text = "" } }, Ui);
-            Gui.Add(new CuiLabel { RectTransform = { AnchorMin = "0 0.9138894", AnchorMax = "0.981482 1", OffsetMax = "0 0" }, Text = { Text = uuu.xxx.ccc.bbb, Font = uuu.xxx.ccc.nnn, Align = TextAnchor.MiddleCenter } }, Ui);
-            Gui.Add(new CuiLabel { RectTransform = { AnchorMin = "0 0.8962963", AnchorMax = "1 0.9324074", OffsetMax = "0 0" }, Text = { Text = uuu.xxx.ccc.mmm, Font = uuu.xxx.ccc.nnn, Align = TextAnchor.MiddleCenter } }, Ui);
-            Gui.Add(new CuiPanel { FadeOut = 0.5f, RectTransform = { AnchorMin = "0.08958333 0.2629631", AnchorMax = "0.9520833 0.8916668" }, Image = { FadeIn = 0.5f, Color = "0 0 0 0" } }, Ui, "InventoryPanel");
-            for (int i = 0, x = 0, y = 0;
-            i < 36;
-            i++)
-            {
-                Gui.Add(new CuiPanel { RectTransform = { AnchorMin = $"{0 + (x * uuu.xxx.ccc.qww)} {0.7805594 - (y * uuu.xxx.ccc.qee)}", AnchorMax = $"{0.09722221 + (x * uuu.xxx.ccc.qww)} {0.995 - (y * uuu.xxx.ccc.qee)}" }, Image = { Color = uuu.xxx.ccc.qrr, Sprite = "assets/content/ui/ui.background.transparent.radial.psd", Material = "assets/content/ui/uibackgroundblur.mat" } }, "InventoryPanel", $"Slot_{i }");
-                x++;
-                if (x >= 9)
-                {
-                    x = 0;
-                    y++;
-                }
-                if (x >= 9 && y >= 4) break;
-            }
-            for (int i = 0, x = 0, y = 0;
-          i < qtt[players.userID].qqq.Count;
-          i++)
-            {
-                string qyy = string.IsNullOrEmpty(qtt[players.userID].qqq.ElementAt(i).Value) ? "Coins" : qtt[players.userID].qqq.ElementAt(i).Value;
-                Gui.Add(new CuiElement { Parent = $"Slot_{i }", Name = "ItemInventory", Components = { new CuiRawImageComponent { Png = quu(qyy), }, new CuiRectTransformComponent { AnchorMin = $"0.08 0.04", AnchorMax = $"0.9 0.9" }, } });
-                Gui.Add(new CuiButton { RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" }, Button = { Command = $"TakeItem {i }", Color = "0 0 0 0", Sprite = "assets/content/ui/ui.background.transparent.radial.psd", }, Text = { Text = qtt[players.userID].qqq.ElementAt(i).Amount.ToString() + "шт", Align = TextAnchor.LowerCenter, FontSize = 17, Font = uuu.xxx.ccc.nnn } }, "ItemInventory");
-                x++;
-                if (x >= 10)
-                {
-                    x = 0;
-                    y++;
-                }
-                if (x == 10 && y == 4) break;
-            }
-            Gui.Add(new CuiButton { RectTransform = { AnchorMin = "0.410417 0.2064815", AnchorMax = "0.5901042 0.2638889" }, Button = { Command = "TakeAll", Color = qcc("#0000005D") }, Text = { Text = "Забрать все", Align = TextAnchor.MiddleCenter, FontSize = 23, Font = uuu.xxx.ccc.nnn } }, Ui);
-            CuiHelper.AddUi(players, Gui);
-        }
-        [Oxide.Core.Plugins.HookMethod("OnPlayerInit")]
-        void tjj(BasePlayer p)
-        {
-            wtt(p);
+            GetConfig("Настройки", "Время активности на сервере за какое выдается подарок (в минутах)", ref GameActive);
+            GetConfig("GUI", "Цвет фона кнопки 'Забрать подарок'", ref GUIEnabledColor);
+            GetConfig("GUI", "Цвет фона заполнения", ref GUIColor);
+            GetConfig("GUI", "Ссылка на изображение", ref ImagesGUI);
+            GetConfig("GUI", "Anchor Min Основной панели", ref EnableGUIPlayerMin);
+            GetConfig("GUI", "Anchor Max Основной панели", ref EnableGUIPlayerMax);
+            SaveConfig();
         }
 
-        [Oxide.Core.Plugins.HookMethod("OnServerSave")]
-        void tgg()
+        private void GetConfig<T>(string menu, string Key, ref T var)
         {
-            rmm();
+            if (Config[menu, Key] != null)
+            {
+                var = (T)Convert.ChangeType(Config[menu, Key], typeof(T));
+            }
+            Config[menu, Key] = var;
         }
 
-        [ConsoleCommand("CheckGift")]
-        void qnn(ConsoleSystem.Arg arg)
-        {
-            BasePlayer players = arg.Player();
-            if (qtt[players.userID].qqq.Count >= 39)
-            {
-                ttt(players, lang.GetMessage("inventorypgfull", this));
-                return;
-            }
-            qtt[players.userID].TimeGame = 0;
-            wqq(players);
-            var qpp = uuu.qaa.ElementAt(UnityEngine.Random.Range(0, uuu.qaa.Count));
-            var qss = qtt[players.userID].qqq;
-            qss.Add(new qdd.qff { Value = qpp.qgg, Amount = qpp.qhh, Url = qpp.qjj });
-            ttt(players, lang.GetMessage("rewardgive", this));
-            ddd.Remove(players.userID);
-        }
-        void ttt(BasePlayer players, string qll)
-        {
-            CuiHelper.DestroyUi(players, qzz);
-            CuiElementContainer qxx = new CuiElementContainer();
-            qxx.Add(new CuiPanel { RectTransform = { AnchorMin = "0.3291668 0.8583333", AnchorMax = "0.6614581 0.9166667" }, Image = { FadeIn = 0.4f, Color = qcc(uuu.xxx.ccc.tkk) } }, "Overlay", qzz);
-            qxx.Add(new CuiLabel { RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" }, Text = { Text = String.Format(qll), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", Color = qcc("#FFFFFFFF") } }, qzz);
-            CuiHelper.AddUi(players, qxx);
-            timer.Once(2f, () => {
-                CuiHelper.DestroyUi(players, qzz);
-            });
-        }
-        void sss(BasePlayer players, string qbb) => ddd.Remove(players.userID);
-        void wqq(BasePlayer players)
-        {
-            CuiHelper.DestroyUi(players, yyy);
-            CuiElementContainer wzz = new CuiElementContainer();
-            string tll = qtt[players.userID].TimeGame >= uuu.wee ? "ActivePng" : "InactivePng";
-            wzz.Add(new CuiElement { Parent = "Overlay", Name = yyy, Components = { new CuiRawImageComponent { Png = quu(tll), }, new CuiRectTransformComponent { AnchorMin = uuu.xxx.wjj.whh, AnchorMax = uuu.xxx.wjj.eyy, OffsetMin = uuu.xxx.wjj.wkk, OffsetMax = uuu.xxx.wjj.wll }, } });
-            if (qtt[players.userID].TimeGame >= uuu.wee)
-            {
-                wzz.Add(new CuiButton { RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" }, Button = { Command = "CheckGift", Color = "0 0 0 0" }, Text = { Text = "" } }, yyy);
-            }
-            CuiHelper.AddUi(players, wzz);
-        }
-        protected override void LoadConfig()
-        {
-            base.LoadConfig();
-            try
-            {
-                uuu = Config.ReadObject<rtt>();
-                if (uuu?.qaa == null) LoadDefaultConfig();
-            }
-            catch
-            {
-                PrintWarning($"Ошибка чтения конфигурации 'oxide/config/{Name }', создаём новую конфигурацию!!");
-                LoadDefaultConfig();
-            }
-            NextTick(SaveConfig);
-        }
-        static double ggg() => DateTime.UtcNow.Subtract(wxx).TotalSeconds;
-        public void wtt(BasePlayer players)
-        {
-            if (players.IsReceivingSnapshot)
-            {
-                NextTick(() => wtt(players));
-                return;
-            }
-            if (!qtt.ContainsKey(players.userID))
-            {
-                qdd wuu = new qdd() { PlayerAuthTime = fff, TimeGame = 0.0, qqq = new List<qdd.qff> { } };
-                qtt.Add(players.userID, wuu);
-            }
-            wqq(players);
-            wcc(players);
-        }
-        private new void lans()
-        {
-            PrintWarning("Языковой файл загружается...");
-            timer.In(2.5f, () => {
-                Dictionary<string, string> woo = new Dictionary<string, string> { ["takeallnull"] = "У вас ничего нет", ["takeallinventory"] = "Вы успешно забрали весь инвентарь", ["inventoryfull"] = "Ваш инвентарь полон,награда выброшена под ноги!", ["inventorypgfull"] = "Ваш инвентарь полон,освободите слоты чтобы получить награду", ["takeitem"] = "Вы успешно забрали награду", ["rewardgive"] = "Вы успешно получили награду", ["noauth"] = "Для того чтобы получить баланс вы должны быть авторизованы в магазине!", };
-                lang.RegisterMessages(woo, this, "en");
-                PrintWarning("Языковой файл загружен успешно");
-            });
-        }
-        public string quu(string wpp, ulong waa = 0) => (string)ImageLibrary?.Call("GetImage", wpp, waa);
+        #endregion
 
-        [ChatCommand("pg")]
-        void wss(BasePlayer players)
+        #region Core
+
+        bool CanTake(BasePlayer player) => !player.inventory.containerMain.IsFull() || !player.inventory.containerBelt.IsFull();
+
+        bool TakeGifts(BasePlayer player, string gift = "Player Gifts")
         {
-            Gui(players);
-        }
-        [Oxide.Core.Plugins.HookMethod("Unload")]
-        void wff()
-        {
-            wgg();
-        }
-        public Dictionary<ulong, qdd> qtt = new Dictionary<ulong, qdd>();
-        void rmm() => Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("PlayerGifts/PlayerTimer", qtt);
-        private static string qcc(string tzz)
-        {
-            if (string.IsNullOrEmpty(tzz))
+            if (data.GiftPlayers[player.userID].ActiveGifts != 0)
             {
-                tzz = "#FFFFFFFF";
-            }
-            var wbb = tzz.Trim('#');
-            if (wbb.Length == 6) wbb += "FF";
-            if (wbb.Length != 8)
-            {
-                throw new Exception(tzz);
-                throw new InvalidOperationException("Cannot convert a wrong format.");
-            }
-            var thh = byte.Parse(wbb.Substring(0, 2), NumberStyles.HexNumber);
-            var wvv = byte.Parse(wbb.Substring(2, 2), NumberStyles.HexNumber);
-            var txx = byte.Parse(wbb.Substring(4, 2), NumberStyles.HexNumber);
-            var wnn = byte.Parse(wbb.Substring(6, 2), NumberStyles.HexNumber);
-            Color wmm = new Color32(thh, wvv, txx, wnn);
-            return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", wmm.r, wmm.g, wmm.b, wmm.a);
-        }
-        private class rtt
-        {
-            internal class tff
-            {
-                [JsonProperty("Настройка UI инвентаря")] public eqq ccc = new eqq();
-                [JsonProperty("Настройка UI лого")] public eww wjj = new eww();
-                internal class eww
+                if (!CanTake(player))
                 {
-                    [JsonProperty("Не активная картинка(Будет показана если игрок не отыграл определенное время(ссылка)")] public string err = "https://i.imgur.com/WmLsDv1.png";
-                    [JsonProperty("Aктивная картинка(Будет показана если игрок  отыграл определенное время(ссылка)")] public string ett = "https://i.imgur.com/CgvNwaS.png";
-                    [JsonProperty("AnchorMin для иконки(для опытных юзеров)")] public string whh = "0.5 0.5";
-                    [JsonProperty("AnchorMax для иконки(для опытных юзеров)")] public string eyy = "0.5 0.5";
-                    [JsonProperty("OffsetMin для иконки(для опытных юзеров)")] public string wkk = "-260 -341";
-                    [JsonProperty("OffsetMax для иконки(для опытных юзеров)")] public string wll = "-200 -282";
+                    SendReply(player, Messages["InvFull"]);
+                    return false;
                 }
-                internal class eqq
+
+                var item = gifts[gift].Items.GetRandom();
+                var amount = item.GetRandom();
+                player.inventory.GiveItem(ItemManager.CreateByName(item.Shortname, amount, 0));
+                var x = ItemManager.CreateByPartialName(item.Shortname);
+                data.GiftPlayers[player.userID].ActiveGifts = data.GiftPlayers[player.userID].ActiveGifts = 0;
+                SaveData();
+                CuiHelper.DestroyUi(player, "GetGift");
+                UpdateTimer(player);
+                if (amount > 1)
+                    SendReply(player, Messages["GiveGift"], x.info.displayName.english, amount);
+                else
                 {
-                    [JsonProperty("Настройка цвета ячеек в инвентаре")] public string qrr = "0 0 0 0.7";
-                    [JsonProperty("Цвет UI с сообщением")] public string tkk = "#eb678a";
-                    [JsonProperty("Текст в инвентаре")] public string bbb = "<size=30>Ваш инвентарь вещей за проведенное время на сервере</size>";
-                    [JsonProperty("Описание в инвентаре")] public string mmm = "<size=18>Вы можете забрать вещи из инвентаря в любое время</size>";
-                    [JsonProperty("Отступы для ячейки (Y)")] public double qee = 0.23;
-                    [JsonProperty("Отступы для ячейки (X)")] public double qww = 0.105;
-                    [JsonProperty("Настройка цвета для заднего фона инвентаря")] public string vvv = "0 0 0 0.7";
-                    [JsonProperty("Шрифт текста в инвентаре")] public string nnn = "robotocondensed-bold.ttf";
+                    SendReply(player, Messages["GiveGiftAmount"], x.info.displayName.english);
                 }
+                SaveData();
+                return true;
             }
-            internal class tcc
-            {
-                [JsonProperty("API от Магазина(Секретный ключ)")] public string tww = "SecretKey";
-                [JsonProperty("ServerID в магазине")] public string tyy = "ServerID";
-                [JsonProperty("Сообщение при получении баланса(отображается в магазине)")] public string rrr = "Вы получили баланс за проведенное время на сервере!";
-            }
-            internal class tbb
-            {
-                [JsonProperty("Предмет из игры или команда. (Если вы ставите предмет из игры(Пример: rifle.ak) не заполняйте URL")] public string qgg;
-                [JsonProperty("Ссылка на фото для команды или денешки")] public string qjj;
-                [JsonProperty("Значение,сколько предметов вам дадут!(Если оставить Value пустым,выдадут баланс на GameStores)")] public int qhh;
-            }
-            [JsonProperty("Настройка магазина")] public tcc eee = new tcc();
-            [JsonProperty("Список предметов! Когда игрок отыграет определенное время на сервере,ему дадут 1 награду из списка.")] public List<tbb> qaa = new List<tbb>();
-            [JsonProperty("Настройка UI плагина")] public tff xxx = new tff();
-            [JsonProperty("Сколько времени нужно отыграть игроку для получения награды (секунды)")] public ulong wee = 300;
-            public static rtt tvv()
-            {
-                return new rtt { qaa = new List<tbb> { new tbb { qgg = "rifle.ak", qjj = "", qhh = 1 }, new tbb { qgg = "addgroup %STEAMID% vip 3d", qjj = "https://i.imgur.com/lZZeCob.png", qhh = 1 }, new tbb { qgg = "", qjj = "https://i.imgur.com/OUgxtD7.png", qhh = 150 } } };
-            }
+            return false;
         }
-        private void tpp()
+
+        public BasePlayer FindBasePlayer(string nameOrUserId)
         {
-            PrintError($"-----------------------------------");
-            PrintError($"            PlayerGifts            ");
-            PrintError($"          Created - Sky Eye        ");
-            PrintError($"      Author = FuzeEffect#5212     ");
-            PrintError($"    https://vk.com/skyeyeplugins   ");
-            PrintError($"-----------------------------------");
-            qtt = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, qdd>>("PlayerGifts/PlayerTimer");
-            lans();
-            rww(uuu.xxx.wjj.err, "InactivePng");
-            rww(uuu.xxx.wjj.ett, "ActivePng");
-            foreach (var configItem in uuu.qaa)
-            {
-                if (!string.IsNullOrEmpty(configItem.qjj))
-                {
-                    string rqq = !string.IsNullOrEmpty(configItem.qgg) ? configItem.qgg : "Coins";
-                    rww(configItem.qjj, rqq);
-                }
-            }
+            nameOrUserId = nameOrUserId.ToLower();
             foreach (var player in BasePlayer.activePlayerList)
             {
-                wtt(player);
-                wcc(player);
+                if (player.displayName.ToLower().Contains(nameOrUserId) || player.UserIDString == nameOrUserId)
+                    return player;
+            }
+            foreach (var player in BasePlayer.sleepingPlayerList)
+            {
+                if (player.displayName.ToLower().Contains(nameOrUserId) || player.UserIDString == nameOrUserId)
+                    return player;
+            }
+            return default(BasePlayer);
+        }
+
+        void TimerHandler()
+        {
+            foreach (var player in timers.Keys.ToList())
+            {
+                var seconds = --timers[player];
+                var resetTime = (GameActive * 60);
+                if (seconds > resetTime)
+                {
+                    data.GiftPlayers[player.userID].Time = data.GiftPlayers[player.userID].Time = resetTime;
+                    TimerHandler();
+                    break;
+                }
+
+                if (seconds <= 0)
+                {
+                    var TimerGift = FormatTime(TimeSpan.FromSeconds(resetTime));
+                    timers.Remove(player);
+                    data.GiftPlayers[player.userID].ActiveGifts = data.GiftPlayers[player.userID].ActiveGifts + 1;
+                    data.GiftPlayers[player.userID].Time = data.GiftPlayers[player.userID].Time = resetTime;
+                    SaveData();
+                    SendReply(player, Messages["TheTimeEnd"], TimerGift);
+                    DrawUIGetGift(player);
+                    continue;
+                }
+                if (data.GiftPlayers[player.userID].ActiveGifts == 0)
+                {
+                    DrawUIBalance(player, seconds);
+                    data.GiftPlayers[player.userID].Time = data.GiftPlayers[player.userID].Time = seconds;
+                }
             }
         }
-        void wcc(BasePlayer players)
+
+        void UpdateTimer(BasePlayer player)
         {
-            timer.Every(uuu.wee / 5, () => {
-                if (qtt[players.userID].TimeGame >= uuu.wee && !ddd.Contains(players.userID))
-                {
-                    wqq(players);
-                    ddd.Add(players.userID);
-                }
-                else
-                {
-                    qtt[players.userID].TimeGame = Math.Max(qtt[players.userID].TimeGame + (ggg() - qtt[players.userID].PlayerAuthTime), 0);
-                    qtt[players.userID].PlayerAuthTime = ggg();
-                }
-            });
+            if (player == null) return;
+
+            var resetTime = (GameActive * 60);
+            timers[player] = data.GiftPlayers[player.userID].Time;
+            DrawUIBalance(player, timers[player]);
         }
-        protected override void LoadDefaultConfig() => uuu = rtt.tvv();
-        Plugin ImageLibrary => Interface.Oxide.RootPluginManager.GetPlugin("ImageLibrary");
-        static DateTime wxx = new DateTime(1970, 1, 1, 0, 0, 0);
-        private static rtt uuu = new rtt();
-        [Oxide.Core.Plugins.HookMethod("OnServerInitialized")]
-        void tss()
+
+        void DeactivateTimer(BasePlayer player)
         {
-            tpp();
-        }
-        [ConsoleCommand("TakeAll")]
-        void tdd(ConsoleSystem.Arg ryy)
-        {
-            BasePlayer players = ryy.Player();
-            foreach (var AllItems in qtt[players.userID].qqq)
+            if (activePlayers.Contains(player.userID))
             {
-                if (string.IsNullOrEmpty(AllItems.Url))
+                activePlayers.Remove(player.userID);
+                timers.Remove(player);
+            }
+        }
+
+        void ActivateTimer(ulong userId)
+        {
+            if (!activePlayers.Contains(userId))
+            {
+                activePlayers.Add(userId);
+            }
+        }
+
+        public static string FormatTime(TimeSpan time)
+        {
+            string result = string.Empty;
+            if (time.Days != 0)
+                result += $"{Format(time.Days, "дней", "дня", "день")} ";
+
+            if (time.Hours != 0)
+                result += $"{Format(time.Hours, "часов", "часа", "час")} ";
+
+            if (time.Minutes != 0)
+                result += $"{Format(time.Minutes, "минут", "минуты", "минуту")} ";
+
+            if (time.Seconds != 0)
+                result += $"{Format(time.Seconds, "секунд", "секунды", "секунда")} ";
+
+            return result;
+        }
+
+        private static string Format(int units, string form1, string form2, string form3)
+        {
+            var tmp = units % 10;
+
+            if (units >= 5 && units <= 20 || tmp >= 5 && tmp <= 9)
+                return $"{units} {form1}";
+
+            if (tmp >= 2 && tmp <= 4)
+                return $"{units} {form2}";
+
+            return $"{units} {form3}";
+        }
+        #endregion
+
+        #region COMMANDS
+
+        [ChatCommand("gift")]
+        void cmdGiveGift(BasePlayer player)
+        {
+            if (player == null) return;
+            if (data.GiftPlayers[player.userID].ActiveGifts == 0)
+            {
+                SendReply(player, Messages["PlayerNHaveGift"]);
+                return;
+            }
+            if (data.GiftPlayers[player.userID].ActiveGifts >= 1)
+            {
+                TakeGifts(player);
+            }
+        }
+
+        [ConsoleCommand("getGift")]
+        void CmdGetGift(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player == null) return;
+
+            if (data.GiftPlayers[player.userID].ActiveGifts == 0)
+            {
+                SendReply(player, Messages["PlayerNHaveGift"]);
+                return;
+            }
+            if (data.GiftPlayers[player.userID].ActiveGifts >= 1)
+            {
+                TakeGifts(player);
+            }
+        }
+
+        #endregion
+
+        #region UI
+
+        int getExperiencePercentInt(int skill)
+        {
+            var resetTime = (GameActive * 60);
+            var next = resetTime;
+            var Points = resetTime - skill;
+            var reply = 683;
+            var experienceProc = Convert.ToInt32((Points / (double)next) * 100);
+            if (experienceProc >= 100)
+                experienceProc = 99;
+            else if (experienceProc == 0)
+                experienceProc = 1;
+            return experienceProc;
+        }
+
+        void DrawUIBalance(BasePlayer player, int seconds)
+        {
+            CuiHelper.DestroyUi(player, "OpenGift1");
+            CuiHelper.DestroyUi(player, "ProcentBar");
+            int percent = getExperiencePercentInt(seconds);
+            var resetTime = (GameActive * 60);
+            var TimerGift = (resetTime / 60);
+            CuiElementContainer Container = new CuiElementContainer();
+            CuiElement OpenGift = new CuiElement
+            {
+                Name = "OpenGift",
+                Parent = "UIPlayer",
+                Components =
                 {
-                    Item taa = ItemManager.CreateByName(AllItems.Value, AllItems.Amount, 0);
-                    players.GiveItem(taa);
-                    timer.Once(0.5f, () => qtt[players.userID].qqq.Remove(AllItems));
-                }
-                if (!string.IsNullOrEmpty(AllItems.Url) && !string.IsNullOrEmpty(AllItems.Value))
-                {
-                    rust.RunServerCommand(AllItems.Value.Replace("%STEAMID%", $"{players.UserIDString }"));
-                    timer.Once(0.5f, () => qtt[players.userID].qqq.Remove(AllItems));
-                }
-                if (string.IsNullOrEmpty(AllItems.Value) && AllItems.Amount != 0 && !string.IsNullOrEmpty(AllItems.Url))
-                {
-                    if (uuu.eee.tyy != "ServerID" || uuu.eee.tww != "SecretKey")
-                    {
-                        tee(players.userID, AllItems.Amount, uuu.eee.rrr, (Action<bool>)((tuu) => {
-                            if (!tuu)
-                            {
-                                ttt(players, lang.GetMessage("noauth", this));
-                                return;
-                            }
-                            timer.Once(0.5f, () => qtt[players.userID].qqq.Remove(AllItems));
-                        }));
+                    new CuiTextComponent {
+                        Text = $"",
+                        Align = TextAnchor.MiddleCenter,
+                    },
+                    new CuiRectTransformComponent {
+                        AnchorMin = "0.15 0",
+                        AnchorMax = "1 1"
                     }
-                    else
+                }
+            };
+            CuiElement ProcentBar = new CuiElement
+            {
+                Name = "ProcentBar",
+                Parent = "OpenGift",
+                Components =
+                {
+                    new CuiButtonComponent
                     {
-                        ttt(players, "Администратор не настроил плагин.Сообщите ему об этом!");
-                        CuiHelper.DestroyUi(players, Ui);
-                        return;
+                        Command = "getGift",
+                        Color = GUIColor,
+                    },
+                    new CuiRectTransformComponent {
+                        AnchorMin = "0 0.1",
+                        AnchorMax = $"{1 - ((seconds + (float)TimerGift) / (float)resetTime)} 0.85"
                     }
                 }
-            }
-            if (qtt[players.userID].qqq.Count < 1) ttt(players, lang.GetMessage("takeallnull", this));
-            else ttt(players, lang.GetMessage("takeallinventory", this));
-            CuiHelper.DestroyUi(players, Ui);
-        }
-        private void rgg(Dictionary<string, string> tii, Action<bool> rpp)
-        {
-            string too = $"http://panel.gamestores.ru/api?shop_id={uuu.eee.tyy }&secret={uuu.eee.tww }" + $"{string.Join("", tii.Select(ruu => $"&{ruu.Key }={ruu.Value }").ToArray())}";
-            webrequest.EnqueueGet(too, (rii, roo) => {
-                if (rii != 200)
-                {
-                    PrintError($"Ошибка зачисления, подробнисти в ЛОГ-Файле");
-                    LogToFile("PlayerGifts", $"Код ошибки: {rii }, подробности:\n{roo }", this);
-                    rpp(false);
-                }
-                else
-                {
-                    if (roo.Contains("fail"))
-                    {
-                        rpp(false);
-                        return;
-                    }
-                    rpp(true);
-                }
-            }, this);
-        }
-        private void tee(ulong raa, float rss, string rdd, Action<bool> rff)
-        {
-            rgg(new Dictionary<string, string>() { { "action", "moneys" }, { "type", "plus" }, { "steam_id", raa.ToString() }, { "amount", rss.ToString() }, { "mess", rdd } }, rff);
-        }
-        static string qzz = "XCC_MESSAGES_UI";
-        public bool rww(string rkk, string rhh, ulong rjj = 0) => (bool)ImageLibrary?.Call("AddImage", rkk, rhh, rjj);
-        public class qdd
-        {
-            public double TimeGame
+            };
+            CuiElement OpenGift1 = new CuiElement
             {
-                get;
-                set;
-            }
-            public double PlayerAuthTime
-            {
-                get;
-                set;
-            }
-            public List<qff> qqq = new List<qff>();
-            public class qff
-            {
-                public string Value
+                Name = "OpenGift1",
+                Parent = "UIPlayer",
+                Components =
                 {
-                    get;
-                    set;
-                }
-                public int Amount
-                {
-                    get;
-                    set;
-                }
-                public string Url
-                {
-                    get;
-                    set;
-                }
-                public qff(string rxx = "", int rll = 0, string rzz = "")
-                {
-                    this.Value = rxx;
-                    this.Amount = rll;
-                    this.Url = rzz;
-                }
-            }
-        }
-        static string Ui = "XCC_INVENTORY";
-        [ConsoleCommand("TakeItem")]
-        void trr(ConsoleSystem.Arg rcc)
-        {
-            BasePlayer players = rcc.Player();
-            var www = qtt[players.userID].qqq.ElementAt(Convert.ToInt32(rcc.Args[0]));
-            if (string.IsNullOrEmpty(www.Url))
-            {
-                Item rbb = ItemManager.CreateByName(www.Value, www.Amount, 0);
-                players.GiveItem(rbb);
-                qtt[players.userID].qqq.Remove(www);
-                ttt(players, lang.GetMessage("takeitem", this));
-            }
-            if (!string.IsNullOrEmpty(www.Url) && !string.IsNullOrEmpty(www.Value))
-            {
-                rust.RunServerCommand(www.Value.Replace("%STEAMID%", $"{players.UserIDString }"));
-                qtt[players.userID].qqq.Remove(www);
-                ttt(players, lang.GetMessage("takeitem", this));
-            }
-            if (string.IsNullOrEmpty(www.Value) && www.Amount != 0 && !string.IsNullOrEmpty(www.Url))
-            {
-                if (uuu.eee.tyy != "ServerID" || uuu.eee.tww != "SecretKey")
-                {
-                    tee(players.userID, www.Amount, uuu.eee.rrr, (Action<bool>)((rnn) => {
-                        if (!rnn)
-                        {
-                            ttt(players, lang.GetMessage("noauth", this));
-                            return;
+                    new CuiTextComponent {
+                        Text = $"{percent}%",
+                        Align = TextAnchor.MiddleCenter,
+                    },
+                    new CuiRectTransformComponent {
+                        AnchorMin = "0.15 0",
+                        AnchorMax = "1 1"
+                    },
+                        new CuiOutlineComponent {
+                            Color = "0 0 0 0.5",
+                            Distance = "1.0 -0.5"
                         }
-                        qtt[players.userID].qqq.Remove(www);
-                        ttt(players, lang.GetMessage("takeitem", this));
-                    }));
                 }
-                else
-                {
-                    ttt(players, "Администратор не настроил плагин.Сообщите ему об этом!");
-                    return;
-                }
-            }
-            CuiHelper.DestroyUi(players, Ui);
+            };
+
+            Container.Add(OpenGift);
+            Container.Add(ProcentBar);
+            Container.Add(OpenGift1);
+            CuiHelper.AddUi(player, Container);
+
         }
-        void wgg()
+
+        void DrawUIGetGift(BasePlayer player)
         {
-            rmm();
-            foreach (var player in BasePlayer.activePlayerList) CuiHelper.DestroyUi(player, yyy);
+            DrawUIPlayer(player);
+            CuiHelper.DestroyUi(player, "OpenGift1");
+            CuiElementContainer Container = new CuiElementContainer();
+
+            CuiElement GetGift = new CuiElement
+            {
+                Name = "GetGift",
+                Parent = "UIPlayer",
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "getGift",
+                        Color = "0.44 0.55 0.26 1",
+                    },
+                    new CuiRectTransformComponent {
+                        AnchorMin = "0.15 0.11",
+                        AnchorMax = "0.985 0.88"
+                    }
+                }
+            };
+
+            CuiElement TextGetGift = new CuiElement
+            {
+                Name = "TextGetGift",
+                Parent = "GetGift",
+                Components =
+                {
+                    new CuiTextComponent {
+                        Text = Messages["GiveGifts"],
+                        Align = TextAnchor.MiddleCenter
+                    },
+                    new CuiRectTransformComponent {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    },
+                        new CuiOutlineComponent {
+                            Color = "0 0 0 0.5", Distance = "1.0 -0.5"
+
+                        }
+                }
+            };
+            Container.Add(GetGift);
+            Container.Add(TextGetGift);
+            CuiHelper.AddUi(player, Container);
+
         }
+
+        void DrawUIPlayer(BasePlayer player)
+        {
+            if (player.HasPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot))
+            {
+                timer.In(0.1f, () => DrawUIPlayer(player));
+                return;
+            }
+            CuiElementContainer Container = new CuiElementContainer();
+            CuiElement GiftIcon = new CuiElement
+            {
+                Name = "GiftIcon",
+                Parent = "BPUI",
+                Components = {
+                        new CuiRawImageComponent {
+                            Url = ImagesGUI,
+                            Color = "1 1 1 0.7"
+                        },
+                        new CuiRectTransformComponent {
+                        AnchorMin = "0.1 0.1",
+                        AnchorMax = "0.9 0.9"
+                        }
+                }
+            };
+            CuiElement BPUI = new CuiElement
+            {
+                Name = "BPUI",
+                Parent = "UIPlayer",
+                Components = {
+                        new CuiImageComponent {
+                            Color = "0 0 0 0.1"
+                        },
+                        new CuiRectTransformComponent {
+                             AnchorMin = "0 0",
+                        AnchorMax = "0.14 0.98"
+                        }
+                    }
+            };
+            CuiElement UIPlayer = new CuiElement
+            {
+                Name = "UIPlayer",
+                Parent = "Overlay",
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "getGift",
+                        Color = "0.32 0.32 0.41 0.22",
+                    },
+                    new CuiRectTransformComponent {
+                         AnchorMin = EnableGUIPlayerMin,
+                        AnchorMax = EnableGUIPlayerMax
+                    }
+                }
+            };
+
+            Container.Add(UIPlayer);
+            Container.Add(BPUI);
+            Container.Add(GiftIcon);
+            CuiHelper.AddUi(player, Container);
+            var resetTime = (GameActive * 60);
+            DrawUIBalance(player, resetTime);
+        }
+
+        void DestroyUIPlayer(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, "UIPlayer");
+        }
+
+        #endregion
+
+        #region OXIDE HOOKS
+
+        void Unload()
+        {
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                DestroyUIPlayer(player);
+                DeactivateTimer(player);
+            }
+            SaveData();
+        }
+
+        void OnPlayerDisconnected(BasePlayer player)
+        {
+            DeactivateTimer(player);
+        }
+
+        void OnServerInitialized()
+        {
+            LoadDefaultConfig();
+            GiftData = Interface.Oxide.DataFileSystem.GetFile("PlayerGifts/Players");
+            LoadData();
+            lang.RegisterMessages(Messages, this, "en");
+            Messages = lang.GetMessages("en", this);
+            timer.Every(1f, TimerHandler);
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                OnPlayerConnected(player);
+            }
+        }
+
+        void LoadData()
+        {
+            try
+            {
+                data = Interface.GetMod().DataFileSystem.ReadObject<DataStorage>("PlayerGifts/Players");
+            }
+
+            catch
+            {
+                data = new DataStorage();
+            }
+
+            if (Interface.Oxide.DataFileSystem.ExistsDatafile("PlayerGifts/Gifts"))
+                gifts = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<string, GiftDefinition>>("PlayerGifts/Gifts");
+            else
+            {
+                gifts.Add("Player Gifts", new GiftDefinition()
+                {
+                    Type = "Gifts",
+                    Items = new List<CaseItem>
+                    {
+                        new CaseItem
+                        {
+                            Shortname = "rifle.ak",
+                            Min = 1,
+                            Max = 1
+                        }
+                    }
+                });
+                Interface.Oxide.DataFileSystem.WriteObject("PlayerGifts/Gifts", gifts);
+            }
+        }
+
+        void SaveData()
+        {
+            GiftData.WriteObject(data);
+        }
+
+        void OnServerSave()
+        {
+            SaveData();
+        }
+
+        void OnPlayerConnected(BasePlayer player)
+        {
+            if (player.HasPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot))
+            {
+                timer.In(1f, () => OnPlayerConnected(player));
+                return;
+            }
+            if (player == null) return;
+
+            var Time = (GameActive * 60);
+            if (!data.GiftPlayers.ContainsKey(player.userID))
+            {
+                data.GiftPlayers.Add(player.userID, new GiftsData()
+                {
+                    Name = player.displayName,
+                    ActiveGifts = 0,
+                    Time = Time,
+                });
+                SaveData();
+            }
+            if (data.GiftPlayers[player.userID].ActiveGifts == 0)
+            {
+                UpdateTimer(player);
+                ActivateTimer(player.userID);
+                DrawUIPlayer(player);
+            }
+            else
+            {
+                DrawUIGetGift(player);
+            }
+
+        }
+        #endregion
+
+        #region DATA
+
+        class DataStorage
+        {
+            public Dictionary<ulong, GiftsData> GiftPlayers = new Dictionary<ulong, GiftsData>();
+            public DataStorage() { }
+        }
+
+        class GiftsData
+        {
+            public string Name;
+            public int ActiveGifts;
+            public int Time;
+        }
+
+        DataStorage data;
+
+        private DynamicConfigFile GiftData;
+
+        static PlayerGifts instance;
+
+        public class GiftDefinition
+        {
+            public string Type;
+            public List<CaseItem> Items;
+            public CaseItem Open() => Items.GetRandom();
+        }
+
+        public class CaseItem
+        {
+            public string Shortname;
+            public int Min;
+            public int Max;
+            public int GetRandom() => UnityEngine.Random.Range(Min, Max + 1);
+        }
+
+        public Dictionary<string, GiftDefinition> gifts = new Dictionary<string, GiftDefinition>();
+
+        #endregion
+
+        #region LOCALIZATION
+
+        Dictionary<string, string> Messages = new Dictionary<string, string>()
+        {
+            {"InvFull", "У Вас переполнен инвентарь" },
+            {"GiveGift", "Вы получили {0} в размере: {1} шт." },
+            {"GiveGiftAmount", "Вы получили {0}" },
+            {"TheTimeEnd", "Вы пробыли на сервере: <color=#A6FFAC>{0}</color>, у нас для Вас подарок!\nОткройте чат, и нажмите кнопку <color=#A6FFAC>Забрать подарок</color>, либо используйте <color=#A6FFAC>/gift</color> что бы получить его" },
+            {"PlayerNHaveGift", "Для Вас пока нету подарков" },
+            {"GiveGifts", "ЗАБРАТЬ ПОДАРОК" },
+        };
+
+        #endregion
     }
 }
+                     
