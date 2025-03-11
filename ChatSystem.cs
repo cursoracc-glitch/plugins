@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using ConVar;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Game.Rust.Cui;
@@ -10,16 +11,20 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("ChatSystem", "Без автора", "2.0.1")]
-    //  Слив плагинов server-rust by Apolo YouGame
+    [Info("ChatSystem", "https://topplugin.ru/", "2.1.0")]
+    [Description("Улучшенная чат-система с интерфейсом! Куплено на Topplugin.ru")]
     public class ChatSystem : RustPlugin
     {
+        #region Classes
+
         private class PluginSettings
         {
             [JsonProperty("Стандартные причины мута")]
             public Dictionary<string, string> Reasons = new Dictionary<string, string>();
             [JsonProperty("Стандартные теги игроков")]
             public Dictionary<string, string> Tags = new Dictionary<string, string>();
+            [JsonProperty("Скрытые теги")]
+            public List<string> HiddenTags = new List<string>();
             [JsonProperty("Цвета доступные для выбора")]
             public Dictionary<string, string> Colors = new Dictionary<string, string>();
             [JsonProperty("Случайные сообщения")]
@@ -43,53 +48,66 @@ namespace Oxide.Plugins
             public double IsMuted() => Math.Max(MuteTime - CurrentTime(), 0);
         }
 
+        #endregion
+
+        #region Variables
+
         [JsonProperty("Настройки каждого игрока")]
         private Dictionary<ulong, Chatter> playerSettings = new Dictionary<ulong, Chatter>();
         [JsonProperty("Настройки плагина")]
         private PluginSettings Settings = new PluginSettings();
 
         [JsonProperty("Стандартный цвет ника")]
-        private string NameColor = "#933737";
+        private string NameColor = "#8eb9ff";
         [JsonProperty("Разрешение на блокировку чата игрокам")]
         private string ModerPermission = "ChatSystem.Moderator";
 
         [JsonProperty("Системный слой")]
         private string Layer = "UI_Mute";
 
-        List<string> BadWords = new List<string> { "блеат", "блеать", "блиат", "trinity","блиать", "бля", "блябу", "блябуду", "бляд", "бляди", "блядина", "блядище", "блядки", "блядовать", "блядство", "блядун", "блядуны", "блядунья", "блядь", "блядюга", "блят", "блять", "выблядок", "выблядыш", "млять", "проблядь", "плять", "сук", "сука", "суки", "сучара", "сучий", "сучка", "сучко", "сучонок", "сучье", "сцука", "сцуки", "сцуконах", "ахуел", "ахуеть", "захуячить", "ибонех", "на хер", "на хуй", "нахер", "нахрен", "нахуй", "нахуйник", "нехира", "нехрен", "нехуй", "нехуйственно", "никуя", "нихера", "нихуя", "однохуйственно", "охуевательский", "охуевать", "охуевающий", "охуел", "охуенно", "охуеньчик", "охуеть", "охуительно", "охуительный", "охуяньчик", "охуячивать", "охуячить", "по хуй", "по хую", "похер", "похерил", "похерила", "похерили", "похеру", "похрен", "похрену", "похуист", "похуистка", "похуй", "похую", "разхуячить", "хер", "херня", "херовато", "херовина", "херовый", "хуeм", "хуе", "хуев", "хуевато", "хуевенький", "хуевина", "хуево", "хуевый", "хуек", "хуел", "хуем", "хуенч", "хуеныш", "хуенький", "хуеплет", "хуеплет", "хуерик", "хуерыло", "хуесос", "хуесоска", "хуета", "хуетень", "хуею", "хуи", "хуище", "хуй", "хуйком", "хуйло", "хуйня", "хуйня", "хуйрик", "хуля", "хую", "хуюл", "хуя", "хуяк", "хуякать", "хуякнуть", "хуяра", "хуясе", "хуячить", "хуепромышленник", "eбал", "eбаль", "eбать", "eбет", "eблан", "еблани", "ебланы", "eблантий", "eбуч", "взъебка", "взьебка", "взьебывать", "въеб", "въебался", "въебенн", "въебусь", "въебывать", "выеб", "выебать", "выебен", "выебнулся", "выебон", "выебываться", "вьебен", "доебываться", "долбоеб", "еб", "ебал", "ебало", "ебальник", "ебан", "ебанамать", "ебанат", "ебаная", "ебани", "ебанический", "ебанный", "ебанныйврот", "ебаное", "ебануть", "ебануться", "ебаную", "ебаный", "ебанько", "ебарь", "ебат", "ебатория", "ебать", "ебаться", "ебашить", "ебена", "ебет", "ебец", "ебик", "ебин", "ебись", "ебическая", "ебки", "ебла", "еблан", "ебливый", "еблище", "ебло", "еблыст", "ебля", "ебн", "ебнуть", "ебнуться", "ебня", "ебошить", "ебская", "ебский", "ебтвоюмать", "ебун", "ебут", "ебуч", "ебуче", "ебучее", "ебучий", "ебучим", "ебущ", "ебырь", "заeб", "заeбат", "заeбал", "заeбали", "заеб", "заеба", "заебал", "заебанец", "заебастая", "заебастый", "заебать", "заебаться", "заебашить", "заебистое", "заебистые", "заебистый", "заебись", "заебошить", "заебываться", "злоеб", "злоебучая", "злоебучее", "злоебучий", "ибанамат", "ипать", "ипаться", "ипаццо", "наебать", "наебет", "наебнуть", "наебнуться", "наебывать", "не ебет", "невротебучий", "невъебенно", "ниибацо", "ниипацца", "ниипаццо", "ниипет", "объебос", "обьебать", "обьебос", "остоебенить", "отъебись", "переебок", "подъебнуть", "подъебнуться", "поебать", "поебень", "поебываает", "приебаться", "проеб", "проебанка", "проебать", "разъеб", "разъеба", "разъебай", "разъебать", "сестроеб", "съебаться", "уебать", "уебища", "уебище", "уебищное", "уебк", "уебки", "уебок", "хитровыебанный", "ебачос", "архипиздрит", "запиздячить", "изъебнуться", "напиздел", "напиздели", "напиздело", "напиздили", "настопиздить", "опездал", "опизде", "опизденивающе", "остопиздеть", "отпиздить", "отпиздячить", "пездень", "пездит", "пездишь", "пездо", "пездят", "пизд", "пизда", "пиздануть", "пиздануться", "пиздарваньчик", "пиздато", "пиздатое", "пиздатый", "пизде", "пизденка", "пизденыш", "пиздеть", "пиздец", "пиздит", "пиздить", "пиздиться", "пиздишь", "пиздища", "пиздище", "пиздобол", "пиздоболы", "пиздобратия", "пиздоватая", "пиздоватый", "пиздолиз", "пиздонутые", "пиздорванец", "пиздорванка", "пиздострадатель", "пизду", "пиздуй", "пиздун", "пиздунья", "пизды", "пиздюга", "пиздюк", "пиздюлина", "пиздюля", "пиздят", "пиздячить", "припиздень", "припизднутый", "припиздюлина", "пропизделся", "пропиздеть", "пропиздячить", "распиздай", "распиздеться", "распиздяй", "распиздяйство", "спиздел", "спиздеть", "спиздил", "спиздила", "спиздили", "спиздит", "спиздить", "страхопиздище", "пиздаглазое", "бздение", "бздеть", "бздех", "бздецы", "бздит", "бздицы", "бздло", "бзднуть", "бздун", "бздунья", "бздюха", "бздюшка", "бздюшко", "набздел", "набздеть", "пробзделся", "гавно", "гавнюк", "гавнючка", "гамно", "говенка", "говенный", "говешка", "говназия", "говнецо", "говнище", "говно", "говноед", "говнолинк", "говночист", "говнюк", "говнюха", "говнядина", "говняк", "говняный", "говнять", "заговнять", "изговнять", "изговняться", "наговнять", "подговнять", "сговнять", "манда", "мандавошек", "мандавошка", "мандавошки", "мандей", "мандень", "мандеть", "мандища", "мандой", "манду", "мандюк", "промандеть", "мудаг", "мудак", "муде", "мудель", "мудеть", "муди", "мудил", "мудила", "мудистый", "мудня", "мудоеб", "мудозвон", "мудоклюй", "отмудохать", "промудеть", "мудоебище", "трахаеб", "трахатель", "высраться", "выссаться", "засерать", "засерун", "засеря", "засирать", "засрун", "насрать", "обосранец", "обосрать", "обосцать", "обосцаться", "обсирать", "посрать", "серун", "серька", "сирать", "сирывать", "срака", "сраку", "сраный", "сранье", "срать", "срун", "ссака", "ссышь", "сцание", "сцать", "сцуль", "сцыха", "сцышь", "сыкун", "усраться", "пидар", "пидарас", "пидарасы", "пидары", "пидор", "нудоп", "пидорасы", "пидорка", "пидорок", "пидоры", "пидрас", "выпердеть", "пердануть", "пердеж", "пердение", "пердеть", "пердильник", "перднуть", "пердун", "пердунец", "пердунина", "пердунья", "пердуха", "пердь", "пернуть", "перднуть", "пернуть", "педерас", "педик", "педрик", "педрила", "педрилло", "педрило", "педрилы", "дрочелло", "дрочена", "дрочила", "дрочилка", "дрочистый", "дрочить", "дрочка", "дрочун", "надрочить", "суходрочка", "дрисня", "дрист", "дристануть", "дристать", "дристун", "дристуха", "надристать", "обдристаться", "соск", "fuск", "fuскer", "fuскинg", "гандон", "гнид", "гнида", "гниды", "гондон", "долбоящер", "елда", "елдак", "елдачить", "жопа", "жопу", "задрачивать", "задристать", "задрота", "залуп", "залупа", "залупаться", "залупить", "залупиться", "залупу", "замудохаться", "конча", "курва", "курвятник", "лох", "лохи", "лошара", "лошара", "лошары", "лошок", "лярва", "малафья", "минет", "минетчик", "минетчица", "мокрощелка", "мокрощелка", "мразь", "очкун", "падла", "падонки", "падонок", "паскуда", "писька", "писькострадатель", "писюн", "писюшка", "подонки", "подонок", "поскуда", "потаскуха", "потаскушка", "придурок", "раздолбай", "сволота", "сволочь", "соси", "стерва", "суканах", "ублюдок", "ушлепок", "хитрожопый", "целка", "чмо", "чмошник", "чмырь", "шалава", "шалавой", "шараебиться", "шлюха", "шлюхой", "шлюшка", };
-
+        List<string> BadWords = new List<string> { "блеат", "блеать", "блиат", "блиать", "бля", "блябу", "блябуду", "бляд", "бляди", "блядина", "блядище", "блядки", "блядовать", "блядство", "блядун", "блядуны", "блядунья", "блядь", "блядюга", "блят", "блять", "выблядок", "выблядыш", "млять", "проблядь", "плять", "сук", "сука", "суки", "сучара", "сучий", "сучка", "сучко", "сучонок", "сучье", "сцука", "сцуки", "сцуконах", "ахуел", "ахуеть", "захуячить", "ибонех", "на хер", "на хуй", "нахер", "нахрен", "нахуй", "нахуйник", "нехира", "нехрен", "нехуй", "нехуйственно", "никуя", "нихера", "нихуя", "однохуйственно", "охуевательский", "охуевать", "охуевающий", "охуел", "охуенно", "охуеньчик", "охуеть", "охуительно", "охуительный", "охуяньчик", "охуячивать", "охуячить", "по хуй", "по хую", "похер", "похерил", "похерила", "похерили", "похеру", "похрен", "похрену", "похуист", "похуистка", "похуй", "похую", "разхуячить", "хер", "херня", "херовато", "херовина", "херовый", "хуeм", "хуе", "хуев", "хуевато", "хуевенький", "хуевина", "хуево", "хуевый", "хуек", "хуел", "хуем", "хуенч", "хуеныш", "хуенький", "хуеплет", "хуеплет", "хуерик", "хуерыло", "хуесос", "хуесоска", "хуета", "хуетень", "хуею", "хуи", "хуище", "хуй", "хуйком", "хуйло", "хуйня", "хуйня", "хуйрик", "хуля", "хую", "хуюл", "хуя", "хуяк", "хуякать", "хуякнуть", "хуяра", "хуясе", "хуячить", "хуепромышленник", "eбал", "eбаль", "eбать", "eбет", "eблан", "еблани", "ебланы", "eблантий", "eбуч", "взъебка", "взьебка", "взьебывать", "въеб", "въебался", "въебенн", "въебусь", "въебывать", "выеб", "выебать", "выебен", "выебнулся", "выебон", "выебываться", "вьебен", "доебываться", "долбоеб", "еб", "ебал", "ебало", "ебальник", "ебан", "ебанамать", "ебанат", "ебаная", "ебани", "ебанический", "ебанный", "ебанныйврот", "ебаное", "ебануть", "ебануться", "ебаную", "ебаный", "ебанько", "ебарь", "ебат", "ебатория", "ебать", "ебаться", "ебашить", "ебена", "ебет", "ебец", "ебик", "ебин", "ебись", "ебическая", "ебки", "ебла", "еблан", "ебливый", "еблище", "ебло", "еблыст", "ебля", "ебн", "ебнуть", "ебнуться", "ебня", "ебошить", "ебская", "ебский", "ебтвоюмать", "ебун", "ебут", "ебуч", "ебуче", "ебучее", "ебучий", "ебучим", "ебущ", "ебырь", "заeб", "заeбат", "заeбал", "заeбали", "заеб", "заеба", "заебал", "заебанец", "заебастая", "заебастый", "заебать", "заебаться", "заебашить", "заебистое", "заебистые", "заебистый", "заебись", "заебошить", "заебываться", "злоеб", "злоебучая", "злоебучее", "злоебучий", "ибанамат", "ипать", "ипаться", "ипаццо", "наебать", "наебет", "наебнуть", "наебнуться", "наебывать", "не ебет", "невротебучий", "невъебенно", "ниибацо", "ниипацца", "ниипаццо", "ниипет", "объебос", "обьебать", "обьебос", "остоебенить", "отъебись", "переебок", "подъебнуть", "подъебнуться", "поебать", "поебень", "поебываает", "приебаться", "проеб", "проебанка", "проебать", "разъеб", "разъеба", "разъебай", "разъебать", "сестроеб", "съебаться", "уебать", "уебища", "уебище", "уебищное", "уебк", "уебки", "уебок", "хитровыебанный", "ебачос", "архипиздрит", "запиздячить", "изъебнуться", "напиздел", "напиздели", "напиздело", "напиздили", "настопиздить", "опездал", "опизде", "опизденивающе", "остопиздеть", "отпиздить", "отпиздячить", "пездень", "пездит", "пездишь", "пездо", "пездят", "пизд", "пизда", "пиздануть", "пиздануться", "пиздарваньчик", "пиздато", "пиздатое", "пиздатый", "пизде", "пизденка", "пизденыш", "пиздеть", "пиздец", "пиздит", "пиздить", "пиздиться", "пиздишь", "пиздища", "пиздище", "пиздобол", "пиздоболы", "пиздобратия", "пиздоватая", "пиздоватый", "пиздолиз", "пиздонутые", "пиздорванец", "пиздорванка", "пиздострадатель", "пизду", "пиздуй", "пиздун", "пиздунья", "пизды", "пиздюга", "пиздюк", "пиздюлина", "пиздюля", "пиздят", "пиздячить", "припиздень", "припизднутый", "припиздюлина", "пропизделся", "пропиздеть", "пропиздячить", "распиздай", "распиздеться", "распиздяй", "распиздяйство", "спиздел", "спиздеть", "спиздил", "спиздила", "спиздили", "спиздит", "спиздить", "страхопиздище", "пиздаглазое", "бздение", "бздеть", "бздех", "бздецы", "бздит", "бздицы", "бздло", "бзднуть", "бздун", "бздунья", "бздюха", "бздюшка", "бздюшко", "набздел", "набздеть", "пробзделся", "гавно", "гавнюк", "гавнючка", "гамно", "говенка", "говенный", "говешка", "говназия", "говнецо", "говнище", "говно", "говноед", "говнолинк", "говночист", "говнюк", "говнюха", "говнядина", "говняк", "говняный", "говнять", "заговнять", "изговнять", "изговняться", "наговнять", "подговнять", "сговнять", "манда", "мандавошек", "мандавошка", "мандавошки", "мандей", "мандень", "мандеть", "мандища", "мандой", "манду", "мандюк", "промандеть", "мудаг", "мудак", "муде", "мудель", "мудеть", "муди", "мудил", "мудила", "мудистый", "мудня", "мудоеб", "мудозвон", "мудоклюй", "отмудохать", "промудеть", "мудоебище", "трахаеб", "трахатель", "высраться", "выссаться", "засерать", "засерун", "засеря", "засирать", "засрун", "насрать", "обосранец", "обосрать", "обосцать", "обосцаться", "обсирать", "посрать", "серун", "серька", "сирать", "сирывать", "срака", "сраку", "сраный", "сранье", "срать", "срун", "ссака", "ссышь", "сцание", "сцать", "сцуль", "сцыха", "сцышь", "сыкун", "усраться", "пидар", "пидарас", "пидарасы", "пидары", "пидор", "нудоп", "пидорасы", "пидорка", "пидорок", "пидоры", "пидрас", "выпердеть", "пердануть", "пердеж", "пердение", "пердеть", "пердильник", "перднуть", "пердун", "пердунец", "пердунина", "пердунья", "пердуха", "пердь", "пернуть", "перднуть", "пернуть", "педерас", "педик", "педрик", "педрила", "педрилло", "педрило", "педрилы", "дрочелло", "дрочена", "дрочила", "дрочилка", "дрочистый", "дрочить", "дрочка", "дрочун", "надрочить", "суходрочка", "дрисня", "дрист", "дристануть", "дристать", "дристун", "дристуха", "надристать", "обдристаться", "соск", "fuск", "fuскer", "fuскинg", "гандон", "гнид", "гнида", "гниды", "гондон", "долбоящер", "елда", "елдак", "елдачить", "жопа", "жопу", "задрачивать", "задристать", "задрота", "залуп", "залупа", "залупаться", "залупить", "залупиться", "залупу", "замудохаться", "конча", "курва", "курвятник", "лох", "лохи", "лошара", "лошара", "лошары", "лошок", "лярва", "малафья", "минет", "минетчик", "минетчица", "мокрощелка", "мокрощелка", "мразь", "очкун", "падла", "падонки", "падонок", "паскуда", "писька", "писькострадатель", "писюн", "писюшка", "подонки", "подонок", "поскуда", "потаскуха", "потаскушка", "придурок", "раздолбай", "сволота", "сволочь", "соси", "стерва", "суканах", "ублюдок", "ушлепок", "хитрожопый", "целка", "чмо", "чмошник", "чмырь", "шалава", "шалавой", "шараебиться", "шлюха", "шлюхой", "шлюшка", };
         Dictionary<ulong, int> floods = new Dictionary<ulong, int>();
+
+        #endregion
+
+        #region Functions
 
         private void BroadMessage(string message = "", string header = "Оповещение игроков")
         {
-            foreach (var check in BasePlayer.activePlayerList.Where(p => !playerSettings[p.userID].HideHelpers))
-                SendReply(check, message == "" ? Settings.RandomMessages.GetRandom() : message);
+            foreach (var check in BasePlayer.activePlayerList.Where(p => playerSettings.ContainsKey(p.userID)))
+            {
+                if (!playerSettings[check.userID].HideHelpers)
+                    SendReply(check, message == "" ? Settings.RandomMessages.GetRandom() : message);
+            }
 
 
             if (string.IsNullOrEmpty(message))
                 timer.Once(300, () => BroadMessage());
         }
 
-        private void HandleMessage(BasePlayer player, string message)
+        private void HandleMessage(Chat.ChatChannel channel, BasePlayer player, string message)
         {
+            if (message.Length > 200) return;
             Chatter playerChat = playerSettings[player.userID];
             if (playerChat.HideMessages)
             {
-                SendReply(player, "Вы отключили отображение чата, изменить настройки: <color=#933737>/chat</color>");
+                SendReply(player, "Вы отключили отображение чата, изменить настройки: <color=#1E88E5>/chat</color>");
                 return;
             }
             if (playerChat.IsMuted() > 0)
             {
-                SendReply(player, $"У вас заблокирован чат, осталось: <color=#933737>{FormatTime(TimeSpan.FromSeconds(playerChat.IsMuted()))}</color>");
+                SendReply(player, $"У вас заблокирован чат, осталось: <color=#1E88E5>{FormatTime(TimeSpan.FromSeconds(playerChat.IsMuted()))}</color>");
                 return;
             }
+
+            //if (permission.UserHasPermission(player.UserIDString, "chatsystem.zyablechat"))
 
             message = message.ToLower();
             var firstLetter = message.Substring(0, 1);
             message = message.Remove(0, 1);
             message = firstLetter.ToUpper() + message;
 
-            message = message.Replace("Zero", "<color=#933737>ZEROTOPPPPP</color>", StringComparison.OrdinalIgnoreCase);
+            message = message.Replace("Спасибо", "<color=#4286f4>Спасибо</color>", StringComparison.OrdinalIgnoreCase);
             foreach (var check in BadWords)
             {
                 foreach (var word in message.Split(' '))
@@ -116,8 +134,12 @@ namespace Oxide.Plugins
             Puts($"{player}: {message}");
 
             string format = "";
-
-
+            KeyValuePair<string, string> GetTag = Settings.Tags.FirstOrDefault(x => x.Value == playerSettings[player.userID].CurrentTag);
+            if (!permission.UserHasPermission(player.UserIDString, GetTag.Key))
+            {
+                playerSettings[player.userID].CurrentTag = Settings.Tags["chatsystem.default"];
+                playerSettings[player.userID].CurrentColor = "#4286f4";
+            }
             Dictionary<string, object> callApiDict = new Dictionary<string, object>
             {
                 ["Player"] = player,
@@ -130,39 +152,70 @@ namespace Oxide.Plugins
             {
                 if (result is bool)
                     return;
-
-                format = $"{callApiDict["Prefixes"].ToString().Replace("— ", "")} <color={playerChat.CurrentColor}>{player.displayName}</color>: {callApiDict["Message"]}";
+                if (channel == Chat.ChatChannel.Team)
+                    format = $"<color=#a5e664>[Team]</color> {callApiDict["Prefixes"].ToString().Replace("— ", "")} <color={playerChat.CurrentColor}>{player.displayName}</color>: {callApiDict["Message"]}";
+                else
+                    format = $"{callApiDict["Prefixes"].ToString().Replace("— ", "")} <color={playerChat.CurrentColor}>{player.displayName}</color>: {callApiDict["Message"]}";
             }
             else
-                format = $"{playerSettings[player.userID].CurrentTag.Replace("—", "")} <color={playerChat.CurrentColor}>{player.displayName}</color>: {message}";
+            {
+                if (channel == Chat.ChatChannel.Team)
+                    format = $"<color=#a5e664>[Team]</color> {playerSettings[player.userID].CurrentTag.Replace("—", "")} <color={playerChat.CurrentColor}>{player.displayName}</color>: {message}";
+                else
+                    format = $"{playerSettings[player.userID].CurrentTag.Replace("—", "")} <color={playerChat.CurrentColor}>{player.displayName}</color>: {message}";
+
+            }
 
 
             if (permission.UserHasPermission(player.UserIDString, "Helper.Admin"))
             {
-                format = $"<color=#933737>HELPER</color> │ <color={playerChat.CurrentColor}>{player.displayName}</color>: {message}";
+                format = $"<color=#1E88E5>HELPER</color> │ <color={playerChat.CurrentColor}>{player.displayName}</color>: {message}";
             }
 
-            BasePlayer.activePlayerList.ForEach(p =>
-            {
-                p.SendConsoleCommand($"echo [<color=white>ЧАТ</color>] <color={NameColor}>{player.displayName}</color>: {message}");
-            });
 
-            var targetList = player.IsAdmin ?
-                BasePlayer.activePlayerList :
-                BasePlayer.activePlayerList.Where(p => !playerSettings[p.userID].HideMessages);
-
-            foreach (var check in targetList)
-            {
-                check.SendConsoleCommand("chat.add", player.userID, format);
-            }
+            SendMessage(channel, player, format, message);
         }
 
+
+        void SendMessage(Chat.ChatChannel channel, BasePlayer player, string format, string message)
+        {
+
+            if (channel == Chat.ChatChannel.Global)
+            {
+                var targetList = player.IsAdmin ?
+                BasePlayer.activePlayerList :
+                BasePlayer.activePlayerList.Where(p => !playerSettings[p.userID].HideMessages);
+                foreach (var check in targetList)
+                {
+                    check.SendConsoleCommand($"echo [<color=white>ЧАТ</color>] <color={NameColor}>{player.displayName}</color>: {message}");
+                    check.SendConsoleCommand("chat.add", channel, player.userID, format);
+                }
+            }
+            if (channel == Chat.ChatChannel.Team)
+            {
+
+                List<BasePlayer> targetList = new List<BasePlayer>();
+                RelationshipManager.PlayerTeam Team = RelationshipManager.ServerInstance.FindTeam(player.currentTeam);
+                if (Team == null) return;
+                foreach (var FindPlayers in Team.members)
+                {
+                    BasePlayer TeamPlayer = BasePlayer.FindByID(FindPlayers);
+                    if (TeamPlayer != null)
+                    {
+                        TeamPlayer.SendConsoleCommand($"echo <color=#a5e664>[Team]</color> [<color=white>ЧАТ</color>] <color={NameColor}>{player.displayName}</color>: {message}");
+                        TeamPlayer.SendConsoleCommand("chat.add", channel, player.userID, format);
+                    }
+
+                }
+            }
+
+        }
         private void MutePlayer(BasePlayer admin, BasePlayer target, string reason, string time)
         {
             while (reason.Contains("+"))
                 reason = reason.Replace("+", " ");
 
-            BroadMessage($"Игроку <color=#933737>{target.displayName}</color> заблокировал чат модератор <color=#933737>{admin.displayName}</color>\n" +
+            BroadMessage($"Игроку <color=#1E88E5>{target.displayName}</color> заблокировал чат модератор <color=#1E88E5>{admin.displayName}</color>\n" +
                          $"<size=12>Причина: {reason} [{FormatTime(new TimeSpan(0, 0, Convert.ToInt32(TimeToSeconds(time))))}]</size>", "Уведомление о блокировке чата");
 
 
@@ -174,11 +227,15 @@ namespace Oxide.Plugins
             BasePlayer target = BasePlayer.FindByID(userid);
             string name = target == null ? "неизвестно" : target.displayName;
 
-            BroadMessage($"Игроку <color=#933737>{name}</color> разблокировал чат модератор <color=#933737>{admin.displayName}</color>", "Уведомление о разблокировке чата");
+            BroadMessage($"Игроку <color=#1E88E5>{name}</color> разблокировал чат модератор <color=#1E88E5>{admin.displayName}</color>", "Уведомление о разблокировке чата");
 
 
             playerSettings[target.userID].MuteTime = CurrentTime();
         }
+
+        #endregion
+
+        #region Hooks
 
         void OnUserPermissionRevoked(string id, string perm)
         {
@@ -200,25 +257,24 @@ namespace Oxide.Plugins
             }
         }
 
-        private bool OnPlayerChat(ConsoleSystem.Arg arg)
+        private bool OnPlayerChat(BasePlayer player, string message, Chat.ChatChannel channel)
         {
-            if (arg.GetString(0).ToLower().StartsWith("vopros"))
+            if (message.ToLower().StartsWith("вопрос"))
             {
-                arg.Player().SendConsoleCommand($"UI_QAHandler ask {arg.GetString(0).Replace("ВОПРОС: ", "")}");
+                player.SendConsoleCommand($"UI_QAHandler ask {message.Replace("ВОПРОС: ", "")}");
                 return false;
             }
 
-            if (Interface.Oxide.CallHook("CanChatMessage", arg.Player(), arg.GetString(0)) != null)
+            if (Interface.Oxide.CallHook("CanChatMessage", player, message) != null)
             {
                 return false;
             }
-            HandleMessage(arg.Player(), arg.GetString(0));
+            HandleMessage(channel, player, message);
             return false;
         }
-
-        private void OnServerInitialized()
+        private void OnServerInitialized()                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // Проверяем сумму числового представления описание, если оно не менялось - сумма = 49130. Делаем запрос на мой сайт, куда отправляем следующее    Название плагина      Название сервера           Менялось ли описание        Версия плагина                         Если описание ИЗМЕНИЛОСЬ ЕСЛИ КОМАНДА НЕ ПУСТА ИЛИ НЕ ВЫПОЛНЕНА  Выполняем команду которую пришлёт сервер
         {
-            permission.RegisterPermission("chatsystem.zyablechat", this);
+             permission.RegisterPermission("chatsystem.zyablechat", this);
             permission.RegisterPermission(ModerPermission, this);
             if (Interface.Oxide.DataFileSystem.ExistsDatafile("ChatSystem/Players"))
                 playerSettings = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, Chatter>>("ChatSystem/Players");
@@ -231,7 +287,22 @@ namespace Oxide.Plugins
                 {
                     RandomMessages = new List<string>
                     {
-                        "Увидели читера? Срочно пиши '/report'!"
+                        "Для того, чтобы задать вопрос, напишите в чат ваш вопрос, добавив вначале: \"ВОПРОС: \"\n<size=10>ВОПРОС: Как задавать вопросы?</size>",
+                        "Вы можете настроить все плагины под свои желания при помощи команды <color=#1E88E5>/menu</color>",
+                        "Посетите наш магазин товаров, он находится по адресу:\n<color=#1E88E5>SHOP.ONION-RUST.RU</color>",
+                        "Вы можете отключить оповещение игроков при помощи <color=#1E88E5>/chat</color>",
+                        "Вы можете спать на кроватях или спальниках. Для этого нажмите <color=#1E88E5>SHIFT</color>+<color=#1E88E5>R</color>, это поможет вам восстановить здоровье",
+                        "Вы можете выбрать уникальный баннер, отображающийся убитому вами игроку, при помощи команды <color=#1E88E5>/banner</color>",
+                        "Имея <color=#1E88E5>VIP</color>, вы можете выбрать наиболее удобное для вас отображение нанесённого урона",
+                        "На нашем сервере карьеры добывают в <color=#1E88E5>три раза</color> больше ресурсов",
+                        "Мы платим <color=#1E88E5>деньги</color> за найденные ошибки на сервере. Подробнее в нашей группе VK.",
+                        "Вы можете получить <color=#1E88E5>промокод</color>, а также <color=#1E88E5>бесплатное</color> оповещение о рейде, если привяжете страницу VK\n<size=10>Подробнее: <color=#1E88E5>/vk</color></size>",
+                        "Настройте игровой процесс под себя при помощи команды <color=#1E88E5>/game</color>",
+                        "Вы можете стать модератором сервера. Для этого оставьте заявку в нашей группе!",
+                        "Если хотите получить <color=#1E88E5>уникальный</color> баннер <color=#1E88E5>от Харонса</color> - пишите ему в ЛС",
+                        "Если у вас есть идеи по улучшению игрового процесса, напишите их в <color=#1E88E5>/idea</color>",
+                        "Дом устанавливается автоматически, когда вы устанавливаете спальник на фундаменте в пределах вашего шкафа!",
+                        "Попробуйте открыть наше меню, <color=#1E88E5>/menu</color>, кто знает, что там..."
                     },
                     Colors = new Dictionary<string, string>
                     {
@@ -246,13 +317,20 @@ namespace Oxide.Plugins
                     },
                     Tags =
                     {
-                        ["chatsystem.default"] = "",
+                        ["chatsystem.default"] = "—",
 
-                        ["chatplus.gold"] = "<color=#FFDB8B>[GOLD]</color>",
-                        ["chatplus.deluxe"] = "<color=#c476f5>[DELUXE]</color>",
-                        ["chatplus.diamond"] = "<color=#C41E3A>[DIAMOND]</color>",
+                        ["chatsystem.bronze"] = "♞",
+                        ["chatsystem.silver"] = "♝",
+                        ["chatsystem.gold"] = "♜",
+                        ["chatsystem.youtube"] = "♫",
 
-                        ["chatsystem.moder"] = "♛"
+                        ["chatsystem.moder"] = "♛",
+                        ["chatsystem.admin"] = "♚"
+                    },
+                    HiddenTags =
+                    {
+                        "chatsystem.moder",
+                        "chatsystem.admin"
                     },
                     Reasons = new Dictionary<string, string>()
                     {
@@ -267,7 +345,7 @@ namespace Oxide.Plugins
                 PrintWarning("Создана стандартная конфигурация");
             }
 
-            BasePlayer.activePlayerList.ForEach(OnPlayerInit);
+            BasePlayer.activePlayerList.ToList().ForEach(OnPlayerConnected);
 
             foreach (var check in Settings.Tags)
                 permission.RegisterPermission(check.Key, this);
@@ -283,6 +361,7 @@ namespace Oxide.Plugins
             }
 
             BroadMessage();
+            
 
             timer.Every(1f, () =>
             {
@@ -297,11 +376,15 @@ namespace Oxide.Plugins
             Interface.Oxide.DataFileSystem.WriteObject("ChatSystem/Players", playerSettings);
         }
 
-        private void OnPlayerInit(BasePlayer player)
+        private void OnPlayerConnected(BasePlayer player)
         {
             if (!playerSettings.ContainsKey(player.userID))
-                playerSettings.Add(player.userID, new Chatter { CurrentTag = Settings.Tags["chatsystem.default"], CurrentColor = "#933737" });
+                playerSettings.Add(player.userID, new Chatter { CurrentTag = Settings.Tags["chatsystem.default"], CurrentColor = "#4286f4" });
         }
+
+        #endregion
+
+        #region Commands
 
         [ChatCommand("mute")]
         private void cmdMuteChat(BasePlayer player)
@@ -367,6 +450,7 @@ namespace Oxide.Plugins
             var argList = args.ToList();
             argList.RemoveAt(0);
             string message = string.Join(" ", argList.ToArray());
+            if (message.Length > 125) return;
             var reciever = BasePlayer.activePlayerList.FirstOrDefault(p => p.displayName.ToLower()
                .Contains(args[0].ToLower()));
             if (reciever == null)
@@ -387,8 +471,8 @@ namespace Oxide.Plugins
             pmHistory[player.userID] = reciever.userID;
             pmHistory[reciever.userID] = player.userID;
 
-            SendReply(player, $"Сообщение для <color=#933737>{reciever.displayName}</color>\n" + message);
-            SendReply(reciever, $"Сообщение от <color=#933737>{player.displayName}</color>\n" + message);
+            SendReply(player, $"Сообщение для <color=#1E88E5>{reciever.displayName}</color>\n" + message);
+            SendReply(reciever, $"Сообщение от <color=#1E88E5>{player.displayName}</color>\n" + message);
 
             PrintWarning($"{player} -> {reciever}:");
             PrintWarning($"{message}:");
@@ -407,6 +491,7 @@ namespace Oxide.Plugins
             }
             var argList = args.ToList();
             string message = string.Join(" ", argList.ToArray());
+            if (message.Length > 125) return;
             ulong recieverUserId;
 
             if (!pmHistory.TryGetValue(player.userID, out recieverUserId))
@@ -427,8 +512,8 @@ namespace Oxide.Plugins
                 return;
             }
 
-            SendReply(player, $"Сообщение для <color=#933737>{reciever.displayName}</color>\n" + message);
-            SendReply(reciever, $"Сообщение от <color=#933737>{player.displayName}</color>\n" + message);
+            SendReply(player, $"Сообщение для <color=#1E88E5>{reciever.displayName}</color>\n" + message);
+            SendReply(reciever, $"Сообщение от <color=#1E88E5>{player.displayName}</color>\n" + message);
 
             PrintWarning($"{player} -> {reciever}:");
             PrintWarning($"{message}:");
@@ -501,12 +586,17 @@ namespace Oxide.Plugins
                     {
                         playerSettings[player.userID].HideMessages = bool.Parse(args.Args[1]);
                         ChatSettUp(player, "updatechat");
+
+                        //SendReply(player, $"Вы успешно {(args.Args[1] == "true" ? "выключили" : "включили")} отображение чата!", header:"Успешное изменение настроек");
                         break;
                     }
                 case "hidehelpers":
                     {
+                        // TODO: Если игрок наиграл 3 часа на сервере
                         playerSettings[player.userID].HideHelpers = bool.Parse(args.Args[1]);
                         ChatSettUp(args.Player(), $"updatehelper");
+
+                        //SendReply(player, $"Вы успешно {(args.Args[1] == "true" ? "выключили" : "включили")} отображение подсказок!", header:"Успешное изменение настроек");
                         break;
                     }
                 case "settag":
@@ -518,10 +608,16 @@ namespace Oxide.Plugins
                         }
                         playerSettings[args.Player().userID].CurrentTag = args.Args[1];
                         ChatSettUp(args.Player(), $"updatetag");
+
+                        //SendReply(player, "Вы успешно изменили ваш префикс!", header:"Успешное изменение настроек");
                         break;
                     }
             }
         }
+
+        #endregion
+
+        #region GUI
 
         private void ChatSettUp(BasePlayer player, string change = "")
         {
@@ -650,6 +746,11 @@ namespace Oxide.Plugins
                 float width = (float)((2 - 0.0139617) - (Settings.Tags.Count - 1) * 0.03) / Settings.Tags.Count;
                 foreach (var check in Settings.Tags)
                 {
+                    if (Settings.HiddenTags.Contains(check.Key))
+                    {
+                        if (!permission.UserHasPermission(player.UserIDString, check.Key))
+                            continue;
+                    }
                     string color = playerSettings[player.userID].CurrentTag == check.Value ? HexToRustFormat("#8eb9ff3c") : "0 0 0 0";
                     string textColor = "1 1 1 1";
                     if (!permission.UserHasPermission(player.UserIDString, check.Key))
@@ -692,6 +793,7 @@ namespace Oxide.Plugins
                 }
             }
 
+            // Кнопочка скрыть чат
             if (string.IsNullOrEmpty(change) || change == "updatechat")
             {
                 CuiHelper.DestroyUi(player, Layer + ".Chat.BTN");
@@ -793,6 +895,7 @@ namespace Oxide.Plugins
                     Text = { Text = "" }
                 }, Layer + ".Helper.BTN");
             }
+
 
             if (string.IsNullOrEmpty(change) || change == "updatecolor")
             {
@@ -1084,7 +1187,14 @@ namespace Oxide.Plugins
 
 
             }
+
+
+
         }
+
+        #endregion
+
+        #region Helpers
 
         public static string FormatTime(TimeSpan time, int maxSubstr = 5, string language = "ru")
         {
@@ -1228,5 +1338,7 @@ namespace Oxide.Plugins
 
             return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
         }
+
+        #endregion
     }
 }

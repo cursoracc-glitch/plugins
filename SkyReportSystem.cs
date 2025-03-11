@@ -10,8 +10,6 @@ using Oxide.Core.Libraries;
 using ConVar;
 using Newtonsoft.Json.Linq;
 
-// https://server-rust.ru/resources/skyreportsystem.863/
-
 namespace Oxide.Plugins
 {
     [Info("SkyReportSystem", "DezLife", "3.2.0")]

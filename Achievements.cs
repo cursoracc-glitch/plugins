@@ -14,7 +14,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("Achievments", "https://topplugin.ru/", "1.0.2")]
+    [Info("Achievments", "FADERUST", "1.0.1")]
     class Achievements : RustPlugin
     {
         public class Achievs
@@ -1059,7 +1059,7 @@ namespace Oxide.Plugins
           Interface.Oxide.DataFileSystem.WriteObject("Achievments/achievs", achievementses);
             achievementses = new Dictionary<string, Achievs>();
         }
-        void OnPlayerConnected(BasePlayer player)
+        void OnPlayerInit(BasePlayer player)
         {
             Dictionary<string, Achievs> PlayerAchievs = new Dictionary<string, Achievs>();
             PlayerAchievs = players_File.ReadObject<Dictionary<string, Achievs>>();

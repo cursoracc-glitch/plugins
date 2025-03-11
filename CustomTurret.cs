@@ -10,8 +10,6 @@ using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 
-// https://server-rust.ru/resources/custom-turret.859
-
 namespace Oxide.Plugins
 {
     [Info("CustomTurret", "BadMandarin", "1.0.0")]

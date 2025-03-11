@@ -1,4 +1,19 @@
 
+/*
+ ########### README ####################################################
+ #                                                                     #
+ #   1. If you found a bug, please report them to developer!           #
+ #   2. Don't edit that file (edit files only in CONFIG/LANG/DATA)     #
+ #                                                                     #
+ ########### CONTACT INFORMATION #######################################
+ #                                                                     #
+ #   Website: https://rustworkshop.space/                              #
+ #   Discord: Orange#0900                                              #
+ #   Email: official.rustworkshop@gmail.com                            #
+ #                                                                     #
+ #######################################################################
+*/
+
 using System;
 using System.Collections.Generic;
 using System.Linq;

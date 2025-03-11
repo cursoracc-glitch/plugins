@@ -13,7 +13,8 @@ using System.Globalization;
 
 namespace Oxide.Plugins
 {
-    [Info("CarCommander", "k1lly0u", "0.2.59", ResourceId = 0)]
+    [Info("CarCommander", "k1lly0u", "0.2.61")]
+    [Description("A custom car controller with many options including persistence")]
     class CarCommander : RustPlugin
     {
         #region Fields
@@ -602,6 +603,8 @@ namespace Oxide.Plugins
             WheelFrictionCurve sidewaysFriction = new WheelFrictionCurve();
             WheelFrictionCurve sidewaysFrictionHB = new WheelFrictionCurve();
 
+            public ulong ownerId = 0UL;
+
             private float engineTorque;
             private float brakeTorque;
             private float reverseTorque;
@@ -954,10 +957,10 @@ namespace Oxide.Plugins
             #region Default Handling
             private void ApplyForceAtWheels()
             {
-                if (entity.myRigidBody == null)                
+                if (entity.rigidBody == null)                
                     return;
                 
-                Vector3 vector3 = entity.myRigidBody.velocity;
+                Vector3 vector3 = entity.rigidBody.velocity;
                 float single = vector3.magnitude * Vector3.Dot(vector3.normalized, base.transform.forward);
                 float single1 = entity.brakePedal;
                 float single2 = entity.gasPedal;
@@ -1339,6 +1342,10 @@ namespace Oxide.Plugins
                         if (security.Ignition.KeyOnEnter && (security.Ignition.KeyChance == 1 || UnityEngine.Random.Range(1, security.Ignition.KeyChance) == 1))
                         {
                             CreateVehicleKey(player);
+
+                            if (ins.configData.Security.Owners)
+                                ownerId = player.userID;
+
                             player.ChatMessage(ins.msg("key_created", player.UserIDString));
 
                             if (security.Ignition.CanCopy)
@@ -1382,6 +1389,9 @@ namespace Oxide.Plugins
 
             public bool HasVehicleKey(BasePlayer keyHolder)
             {
+                if (ins.configData.Security.Owners && keyHolder.userID == ownerId)
+                    return true;
+
                 List<Item> items = keyHolder.inventory.FindItemIDs(-1112793865);
                 List<Item>.Enumerator enumerator = items.GetEnumerator();
                 try
@@ -1897,9 +1907,7 @@ namespace Oxide.Plugins
         [ChatCommand("spawncar")]
         void cmdSpawnCar(BasePlayer player, string command, string[] args)
         {
-            if (!permission.UserHasPermission(player.UserIDString, "carcommander.canspawn")) return;
-            
-            Vector3 position = player.transform.position + (player.transform.forward * 3);
+            if (!permission.UserHasPermission(player.UserIDString, "carcommander.canspawn")) return;            
 
             RaycastHit hit;
             if (Physics.SphereCast(player.eyes.position, 0.1f, Quaternion.Euler(player.serverInput.current.aimAngles) * Vector3.forward, out hit, 20f))
@@ -1910,8 +1918,6 @@ namespace Oxide.Plugins
                     SendReply(player, msg("noStacking", player.UserIDString));
                     return;
                 }
-
-                position = hit.point;
             }
 
             if (!permission.UserHasPermission(player.UserIDString, "carcommander.ignorecooldown"))
@@ -1931,16 +1937,20 @@ namespace Oxide.Plugins
                 }
             }
 
-            SpawnAtLocation(position, player.transform.rotation, true);
+            Vector3 position = player.eyes.position + (player.eyes.MovementForward() * 5f);
+
+            float y = TerrainMeta.HeightMap.GetHeight(position);
+            if (y > position.y)
+                position.y = y;
+
+            SpawnAtLocation(position, Quaternion.Euler(0, player.eyes.rotation.eulerAngles.y - 90f, 0), true);
         }
 
         [ChatCommand("admincar")]
         void cmdAdminCar(BasePlayer player, string command, string[] args)
         {
             if (!permission.UserHasPermission(player.UserIDString, "carcommander.admin")) return;
-                       
-            Vector3 position = player.transform.position + (player.transform.forward * 3);
-
+                   
             RaycastHit hit;
             if (Physics.SphereCast(player.eyes.position, 0.1f, Quaternion.Euler(player.serverInput.current.aimAngles) * Vector3.forward, out hit, 20f))
             {
@@ -1950,10 +1960,15 @@ namespace Oxide.Plugins
                     SendReply(player, msg("noStacking", player.UserIDString));
                     return;
                 }
-                position = hit.point;
             }
 
-            SpawnAtLocation(position, player.transform.rotation, (args.Length == 1 && args[0].ToLower() == "save"));
+            Vector3 position = player.eyes.position + (player.eyes.MovementForward() * 5f);
+
+            float y = TerrainMeta.HeightMap.GetHeight(position);
+            if (y > position.y)
+                position.y = y;
+
+            SpawnAtLocation(position, Quaternion.Euler(0, player.eyes.rotation.eulerAngles.y - 90f, 0), (args.Length == 1 && args[0].ToLower() == "save"));
         }
 
         [ChatCommand("clearcars")]
@@ -2071,13 +2086,13 @@ namespace Oxide.Plugins
             foreach (ItemCost cost in requiredItems)
                 player.inventory.Take(null, cost.itemId, cost.amount);
 
-            Vector3 position = player.transform.position + (player.transform.forward * 3);
+            Vector3 position = player.eyes.position + (player.eyes.MovementForward() * 5f);
 
-            RaycastHit hit;
-            if (Physics.SphereCast(player.eyes.position, 0.1f, Quaternion.Euler(player.serverInput.current.aimAngles) * Vector3.forward, out hit, 20f))
-                position = hit.point;
+            float y = TerrainMeta.HeightMap.GetHeight(position);
+            if (y > position.y)
+                position.y = y;
 
-            SpawnAtLocation(position, new Quaternion(), true);
+            SpawnAtLocation(position, Quaternion.Euler(0, player.eyes.rotation.eulerAngles.y - 90f, 0), true);
         }
         #endregion
 
@@ -2118,13 +2133,13 @@ namespace Oxide.Plugins
                 BasePlayer player = covalence.Players.Connected.FirstOrDefault(x => x.Id == arg.GetString(0))?.Object as BasePlayer;
                 if (player != null)
                 {
-                    Vector3 position = player.transform.position + (player.transform.forward * 3) + Vector3.up;
+                    Vector3 position = player.eyes.position + (player.eyes.MovementForward() * 5f);
 
-                    RaycastHit hit;
-                    if (Physics.SphereCast(player.eyes.position, 0.5f, Quaternion.Euler(player.serverInput.current.aimAngles) * Vector3.forward, out hit, 20f))
-                        position = hit.point;
+                    float y = TerrainMeta.HeightMap.GetHeight(position);
+                    if (y > position.y)
+                        position.y = y;
 
-                    SpawnAtLocation(position, new Quaternion(), (arg.Args.Length == 2 && arg.Args[1].ToLower() == "save"));
+                    SpawnAtLocation(position, Quaternion.Euler(0, player.eyes.rotation.eulerAngles.y - 90f, 0), (arg.Args.Length == 2 && arg.Args[1].ToLower() == "save"));
                 }
                 return;
             }
@@ -2159,7 +2174,7 @@ namespace Oxide.Plugins
         private bool AreFriends(ulong playerId, ulong friendId)
         {
             if (Friends && configData.Passengers.UseFriends)
-                return (bool)Friends?.Call("AreFriendsS", playerId.ToString(), friendId.ToString());
+                return (bool)Friends?.Call("AreFriends", playerId.ToString(), friendId.ToString());
             return true;
         }
         private bool IsClanmate(ulong playerId, ulong friendId)
@@ -2337,6 +2352,8 @@ namespace Oxide.Plugins
             {             
                 [JsonProperty(PropertyName = "Enable ignition systems")]
                 public bool Enabled { get; set; }
+                [JsonProperty(PropertyName = "Set first player with a key as vehicle owner (doesn't require a key to drive)")]
+                public bool Owners { get; set; }
                 [JsonProperty(PropertyName = "Ignition options")]
                 public IgnitionOptions Ignition { get; set; }
                 [JsonProperty(PropertyName = "Hotwire options")]
@@ -2781,7 +2798,7 @@ namespace Oxide.Plugins
                 {
                     foreach (var contentData in itemData.contents)
                     {
-                        var newContent = ItemManager.CreateByItemID(contentData.itemid, contentData.amount);
+                        Item newContent = ItemManager.CreateByItemID(contentData.itemid, contentData.amount);
                         if (newContent != null)
                         {
                             newContent.condition = contentData.condition;
@@ -2883,6 +2900,8 @@ namespace Oxide.Plugins
                 public string lockCode;
                 public string guestCode;
 
+                public ulong ownerId;
+
                 public List<ulong> whiteListPlayers = new List<ulong>();
                 public List<ulong> guestPlayers = new List<ulong>();
 
@@ -2891,6 +2910,7 @@ namespace Oxide.Plugins
                 {
                     this.ignitionCode = controller.IgnitionCode;
                     this.hasBeenHotwired = controller.HasBeenHotwired;
+                    this.ownerId = controller.ownerId;
                     this.health = controller.entity.health;
 
                     if (controller.container != null)
@@ -2920,6 +2940,7 @@ namespace Oxide.Plugins
                 public void RestoreVehicleSecurity(CarController controller)
                 {
                     controller.HasBeenHotwired = hasBeenHotwired;
+                    controller.ownerId = ownerId;
                     controller.IgnitionCode = ignitionCode;
                     controller.entity.ChangeHealth(health);
 
@@ -2979,8 +3000,7 @@ namespace Oxide.Plugins
 
         Dictionary<string, string> Messages = new Dictionary<string, string>
         {
-            
-			["not_friend"] = "<color=#D3D3D3>You must be a friend or clanmate with the operator</color>",
+            ["not_friend"] = "<color=#D3D3D3>You must be a friend or clanmate with the operator</color>",
             ["controls1"] = "<color=#ce422b>Car Controls:</color>\n<color=#D3D3D3>Accelerate:</color> <color=#ce422b>{0}</color>\n<color=#D3D3D3>Brake/Reverse:</color> <color=#ce422b>{1}</color>\n<color=#D3D3D3>Turn Left:</color> <color=#ce422b>{2}</color>\n<color=#D3D3D3>Turn Right:</color> <color=#ce422b>{3}</color>\n<color=#D3D3D3>Hand Brake:</color> <color=#ce422b>{4}</color>\n<color=#D3D3D3>Toggle Lights:</color> <color=#ce422b>{5}</color>",
             ["controls2"] = "<color=#ce422b>Car Controls:</color>\n<color=#D3D3D3>Accelerate:</color> <color=#ce422b>{0}</color>\n<color=#D3D3D3>Brake/Reverse:</color> <color=#ce422b>{1}</color>\n<color=#D3D3D3>Turn Left:</color> <color=#ce422b>{2}</color>\n<color=#D3D3D3>Turn Right:</color> <color=#ce422b>{3}</color>\n<color=#D3D3D3>Toggle Lights:</color> <color=#ce422b>{4}</color>",
             ["access_inventory1"] = "<color=#D3D3D3>You can access the inventory from the trunk of the vehicle</color>",

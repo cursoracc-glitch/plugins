@@ -13,8 +13,6 @@ using UnityEngine;
 using System.Diagnostics;
 // Reference: System.Drawing
 
-// https://server-rust.ru/resources/randomcases.875/
-
 namespace Oxide.Plugins
 {
     [Info("Random Cases", "OxideBro", "0.1.11")]

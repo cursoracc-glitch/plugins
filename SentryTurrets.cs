@@ -1,56 +1,34 @@
-
-/*
- ########### README ####################################################
- #                                                                     #
- #   1. If you found a bug, please report them to developer!           #
- #   2. Don't edit that file (edit files only in CONFIG/LANG/DATA)     #
- #                                                                     #
- ########### CONTACT INFORMATION #######################################
- #                                                                     #
- #   Website: https://oxide-russia.ru/                                 #
- #   Discord: odin_ulveand_odin                                        #
- #   Mail: maksulrich@gmail.com                                        #
- #                                                                     #
- #######################################################################
-*/
-
+﻿using Newtonsoft.Json;
+using Oxide.Core;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using Newtonsoft.Json;
-using Oxide.Core.Plugins;
-using ProtoBuf;
 using UnityEngine;
 using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Sentry Turrets", "Orange&WOLF SPIRIT", "2.4.1")]
-    [Description("https://oxide-russia.ru/resources/1009/")]
+    [Info("Sentry Turrets", "Rust", "2.2.4")]
+    [Description("Leak By SparK")]
     public class SentryTurrets : RustPlugin
     {
         #region Vars
 
         private const ulong skinID = 1587601905;
         private const string prefabSentry = "assets/content/props/sentry_scientists/sentry.scientist.static.prefab";
-        private const string prefabSwitch = "assets/prefabs/deployable/playerioents/simpleswitch/switch.prefab";
         private const string itemName = "autoturret";
-        private const string command = "sentryturrets.give";
-        private const string itemDisplayName = "Sentry Turret";
-        private const string ammoShortname = "ammo.rifle";
-        private static Vector3 switchPosition = new Vector3(0, 2f, 1);
-        
-        
-        #endregion
+
+        #endregion Vars
 
         #region Oxide Hooks
 
         private void Init()
         {
-            cmd.AddConsoleCommand(command, this, nameof(cmdGiveConsole));
-            
+            cmd.AddConsoleCommand("sentryturrets.give", this, nameof(cmdGiveConsole));
+
             if (config.spray == 0)
             {
-                Unsubscribe(nameof(OnTurretTarget));
+                Unsubscribe("OnTurretTarget");
             }
         }
 
@@ -61,10 +39,7 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
-            foreach (var entity in UnityEngine.Object.FindObjectsOfType<TurretComponent>())
-            {
-                UnityEngine.Object.Destroy(entity);
-            }
+            UnityEngine.Object.FindObjectsOfType<CheckGround>().ToList().ForEach(UnityEngine.Object.Destroy);
         }
 
         private void OnEntityBuilt(Planner plan, GameObject go)
@@ -74,58 +49,22 @@ namespace Oxide.Plugins
 
         private object CanPickupEntity(BasePlayer player, NPCAutoTurret entity)
         {
-            CheckPickup(player, entity);
-            return false;
+            return CheckPickup(player, entity);
         }
 
         private object OnTurretTarget(NPCAutoTurret turret, BasePlayer player)
         {
-            if (player == null || turret.OwnerID == 0)
+            
+            if (player != null && turret.OwnerID != 0 && CanShootBullet(turret, player))
             {
                 return null;
             }
 
-            if (Vector3.Distance(turret.transform.position, player.transform.position) > config.range)
-            {
-                return true;
-            }
-
-            if (CanShootBullet(turret.inventory) == false)
-            {
-                return true;
-            }
-
-            return null;
+            return false;
         }
 
-        private void OnSwitchToggle(ElectricSwitch entity, BasePlayer player)
-        {
-            var turret = entity.GetComponentInParent<NPCAutoTurret>();
-            if (turret == null)
-            {
-                return;
-            }
-            
-            if (turret.authorizedPlayers.Any(x => x.userid == player.userID) == false)
-            {
-                player.ChatMessage("No permission");
-                entity.SetSwitch(!entity.IsOn());
-                return;
-            }
+        #endregion Oxide Hooks
 
-            if (entity.GetCurrentEnergy() < config.requiredPower)
-            {
-                player.ChatMessage("No power");
-                entity.SetSwitch(!entity.IsOn());
-                return;
-            }
-            
-            turret.SetIsOnline(!turret.IsOn());
-        }
-        
-        
-        #endregion
-        
         #region Commands
 
         private void cmdGiveConsole(ConsoleSystem.Arg arg)
@@ -150,30 +89,39 @@ namespace Oxide.Plugins
             }
         }
 
-        #endregion
-
-        #region Core
-        
-        private void CheckExistingTurrets()
+        [ChatCommand("t")]
+        private void cmdToggleChat(BasePlayer player)
         {
-            var turrets = UnityEngine.Object.FindObjectsOfType<NPCAutoTurret>().Where(x => x.OwnerID != 0);
-            foreach (var turret in turrets)
+            var entity = GetLookEntity(player);
+            if (entity == null)
             {
-                SetupTurret(turret);
+                return;
             }
+
+            if (entity.IsAuthed(player) == false)
+            {
+                return;
+            }
+
+            entity.SetIsOnline(entity.IsOn() == false);
         }
 
-        private void CheckPickup(BasePlayer player, NPCAutoTurret entity)
+        #endregion Commands
+
+        #region Core
+
+        private object CheckPickup(BasePlayer player, NPCAutoTurret entity)
         {
-            var items = entity.inventory?.itemList.ToArray() ?? new Item[]{};
-            
+            var items = entity.inventory?.itemList.ToList() ?? new List<Item>();
+
             foreach (var item in items)
             {
                 player.GiveItem(item);
             }
-            
+
             entity.Kill();
             GiveItem(player);
+            return false;
         }
 
         private void CheckPlacement(Planner plan, GameObject go)
@@ -199,14 +147,9 @@ namespace Oxide.Plugins
             var position = transform.position;
             var rotation = transform.rotation;
             var owner = entity.OwnerID;
-            NextTick(()=> { entity.Kill();});
-            var turret = GameManager.server.CreateEntity(prefabSentry, position, rotation)?.GetComponent<NPCAutoTurret>();
-            if (turret == null)
-            {
-                GiveItem(player);
-                return;
-            }
-            
+            entity.Kill();
+
+            var turret = GameManager.server.CreateEntity(prefabSentry, position, rotation).GetComponent<NPCAutoTurret>();
             turret.OwnerID = owner;
             turret.Spawn();
             turret.SetIsOnline(false);
@@ -214,54 +157,39 @@ namespace Oxide.Plugins
             SetupTurret(turret);
         }
 
+
+        public bool CanAcceptItem(Item item, int targetSlot)
+        {
+            return (item.info.itemid.Equals(-1211166256));
+        }
+
         private void SetupTurret(NPCAutoTurret turret)
         {
             turret.sightRange = config.range;
             turret.aimCone = config.aimCone;
             turret.inventory.capacity = 12;
-            turret.inventory.canAcceptItem = null;
-            turret.inventory.onlyAllowedItems = new []{ItemManager.FindItemDefinition(ammoShortname)};
+            turret.inventory.canAcceptItem = (Func<Item, int, bool>)Delegate.Combine(turret.inventory.canAcceptItem, new Func<Item, int, bool>(CanAcceptItem));
             SetupProtection(turret);
-            AuthorizeOthers(turret.OwnerID, turret);
-            
-            timer.Once(1f, () =>
-            {
-                CheckSwitch(turret);
-                turret.GetOrAddComponent<TurretComponent>();
-            });
-            
+            AddComponent(turret);
             turret.SendNetworkUpdate();
         }
 
-        private static void CheckSwitch(BaseEntity turret)
+        private void CheckExistingTurrets()
         {
-            var entity = turret.GetComponentInChildren<ElectricSwitch>();
-            if (entity == null)
+            var turrets = UnityEngine.Object.FindObjectsOfType<NPCAutoTurret>().Where(x => x.OwnerID != 0);
+            foreach (var turret in turrets)
             {
-                var position = turret.transform.position + switchPosition;
-                entity = GameManager.server.CreateEntity(prefabSwitch, position) as ElectricSwitch;
-                if (entity == null)
-                {
-                    return;
-                }
-                
-                entity.Spawn();
-                entity.SetParent(turret, true);
+                SetupTurret(turret);
             }
-            
-            entity.InitializeHealth(100 * 1000, 100 * 1000);
-            entity.pickup.enabled = false;
-            UnityEngine.Object.Destroy(entity.GetComponent<DestroyOnGroundMissing>());
-            UnityEngine.Object.Destroy(entity.GetComponent<GroundWatch>());
         }
 
-        private static void SetupProtection(BaseCombatEntity turret)
+        private void SetupProtection(BaseCombatEntity turret)
         {
             var health = config.health;
             turret._maxHealth = health;
             turret.health = health;
-            
-            if (config.getDamage == true)
+
+            if (config.getDamage)
             {
                 turret.baseProtection = ScriptableObject.CreateInstance<ProtectionProperties>();
                 turret.baseProtection.amounts = new float[]
@@ -272,37 +200,28 @@ namespace Oxide.Plugins
             }
         }
 
+        private void AddComponent(BaseNetworkable entity)
+        {
+            entity.gameObject.GetOrAddComponent<CheckGround>();
+            entity.SendNetworkUpdate();
+        }
+
         private static Item CreateItem()
         {
             var item = ItemManager.CreateByName(itemName, 1, skinID);
-            if (item == null)
-            {
-                return null;
-            }
-            
-            item.name = itemDisplayName;
+            item.name = "Sentry Turret";
             return item;
         }
-        
+
         private static void GiveItem(Vector3 position)
         {
             var item = CreateItem();
-            if (item == null)
-            {
-                return;
-            }
-            
             item.Drop(position, Vector3.down);
         }
 
         private void GiveItem(BasePlayer player)
         {
             var item = CreateItem();
-            if (item == null)
-            {
-                return;
-            }
-            
             player.GiveItem(item);
             Puts($"Turret was gave successfully to {player.displayName}");
         }
@@ -310,7 +229,7 @@ namespace Oxide.Plugins
         private BasePlayer FindPlayer(string nameOrID)
         {
             var targets = BasePlayer.activePlayerList.Where(x => x.UserIDString == nameOrID || x.displayName.ToLower().Contains(nameOrID.ToLower())).ToList();
-            
+
             if (targets.Count == 0)
             {
                 Puts("There are no players with that Name or steamID!");
@@ -326,119 +245,79 @@ namespace Oxide.Plugins
             return targets[0];
         }
 
-        private static bool CanShootBullet(ItemContainer inventory)
+        private bool CanShootBullet(NPCAutoTurret nPCAutoTurret, BasePlayer player)
         {
-            var items = inventory.itemList.Where(x => x.info.shortname == ammoShortname).ToArray();
-            if (items.Length == 0)
+            var items = nPCAutoTurret.inventory.itemList.Where(x => x.info.shortname == "ammo.rifle").ToList();
+            if (items.Count == 0)
             {
                 return false;
             }
-
-            var need = config.spray;
-            var item = items[0];
-            Consume(item, need);
-            return true;
-        }
-        
-        private static void Consume(Item item, int value)
-        {
-            if (item.amount > value)
+            if (Vector3.Distance(player.transform.position, nPCAutoTurret.transform.position) > config.range)
             {
-                item.amount -= value;
-                item.MarkDirty();
+                return false;
+            }
+            var item = items[0];
+            var need = config.spray;
+
+            if (item.amount > need)
+            {
+                item.amount -= need;
             }
             else
             {
                 item.GetHeldEntity()?.Kill();
                 item.DoRemove();
             }
+
+            return true;
         }
 
-        private void AuthorizeOthers(ulong userID, NPCAutoTurret entity)
+        private NPCAutoTurret GetLookEntity(BasePlayer player)
         {
-            if (config.authorizeOthers == true)
-            {
-                var team = RelationshipManager.ServerInstance.teams.FirstOrDefault(x => x.Value.members.Contains(userID)).Value;
-                if (team?.members != null)
-                {
-                    foreach (var member in team.members)
-                    {
-                        entity.authorizedPlayers.Add(new PlayerNameID
-                        {
-                            userid = member,
-                            username = "Player"
-
-                        });
-                    }
-                }
-
-                var friends = GetFriends(userID.ToString());
-                if (friends != null)
-                {
-                    foreach (var friend in friends)
-                    {
-                        var friendID = (ulong)0;
-                        if (ulong.TryParse(friend, out friendID) == true)
-                        {
-                            entity.authorizedPlayers.Add(new PlayerNameID
-                            {
-                                userid = friendID,
-                                username = "Player"
-                            });
-                        }
-                    }
-                }
-            }
-
-            if (config.authorizeByTC == true)
-            {
-                var tc = entity.GetBuildingPrivilege();
-                if (tc != null)
-                {
-                    foreach (var value in tc.authorizedPlayers)
-                    {
-                        entity.authorizedPlayers.Add(value);
-                    }
-                }
-            }
-    
-            entity.authorizedPlayers = new HashSet<ProtoBuf.PlayerNameID>(entity.authorizedPlayers.Distinct());
+            RaycastHit rHit;
+            if (Physics.Raycast(player.eyes.HeadRay(), out rHit) == false) { return null; }
+            return rHit.GetEntity()?.GetComponent<NPCAutoTurret>();
         }
 
-        #endregion
-        
-        #region Configuration 2.0.0
+        #endregion Core
 
-        private static ConfigData config = new ConfigData();
+        #region Configuration 1.1.0
+
+        private static ConfigData config;
 
         private class ConfigData
         {
             [JsonProperty(PropertyName = "Can get damage")]
-            public bool getDamage = true;
-
-            [JsonProperty(PropertyName = "Required power")]
-            public int requiredPower = 0;
-
-            [JsonProperty(PropertyName = "Authorize friends and team members")]
-            public bool authorizeOthers = false;
-
-            [JsonProperty(PropertyName = "Authorize tc members")]
-            public bool authorizeByTC = false;
+            public bool getDamage;
 
             [JsonProperty(PropertyName = "Amount of ammo for one spray (set to 0 for no-ammo mode)")]
-            public int spray = 3;
-            
+            public int spray;
+
             [JsonProperty(PropertyName = "Range (normal turret - 30")]
-            public int range = 100;
+            public int range;
 
             [JsonProperty(PropertyName = "Give back on ground missing")]
-            public bool itemOnGroundMissing = true;
+            public bool itemOnGroundMissing;
 
             [JsonProperty(PropertyName = "Health (normal turret - 1000)")]
-            public float health = 1500;
+            public float health;
 
             [JsonProperty(PropertyName = "Aim cone (normal turret - 4)")]
-            public float aimCone = 2;
+            public float aimCone;
+        }
+
+        private ConfigData GetDefaultConfig()
+        {
+            return new ConfigData
+            {
+                getDamage = true,
+                spray = 3,
+                range = 100,
+                itemOnGroundMissing = true,
+                health = 1500,
+				/*aimTarge = %id%,*/
+                aimCone = 2
+            };
         }
 
         protected override void LoadConfig()
@@ -448,6 +327,7 @@ namespace Oxide.Plugins
             try
             {
                 config = Config.ReadObject<ConfigData>();
+
                 if (config == null)
                 {
                     LoadDefaultConfig();
@@ -455,27 +335,17 @@ namespace Oxide.Plugins
             }
             catch
             {
-                for (var i = 0; i < 3; i++)
-                {
-                    PrintError("Configuration file is corrupt! Check your config file at https://jsonlint.com/");
-                }
-                
-                LoadDefaultConfig();
+                PrintError("Configuration file is corrupt! Unloading plugin...");
+                Interface.Oxide.RootPluginManager.RemovePlugin(this);
                 return;
             }
 
-            ValidateConfig();
             SaveConfig();
-        }
-
-        private static void ValidateConfig()
-        {
-            
         }
 
         protected override void LoadDefaultConfig()
         {
-            config = new ConfigData();
+            config = GetDefaultConfig();
         }
 
         protected override void SaveConfig()
@@ -483,30 +353,28 @@ namespace Oxide.Plugins
             Config.WriteObject(config);
         }
 
-        #endregion
+        #endregion Configuration 1.1.0
 
         #region Scripts
 
-        private class TurretComponent : MonoBehaviour
+        private class CheckGround : MonoBehaviour
         {
-            private NPCAutoTurret entity;
-            private ElectricSwitch eSwitch;
+            private BaseEntity entity;
 
             private void Start()
             {
-                entity = GetComponent<NPCAutoTurret>();
-                eSwitch = GetComponentInChildren<ElectricSwitch>();
-                InvokeRepeating(nameof(DoChecks), 5f, 5f);
+                entity = GetComponent<BaseEntity>();
+                InvokeRepeating(nameof(Check), 5f, 5f);
             }
 
-            private void DoChecks()
+            private void Check()
             {
-                CheckPower();
-                CheckGround();
-            }
+                if (entity == null)
+                {
+                    Destroy(this);
+                    return;
+                }
 
-            private void CheckGround()
-            {
                 RaycastHit rhit;
                 var cast = Physics.Raycast(entity.transform.position + new Vector3(0, 0.1f, 0), Vector3.down, out rhit, 4f, LayerMask.GetMask("Terrain", "Construction"));
                 var distance = cast ? rhit.distance : 3f;
@@ -517,27 +385,12 @@ namespace Oxide.Plugins
                 }
             }
 
-            private void CheckPower()
-            {
-                if (HasPower())
-                {
-                    return;
-                }
-                
-                entity.SetIsOnline(false);
-            }
-
-            public bool HasPower()
-            {
-                return eSwitch != null && eSwitch.GetCurrentEnergy() >= config.requiredPower;
-            }
-
             private void GroundMissing()
             {
                 var position = entity.transform.position;
                 entity.Kill();
                 Effect.server.Run("assets/bundled/prefabs/fx/item_break.prefab", position);
-                
+
                 if (config.itemOnGroundMissing)
                 {
                     GiveItem(position);
@@ -545,41 +398,6 @@ namespace Oxide.Plugins
             }
         }
 
-        #endregion
-        
-        #region Friends Support
-
-        [PluginReference] private Plugin Friends, RustIOFriendListAPI;
-
-        private bool IsFriends(BasePlayer player1, BasePlayer player2)
-        {
-            return IsFriends(player1.userID, player2.userID);
-        }
-
-        private bool IsFriends(BasePlayer player1, ulong player2)
-        {
-            return IsFriends(player1.userID, player2);
-        }
-
-        private bool IsFriends(ulong player1, BasePlayer player2)
-        {
-            return IsFriends(player1, player2.userID);
-        }
-
-        private bool IsFriends(ulong id1, ulong id2)
-        {
-            var flag1 = Friends?.Call<bool>("AreFriends", id1, id2) ?? false;
-            var flag2 = RustIOFriendListAPI?.Call<bool>("AreFriendsS", id1.ToString(), id2.ToString()) ?? false;
-            return flag1 || flag2;
-        }
-        
-        private string[] GetFriends(string playerID)
-        {
-            var flag1 = Friends?.Call<string[]>("GetFriends", playerID) ?? new string[]{};
-            var flag2 = RustIOFriendListAPI?.Call<string[]>("GetFriends", playerID) ?? new string[]{};
-            return flag1.Length > 0 ? flag1 : flag2;
-        }
-
-        #endregion
+        #endregion Scripts
     }
 }

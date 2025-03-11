@@ -10,13 +10,13 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("BuriedTreasure", "Colon Blow", "1.0.7")]
+    [Info("BuriedTreasure", "Colon Blow", "1.0.11")]
+	[Description("Treasure on your server")]
     class BuriedTreasure : RustPlugin
     {
 
-        // recoded Config area
-        // Added lootspawn options
-        // Tweaks
+        // Added Randomizer to Custom Loot tables.
+        // Changed from Item id to shortname in config.
 
         #region Load
 
@@ -74,11 +74,17 @@ namespace Oxide.Plugins
                 [JsonProperty(PropertyName = "Treasure - Prefab - Rare Treasure Chest prefab : ")] public string RareTreasurePrefab { get; set; }
                 [JsonProperty(PropertyName = "Treasure - Prefab - Elite Treasure Chest prefab : ")] public string EliteTreasurePrefab { get; set; }
 
+                [JsonProperty(PropertyName = "Text - Basic Map name when inspecting map in inventory")] public string BasicMapTitle { get; set; }
+                [JsonProperty(PropertyName = "Text - Uncommon Map name when inspecting map in inventory")] public string UncommonMapTitle { get; set; }
+                [JsonProperty(PropertyName = "Text - Rare Map name when inspecting map in inventory")] public string RareMapTitle { get; set; }
+                [JsonProperty(PropertyName = "Text - Elite Map name when inspecting map in inventory")] public string EliteMapTitle { get; set; }
+                [JsonProperty(PropertyName = "Text - Notes to player when inspecting map in inventory")] public string MapInfomation { get; set; }
+
                 [JsonProperty(PropertyName = "Loot Table - Only Use Loot Table Items ? ")] public bool UseOnlyLootTable { get; set; }
-                [JsonProperty(PropertyName = "Loot Table - Basic Treasure Chest")] public List<int> BasicLootTable { get; set; }
-                [JsonProperty(PropertyName = "Loot Table - UnCommon Treasure Chest")] public List<int> UnCommonLootTable { get; set; }
-                [JsonProperty(PropertyName = "Loot Table - Rare Treasure Chest")] public List<int> RareLootTable { get; set; }
-                [JsonProperty(PropertyName = "Loot Table - Elite Treasure Chest")] public List<int> EliteLootTable { get; set; }
+                [JsonProperty(PropertyName = "Loot Table - Basic Treasure Chest (shortname, max qty) ")] public Dictionary<string, int> BasicLootTable { get; set; }
+                [JsonProperty(PropertyName = "Loot Table - UnCommon Treasure Chest (shortname, max qty) ")] public Dictionary<string, int> UnCommonLootTable { get; set; }
+                [JsonProperty(PropertyName = "Loot Table - Rare Treasure Chest (shortname, max qty) ")] public Dictionary<string, int> RareLootTable { get; set; }
+                [JsonProperty(PropertyName = "Loot Table - Elite Treasure Chest (shortname, max qty) ")] public Dictionary<string, int> EliteLootTable { get; set; }
             }
 
             public static PluginConfig DefaultConfig() => new PluginConfig()
@@ -107,17 +113,24 @@ namespace Oxide.Plugins
                     UnCommonMapChance = 30,
                     RareMapChance = 15,
                     EliteMapChance = 5,
-                    MapMarkerPrefab = "assets/prefabs/tools/map/explosionmarker.prefab",
+                    MapMarkerPrefab = "assets/prefabs/tools/map/cratemarker.prefab",
                     BasicTreasurePrefab = "assets/bundled/prefabs/radtown/crate_basic.prefab",
                     UnCommonTreasurePrefab = "assets/bundled/prefabs/radtown/crate_normal.prefab",
                     RareTreasurePrefab = "assets/bundled/prefabs/radtown/crate_normal_2.prefab",
                     EliteTreasurePrefab = "assets/bundled/prefabs/radtown/crate_elite.prefab",
 
+                    BasicMapTitle = "Basic Map",
+                    UncommonMapTitle = "Uncommon Map",
+                    RareMapTitle = "Rare Map",
+                    EliteMapTitle = "Elite Map",
+
+                    MapInfomation = "Place map in Quick Slot, then right click on it to mark location.",
+
                     UseOnlyLootTable = false,
-                    BasicLootTable = new List<int>() { -700591459, 1655979682 },
-                    UnCommonLootTable = new List<int>() { -1941646328, -1557377697 },
-                    RareLootTable = new List<int>() { -1848736516, 1973684065, -1440987069 },
-                    EliteLootTable = new List<int>() { 1545779598, -2139580305, 1099314009 }
+                    BasicLootTable = new Dictionary<string, int>() { { "tool.binoculars", 3 }, { "seed.hemp", 25 } },
+                    UnCommonLootTable = new Dictionary<string, int>() { { "tool.binoculars", 3 }, { "seed.hemp", 25 } },
+                    RareLootTable = new Dictionary<string, int>() { { "tool.binoculars", 3 }, { "seed.hemp", 25 }, { "hoodie", 1 } },
+                    EliteLootTable = new Dictionary<string, int>() { { "tool.binoculars", 3 }, { "seed.hemp", 25 }, { "hoodie", 1 } }
                 }
             };
         }
@@ -346,24 +359,32 @@ namespace Oxide.Plugins
         void GiveTreasureMap(BasePlayer player)
         {
             var item = ItemManager.CreateByItemID(1414245162, 1, 1389950043);
+            item.name = config.globalSettings.BasicMapTitle;
+            item.text = config.globalSettings.MapInfomation;
             player.inventory.GiveItem(item);
         }
 
         void GiveUnCommonTreasureMap(BasePlayer player)
         {
             var item = ItemManager.CreateByItemID(1414245162, 1, 1390209788);
+            item.name = config.globalSettings.UncommonMapTitle;
+            item.text = config.globalSettings.MapInfomation;
             player.inventory.GiveItem(item);
         }
 
         void GiveRareTreasureMap(BasePlayer player)
         {
             var item = ItemManager.CreateByItemID(1414245162, 1, 1390210901);
+            item.name = config.globalSettings.RareMapTitle;
+            item.text = config.globalSettings.MapInfomation;
             player.inventory.GiveItem(item);
         }
 
         void GiveEliteTreasureMap(BasePlayer player)
         {
             var item = ItemManager.CreateByItemID(1414245162, 1, 1390211736);
+            item.name = config.globalSettings.EliteMapTitle;
+            item.text = config.globalSettings.MapInfomation;
             player.inventory.GiveItem(item);
         }
 
@@ -505,9 +526,36 @@ namespace Oxide.Plugins
             return gridstring;
         }
 
+        void Unload()
+        {
+            DestroyAll<TreasureMarker>();
+        }
+
+        static void DestroyAll<T>()
+        {
+            var objects = GameObject.FindObjectsOfType(typeof(T));
+            if (objects != null)
+                foreach (var gameObj in objects)
+                    GameObject.Destroy(gameObj);
+        }
+
         #endregion
 
         #region TreasureMarker 
+
+        object CanNetworkTo(BaseNetworkable entity, BasePlayer target)
+        {
+            if (entity is MapMarker && entity.name == "Treasure Marker")
+            {
+                MapMarker getMarker = entity.GetComponent<MapMarker>();
+                if (getMarker)
+                {
+                    if (target.userID == getMarker.OwnerID) return null;
+                    else return false;
+                }
+            }
+            return null;
+        }
 
         class TreasureMarker : BaseEntity
         {
@@ -519,7 +567,7 @@ namespace Oxide.Plugins
             BuriedTreasure instance;
             public int rarity;
             string prefabtreasure;
-            List<int> loottable;
+            Dictionary<string, int> loottable;
             bool isvisible;
             bool didspawnchest;
             float despawncounter;
@@ -536,8 +584,10 @@ namespace Oxide.Plugins
                 didspawnchest = false;
                 detectionradius = config.globalSettings.LootDetectionRadius;
                 string prefabmarker = config.globalSettings.MapMarkerPrefab;
+
                 mapmarker = GameManager.server.CreateEntity(prefabmarker, lootbox.transform.position, Quaternion.identity, true) as MapMarker;
-                mapmarker.OwnerID = playerid;
+                mapmarker.OwnerID = lootbox.OwnerID;
+                mapmarker.name = "Treasure Marker";
                 mapmarker.Spawn();
 
                 sphereCollider = gameObject.AddComponent<SphereCollider>();
@@ -591,14 +641,28 @@ namespace Oxide.Plugins
                 if (rarity == 3) loottable = config.globalSettings.RareLootTable;
                 if (rarity == 4) loottable = config.globalSettings.EliteLootTable;
 
-                foreach (var itemid in loottable)
+                foreach (KeyValuePair<string, int> lootlist in loottable)
                 {
-                    ItemContainer component1 = treasurebox.GetComponent<StorageContainer>().inventory;
-                    Item item = ItemManager.CreateByItemID(itemid, 1, 0);
-                    component1.itemList.Add(item);
-                    item.parent = component1;
-                    item.MarkDirty();
+                    int itemqty = lootlist.Value;
+                    string itemname = lootlist.Key;
+
+                    Item foundItem = ItemManager.CreateByPartialName(itemname, 1);
+                    if (foundItem != null)
+                    {
+                        var doSpawn = UnityEngine.Random.Range(1, 3);
+                        if (doSpawn == 1) AddCustomLoot(treasurebox, itemqty, foundItem.info.itemid);
+                    }
                 }
+            }
+//Black Jack
+            void AddCustomLoot(BaseEntity treasurebox, int qauntity, int itemid)
+            {
+                if (qauntity <= 0) qauntity = 1;
+                ItemContainer component1 = treasurebox.GetComponent<StorageContainer>().inventory;
+                Item item = ItemManager.CreateByItemID(itemid, UnityEngine.Random.Range(1, qauntity + 1), 0);
+                component1.itemList.Add(item);
+                item.parent = component1;
+                item.MarkDirty();
             }
 
             void CheckSpawnVisibility(BaseEntity entitybox)

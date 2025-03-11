@@ -1,1 +1,2356 @@
-using Rust; using System; using System.Collections.Generic; using System.Collections; using System.Linq; using System.Text; using System.Text.RegularExpressions; using UnityEngine; using Newtonsoft.Json; using Newtonsoft.Json.Linq; using Oxide.Core.Configuration; using Random = System.Random; using Oxide.Core; using Oxide.Core.Plugins; using Facepunch.Extend;  namespace Oxide.Plugins { [Info("AlphaLoot", "FuJiCuRa", "2.5.2", ResourceId = 13)]  public class AlphaLoot : RustPlugin { [PluginReference] Plugin CustomLootSpawns, FancyDrop, SkinBox, EventLoot;  bool Changed = false; bool firstSetup = false; Random rng = new Random(); Random rngHeli = new Random(); List<int> rngHeliList = new List<int>(); Random rngBradley = new Random(); List<int> rngBradleyList = new List<int>(); double fancyDropBpProbability; static AlphaLoot al = null; double baseItemRarity = 3; bool initialized = false; bool skinsLoaded = false; bool manualReload = false; int oldProtocol = 0;  StoredExportNames storedExportNames = new StoredExportNames(); DynamicConfigFile itemRaritys; DynamicConfigFile itemLootFractions; DynamicConfigFile lootTable; DynamicConfigFile heliLoot; DynamicConfigFile bradleyLoot; DynamicConfigFile fancyDropLoot;  DynamicConfigFile getFile(string file) => Interface.Oxide.DataFileSystem.GetDatafile($"{this.Title}/{file}"); bool chkFile(string file) => Interface.Oxide.DataFileSystem.ExistsDatafile($"{this.Title}/{file}"); Dictionary<string, object> lootData = new Dictionary<string, object>(); Dictionary<string, object> lootContainers = new Dictionary<string, object>(); Dictionary<string, object> lootCategoryLimits = new Dictionary<string, object>(); Dictionary<string, object> fancyDropData = new Dictionary<string, object>(); Dictionary<string,object> fancyDropLootSpawn = new Dictionary<string,object>(); List<object> heliData = new List<object>(); List<object> bradleyData = new List<object>(); Dictionary<string, object> rarityOverridesItems = new Dictionary<string, object>(); Dictionary<string, object> rarityOverridesBlueprints = new Dictionary<string, object>(); Dictionary<string, object> fractionOverrides = new Dictionary<string, object>(); Dictionary<string, object> weaponAmmoConfig = new Dictionary<string, object>(); Dictionary<string, List<ulong>> skinsCache = new Dictionary<string, List<ulong>>(); List <string> newGameItems = new List <string>(); List <ItemDefinition> showNewGameItems = new List <ItemDefinition>(); Dictionary<string, string> AllContainerTypes = new Dictionary<string, string>(); Dictionary<string, LootSpawn> AllLootSpawns = new Dictionary<string, LootSpawn>(); Dictionary<string, LootContainer.LootSpawnSlot[]> AllLootSlots = new Dictionary<string, LootContainer.LootSpawnSlot[]>();  static Dictionary<string, string> guidToPathCopy = new Dictionary<string, string>();  Dictionary<string, List<string>[]> Items = new Dictionary<string, List<string>[]>(); Dictionary<string, List<string>[]> Blueprints = new Dictionary<string, List<string>[]>(); Dictionary<string, int[]> itemWeights = new Dictionary<string, int[]>(); Dictionary<string, int[]> blueprintWeights = new Dictionary<string, int[]>(); Dictionary<string, int> totalItemWeight = new Dictionary<string, int>(); Dictionary<string, int> totalBlueprintWeight = new Dictionary<string, int>();  Dictionary<string, List<string>[]> itemsDrop = new Dictionary<string, List<string>[]>(); Dictionary<string, List<string>[]> blueprintsDrop = new Dictionary<string, List<string>[]>(); Dictionary<string, int[]> itemWeightsDrop = new Dictionary<string, int[]>(); Dictionary<string, int[]> blueprintWeightsDrop = new Dictionary<string, int[]>(); Dictionary<string, int> totalItemWeightDrop = new Dictionary<string, int>(); Dictionary<string, int> totalBlueprintWeightDrop = new Dictionary<string, int>();  ConsoleSystem.Command[] alVars; static Dictionary<string, string> alVarDescriptions = new Dictionary<string, string> { ["admininputlootrefresh"] = "Enables fast container lootrefresh on hammerhit", ["adminlootrefreshinterval"] = "The interval in seconds for the admin loot check", ["blockplayeriteminput"] = "Blocks input of player items back into lootcontainers", ["enablefancydroploot"] = "Provides seperate itemlists for all drop types (FancyDropLoot.json)", ["enableheliloadout"] = "Provides predefined loadouts for heli crates (HeliLoot.json)", ["enablebradleyloadout"] = "Provides predefined loadouts for bradley crates (BradleyLoot.json)", ["excludecustomlootspawns"] = "Excludes CustomLootSpawn boxes from handling", ["excludeeventloot"] = "Excludes EventLoot boxes from handling", ["includeworkshopskins"] = "Randomize also WorkShopskins", ["itemamountminmax"] = "Enables all loottables and itemlists to use a min and max per item", ["lootstackfixenable"] = "Removal of stacked loot container at same position", ["lootstackfixrange"] = "Range to check for stacked loot containers", ["lootstackfixexclude"] = "from stackfix excluded containers by name", ["pluginenabled"] = "Enables/disables the plugin loot spawning", ["setupauthlevel"] = "AuthLevel to have access to the plugin commands", ["showadminlootinfo"] = "Writes the lootcontainer name to chat after a hammerhit", ["useskinboxskins"] = "Can re-use the skins loaded by Skinbox", ["blueprintprobability"] = "Can be used as bp dropchance modifier (default 0.11 > ~11%)", ["multiplyconditioneditems"] = "multiply with 'lootmultiplier' also items with condition", ["alignitemrarity"] = "Place all items in the lootpool on same rarity|weight", ["alignblueprintrarity"] = "Place all blueprints in the lootpool on same rarity|weight", ["renewraritysnewprotocol"] = "Overwrites rarities with their defaults at protocolupdate", ["extendedstatus"] = "Displays the extented status once per plugin load", ["enableSkinIdFields"] = "Adds a SkinId field to items (only when using also itemamountminmax)", };  static Dictionary<string, string> alCmdDescriptions = new Dictionary<string, string> { ["reload"] = "Reloads the whole plugin internally", ["repopulateloot"] = "Repopulates loot for all supported containers on map", ["rarityreload"] = "Reloads the item raritys into server after changing them", ["rarityset"] = "Sets the item rarity for a specific item", ["raritysetbp"] = "Sets the blueprint rarity for a specific item", ["lootreset"] = "Can be used to recreate all or specific tables/files with new defaults", ["enable"] = "Enables the plugin from passive state", ["disable"] = "Disables the plugin into passive state", ["itemlimit"] = "Sets the maximum item limit for an item in 'LootTables.json'", ["itemremove"] = "Removes an item complete from 'LootTables.json'", ["itemfind"] = "Shows the entries for a specific item in 'LootTables.json'", ["itemadd"] = "Adds an item to specific containers in 'LootTables.json'", ["categorylist"] = "Lists the current category defaults", ["categoryset"] = "Modifies a given category in the plugin config", ["containertypes"] = "Lists the added container types and their status", ["containeradd"] = "Adds a not included containtertype to your loot tables", ["containerreset"] = "Resets a specific containtertype to the defaults", ["containerremove"] = "Removes a specific containtertype from your loot tables", ["containeronmap"] = "Lists all current containers on map", ["containeritemweights"] = "Shows calculated and used itemweights of 'LootTables.json'", ["showconfig"] = "Shows and explains the current config options", ["searchitems"] = "Search any game item(s) by partial name", ["shownewitems"] = "Lists any new items since last protocol update", ["lootmultiplier"] = "Simplified multiplier for all or specific tables/files" };  static Dictionary<string, object> defaultCategoryLimits() { var dp = new Dictionary<string, object>(); foreach (var cat in Enum.GetValues(typeof(ItemCategory)).Cast<ItemCategory>().ToList()) { if (cat.ToString() == "All" || cat.ToString() == "Common" || cat.ToString() == "Search") continue; var dp0 = new Dictionary<string, object>(); dp0.Add("LootMultiplier", 1); dp0.Add("DropSkinned", false); dp.Add(cat.ToString(), dp0); } return dp; }  bool pluginEnabled; bool debugLogEnabled; bool adminInputLootRefresh; float adminLootRefreshInterval; int setupAuthLevel; bool showAdminLootInfo; bool includeWorkShopSkins; bool blockPlayerItemInput; bool lootStackFixEnable; float lootStackFixRange; List<object> lootStackFixExclude;  bool itemAmountMinMax; bool enableSkinIdFields; bool enableHeliLoadOut; bool enableBradleyLoadOut; bool enableFancyDropLoot; bool useSkinBoxSkins; bool excludeCustomLootSpawns; bool excludeEventLoot; double blueprintProbability; bool renewRaritysNewProtocol; bool multiplyConditionedItems; bool alignItemRarity; bool alignBlueprintRarity; string version; bool extendedStatus;  object GetConfig(string menu, string datavalue, object defaultValue) { var data = Config[menu] as Dictionary<string, object>; if (data == null) { data = new Dictionary<string, object>(); Config[menu] = data; Changed = true; } object value; if (!data.TryGetValue(datavalue, out value)) { value = defaultValue; data[datavalue] = value; Changed = true; } return value; }  void LoadVariables() { lootCategoryLimits = (Dictionary<string, object>)GetConfig("LootCategorys", "Limits", defaultCategoryLimits()); pluginEnabled = Convert.ToBoolean(GetConfig("Generic", "pluginEnabled", false)); debugLogEnabled = Convert.ToBoolean(GetConfig("Debug", "debugLogEnabled", false)); adminInputLootRefresh = Convert.ToBoolean(GetConfig("Generic", "adminInputLootRefresh", true)); adminLootRefreshInterval = Convert.ToSingle(GetConfig("Generic", "adminLootRefreshInterval", 3f)); setupAuthLevel = Convert.ToInt32(GetConfig("Generic", "setupAuthLevel", 2)); showAdminLootInfo = Convert.ToBoolean(GetConfig("Generic", "showAdminLootInfo", true)); includeWorkShopSkins = Convert.ToBoolean(GetConfig("Generic", "includeWorkShopSkins", false)); blockPlayerItemInput = Convert.ToBoolean(GetConfig("Generic", "blockPlayerItemInput", true)); lootStackFixEnable = Convert.ToBoolean(GetConfig("Generic", "lootStackFixEnable", true)); lootStackFixRange = Convert.ToSingle(GetConfig("Generic", "lootStackFixRange", 0.3f)); lootStackFixExclude = (List<object>)GetConfig("Generic", "lootStackFixExclude", new List<object> { "place-container-name-here", "example_name_1" });  itemAmountMinMax = Convert.ToBoolean(GetConfig("Generic", "itemAmountMinMax", true)); enableSkinIdFields = Convert.ToBoolean(GetConfig("Generic", "enableSkinIdFields", false)); enableHeliLoadOut = Convert.ToBoolean(GetConfig("Generic", "enableHeliLoadOut", true)); enableBradleyLoadOut = Convert.ToBoolean(GetConfig("Generic", "enableBradleyLoadOut", true)); enableFancyDropLoot = Convert.ToBoolean(GetConfig("Generic", "enableFancyDropLoot", false)); useSkinBoxSkins = Convert.ToBoolean(GetConfig("Generic", "useSkinBoxSkins", false)); excludeCustomLootSpawns = Convert.ToBoolean(GetConfig("Generic", "excludeCustomLootSpawns", true)); excludeEventLoot = Convert.ToBoolean(GetConfig("Generic", "excludeEventLoot", true)); blueprintProbability = Convert.ToDouble(GetConfig("Generic", "blueprintProbability", 0.11)); renewRaritysNewProtocol = Convert.ToBoolean(GetConfig("Generic", "renewRaritysNewProtocol", false)); multiplyConditionedItems = Convert.ToBoolean(GetConfig("Generic", "multiplyConditionedItems", false)); alignItemRarity = Convert.ToBoolean(GetConfig("Generic", "alignItemRarity", false)); alignBlueprintRarity = Convert.ToBoolean(GetConfig("Generic", "alignBlueprintRarity", false)); extendedStatus = Convert.ToBoolean(GetConfig("Generic", "extendedStatus", true));  version = Convert.ToString(GetConfig("Debug", "version", this.Version.ToString())); if (version != this.Version.ToString()) { Config["Debug","version"] =  this.Version.ToString(); Changed = true; }  if (blueprintProbability > 0.9d) blueprintProbability = 0.9d;  var configremoval = false; if ((Config.Get("Generic") as Dictionary<string,object>).ContainsKey("itemSlotVariance")) { (Config.Get("Generic") as Dictionary<string,object>).Remove("itemSlotVariance"); configremoval = true; } if ((Config.Get("Generic") as Dictionary<string,object>).ContainsKey("enableLootFraction")) { (Config.Get("Generic") as Dictionary<string,object>).Remove("enableLootFraction"); configremoval = true; } if ((Config.Get("Generic") as Dictionary<string,object>).ContainsKey("enableScrapSpawn")) { (Config.Get("Generic") as Dictionary<string,object>).Remove("enableScrapSpawn"); configremoval = true; } if ((Config.Get("Generic") as Dictionary<string,object>).ContainsKey("itemCanSpawnAsBlueprint")) { (Config.Get("Generic") as Dictionary<string,object>).Remove("itemCanSpawnAsBlueprint"); configremoval = true; } if ((Config.Get("Generic") as Dictionary<string,object>).ContainsKey("enableDefaultRarityOverrides")) { (Config.Get("Generic") as Dictionary<string,object>).Remove("enableDefaultRarityOverrides"); configremoval = true; } if ((Config.Get("Generic") as Dictionary<string,object>).ContainsKey("disableRefreshFunctions")) { (Config.Get("Generic") as Dictionary<string,object>).Remove("disableRefreshFunctions"); configremoval = true; } if ((Config.Get("Generic") as Dictionary<string,object>).ContainsKey("debugLootRepopulation")) { (Config.Get("Generic") as Dictionary<string,object>).Remove("debugLootRepopulation"); configremoval = true; } if ((Config.Get("Generic") as Dictionary<string,object>).ContainsKey("refreshMinutes")) { (Config.Get("Generic") as Dictionary<string,object>).Remove("refreshMinutes"); configremoval = true; } if ((Config.Get("ExcludeFromMultiply") != null)) { Config.Remove("ExcludeFromMultiply"); configremoval = true; } if ((Config.Get("Weapons") != null)) { Config.Remove("Weapons"); configremoval = true; }  foreach (var category in lootCategoryLimits.ToList()) { if (category.Key.ToString() == "All" || category.Key.ToString() == "Common" || category.Key.ToString() == "Search") { lootCategoryLimits.Remove(category.Key); configremoval = true; continue; } var cat = category.Value as Dictionary<string,object>; if (cat.ContainsKey("VanillaMultiplier")) { int tmp = (int)cat["VanillaMultiplier"]; cat.Add("LootMultiplier", tmp); cat.Remove("VanillaMultiplier"); configremoval = true; } }  if (!Changed && !configremoval) return; SaveConfig(); Changed = false; }  protected override void LoadDefaultConfig() { Config.Clear(); LoadVariables(); }  void Loaded() { al = this; LoadVariables(); InitConNames(); guidToPathCopy = new Dictionary<string, string>(GameManifest.guidToPath); }  void OnTerrainInitialized() { if (debugLogEnabled) LogToFile("population", $"{DateTime.Now.ToString()} - SERVERSTARTUP > fresh server startup detected", this); }  void OnServerInitialized() { if (initialized) return; int varCount = (Config["Generic"] as Dictionary<string, object>).Count; alVars = new ConsoleSystem.Command[varCount]; int i = 0; foreach (var conf in (Config["Generic"] as Dictionary<string, object>)) { alVars[i]	= new ConsoleSystem.Command { Name = conf.Key, Parent = "al", FullName = "al." +conf.Key.ToLower(), ServerAdmin = true, Arguments = "alphaloot", Description = alVarDescriptions.ContainsKey(conf.Key.ToLower()) && alVarDescriptions[conf.Key.ToLower()] != string.Empty ? $"| {alVarDescriptions[conf.Key.ToLower()]} |" : "| no description - contact the author |", Variable = true, GetOveride = (() => Config["Generic", conf.Key].ToString()), SetOveride = delegate(string str) { bool changed = false; TypeCode	typeCode = Convert.GetTypeCode(conf.Value); switch( typeCode ) { case TypeCode.Boolean: if (conf.Value.ToString().ToBool() !=  str.ToBool()) { Config["Generic", conf.Key] = str.ToBool(); changed = true; } break; case TypeCode.Single: if (conf.Value.ToString().ToFloat() !=  str.ToFloat()) { Config["Generic", conf.Key] = str.ToFloat(); changed = true; } break; case TypeCode.Int32: if (conf.Value.ToString().ToInt() !=  str.ToInt()) { Config["Generic", conf.Key] = str.ToInt(); changed = true; } break; default: break; } if (changed) { Config.Save(); manualReload = true; LoadConfig(); LoadVariables(); NextFrame(()=>ServerMgr.Instance.StartCoroutine(UpdateInternals(true))); } } }; i++; } foreach (var alCmd in alCmdDescriptions) { if (ConsoleSystem.Index.Server.Dict.ContainsKey("al."+alCmd.Key)) { ConsoleSystem.Index.Server.Dict["al."+alCmd.Key].Description = alCmd.Value; ConsoleSystem.Index.Server.Dict["al."+alCmd.Key].Arguments = "alphaloot"; } } foreach (var indexCmd in ConsoleSystem.Index.Server.Dict.Where(k => k.Key.StartsWith("al.") && (k.Value.Description == null || k.Value.Description == string.Empty))) { indexCmd.Value.Arguments = "alphaloot"; indexCmd.Value.Description = "no description - contact the author -"; } foreach (var alVar in alVars) ConsoleSystem.Index.Server.Dict[alVar.FullName.ToLower()] = alVar; ConsoleSystem.Index.All = ConsoleSystem.Index.Server.Dict.Values.ToArray<ConsoleSystem.Command>(); NextFrame(()=> ServerMgr.Instance.StartCoroutine(UpdateInternals(true))); }  void Unload() { if (Interface.Oxide.IsShuttingDown) return; ServerMgr.Instance.CancelInvoke(this.FixLoot); foreach (var cmd in alVars) ConsoleSystem.Index.Server.Dict.Remove(cmd.FullName.ToLower()); var objsa = UnityEngine.Object.FindObjectsOfType<AdminLootHandler>().ToList(); if (objsa.Count > 0) foreach (var obj in objsa) GameObject.Destroy(obj); }  void OnPluginLoaded(Plugin name) { if (initialized && enableFancyDropLoot && name.Name == "FancyDrop") { if (FancyDrop?.Call("getFancyDropTypes") == null) return; Dictionary<string,object> setupDropTypes = FancyDrop.Call("getFancyDropTypes") as Dictionary<string,object>; if (setupDropTypes != null && setupDropTypes.Count != 0) GetFancyDropLoot(setupDropTypes); } }  object OnLootSpawn(LootContainer container) { if (!initialized || !pluginEnabled || container == null || (!container.initialLootSpawn && !(container is SupplyDrop)) || (!(container is SupplyDrop) && container.OwnerID != 0uL) ) return null; if (CustomLootSpawns && excludeCustomLootSpawns && (bool)CustomLootSpawns.Call("IsLootBox", container.GetComponent<BaseEntity>())) return null; if (EventLoot && excludeEventLoot && (bool)EventLoot.Call("IsEventLootContainer", container.GetComponent<BaseEntity>())) return null; if (enableHeliLoadOut && container.ShortPrefabName == "heli_crate") { if (PopulateSpecial(container, false)) return true; } if (enableBradleyLoadOut && container.ShortPrefabName == "bradley_crate") { if (PopulateSpecial(container, false)) return true; } if (enableFancyDropLoot && container is SupplyDrop && FancyDrop) { if (blockPlayerItemInput && container.inventory != null) container.inventory.SetFlag(ItemContainer.Flag.NoItemInput, true); return null; } if (PopulateContainer(container, false)) return true; return null; }  void OnEntityKill(BaseNetworkable entity) { if (!initialized || !pluginEnabled || entity == null) return; if (enableHeliLoadOut && entity is BaseHelicopter) { timer.Once(1.0f, () => { rngHeli = new Random(); rngHeliList = new List<int>(); }); } if (enableBradleyLoadOut && entity is BradleyAPC) { timer.Once(1.0f, () => { rngBradley = new Random(); rngBradleyList = new List<int>(); }); } }  IEnumerator UpdateInternals(bool doLog = true, bool reHeli = false, bool reBradley = false, bool reFancy = false, ConsoleSystem.Arg arg = null) { ClearDictionarys(); SaveExportNames(); LoadAllContainers(); LoadItemRaritys(doLog); LoadLootFractions(doLog); LoadLootTables(doLog, arg); GetFancyDropLoot(new Dictionary<string, object>(), reFancy); GetHeliLoot(reHeli); GetBradleyLoot(reBradley); if (lootStackFixEnable) { FixLoot(); ServerMgr.Instance.InvokeRepeating(this.FixLoot, 1800f, 1800f); } GetItemSkins(arg); LoadGunConfig(); if (!pluginEnabled || Changed || firstSetup) { if (Changed) Config["Generic", "pluginEnabled"] = false; SaveConfig(); Changed = false; if (doLog) PrintWarningCl("Plugin running in passive mode. Activate by command 'al.enable'", arg); yield break; } foreach (var data in lootData) { if (!(bool)(lootContainers[data.Key] as Dictionary<string, object>)["Enabled"] || (enableBradleyLoadOut && data.Key == "bradley_crate") || (enableHeliLoadOut && data.Key == "heli_crate") || (enableFancyDropLoot && FancyDrop && FancyDrop.IsLoaded && data.Key == "supply_drop")) continue; Items.Add(data.Key, new List<string>[5]); Blueprints.Add(data.Key, new List<string>[5]); for (var i = 0; i < 5; ++i) { Items[data.Key][i] = new List<string>(); Blueprints[data.Key][i] = new List<string>(); } var limits = (Dictionary<string, object>)data.Value; foreach (var limit in limits.ToList()) { if (limit.Value is Dictionary<string, object>) { var testFields  = limit.Value as Dictionary<string, object>; if (!testFields.ContainsKey("Min") || !testFields.ContainsKey("Max")) { PrintWarningCl($"Item '{limit.Key}' of '{data.Key}' ignored by missing 'Min|Max'", arg); continue; } else if ((int)testFields["Min"] == 0 || (int)testFields["Max"] == 0) { PrintWarningCl($"Item '{limit.Key}' of '{data.Key}' ignored by having '0'", arg); continue; } } else if ((int)limit.Value < 1) { PrintWarningCl($"Item '{limit.Key}' of '{data.Key}' ignored by having '0'", arg); continue; } string name = limit.Key; bool isBP = name.EndsWith(".bp") || name.EndsWith(".blueprint") ? true : false; if (isBP) name = name.Replace(".bp", "").Replace(".blueprint", ""); ItemDefinition def = ItemManager.FindItemDefinition(name); if (def != null) { if (def.GetComponent<ItemModEntity>() != null && def.GetComponent<ItemModEntity>().entityPrefab != null && !guidToPathCopy.ContainsKey(def.GetComponent<ItemModEntity>().entityPrefab.guid)) continue; if (isBP && def.Blueprint != null && def.Blueprint.isResearchable) { { var r = rarityOverridesBlueprints.ContainsKey(name) ? (int)rarityOverridesBlueprints[name] : (int)def.rarity; if (!Blueprints[data.Key][alignBlueprintRarity ? 0 : r].Contains(name)) Blueprints[data.Key][alignBlueprintRarity ? 0 : r].Add(name); } } { var r = rarityOverridesItems.ContainsKey(name) ? (int)rarityOverridesItems[name] : (int)def.rarity; if (!isBP && !Items[data.Key][alignItemRarity ? 0 : r].Contains(name)) Items[data.Key][alignItemRarity ? 0 : r].Add(name); } } } totalItemWeight.Add(data.Key, 0); totalBlueprintWeight.Add(data.Key, 0); itemWeights.Add(data.Key, new int[5]); blueprintWeights.Add(data.Key, new int[5]); for (var i = 0; i < 5; ++i) { totalItemWeight[data.Key] += (itemWeights[data.Key][i] = ItemWeight(baseItemRarity, i) * Items[data.Key][i].Count); totalBlueprintWeight[data.Key] += (blueprintWeights[data.Key][i] = ItemWeight(baseItemRarity, i) * Blueprints[data.Key][i].Count); } } int populatedContainers = 0; if (debugLogEnabled) LogToFile("population", $"{DateTime.Now.ToString()} - START > Initial LootPopulation started", this); foreach (var container in BaseNetworkable.serverEntities.Where(p => p != null &&  p.GetComponent<BaseEntity>() != null && p is LootContainer).Cast<LootContainer>().ToList()) { if ((!container.initialLootSpawn && !(container is SupplyDrop)) || (!(container is SupplyDrop) && container.OwnerID != 0uL)) continue; if(excludeCustomLootSpawns && CustomLootSpawns && (bool)CustomLootSpawns?.Call("IsLootBox", container.GetComponent<BaseEntity>())) continue; if (excludeEventLoot && EventLoot && (bool)EventLoot?.Call("IsEventLootContainer", container.GetComponent<BaseEntity>())) continue; if (enableHeliLoadOut && container.ShortPrefabName == "heli_crate") { if (PopulateSpecial(container, true)) populatedContainers++; continue; } if (enableBradleyLoadOut && container.ShortPrefabName == "bradley_crate") { if (PopulateSpecial(container, true)) populatedContainers++; continue; } if (enableFancyDropLoot && container is SupplyDrop && FancyDrop) continue; if (PopulateContainer(container, true)) populatedContainers++; } if (debugLogEnabled) LogToFile("population", $"{DateTime.Now.ToString()} - STARTED > Initial LootPopulation done with '{populatedContainers}' containers", this); if (doLog) PutsCl($"Populated '{populatedContainers}' LootContainer with custom Loot.", arg); if (!initialized && extendedStatus) { var sb = new StringBuilder(); sb.AppendLine(); sb.AppendLine(" AlphaLoot extended status | extendedStatus (True)"); if (enableBradleyLoadOut) sb.AppendLine("  'enableBradleyLoadOut' (True) | using BradleyLoot.json for 'bradley_crate'"); else sb.AppendLine("  'enableBradleyLoadOut' (False) | using LootTables.json for 'bradley_crate'"); if (enableHeliLoadOut) sb.AppendLine("  'enableHeliLoadOut' (True) | using HeliLoot.json for 'heli_crate'"); else sb.AppendLine("  'enableHeliLoadOut' (False) | using LootTables.json for 'heli_crate'"); if (enableFancyDropLoot && FancyDrop) sb.AppendLine("  'enableFancyDropLoot' (True) | using FancyDropLoot.json for 'supply_drop'"); else sb.AppendLine("  'enableFancyDropLoot' (False) | using LootTables.json for 'supply_drop'"); sb.AppendLine("  For easy edit of these data-files, this is highly recommended > http://jsoneditoronline.org/ <"); sb.AppendLine("  Use 'NamesList.json' (read-only) for item lookup | or use 'al.searchitems'"); sb.AppendLine("  Find All main-config variables & commands | Srv: 'find alphaloot' | Cl: 'sv find alphaloot'"); PutsCl(sb.ToString(), arg); } initialized = true; yield return null; }  void PutsCl(string format, ConsoleSystem.Arg arg = null) { if (arg != null && arg.Connection != null) SendReply(arg, format); Puts(format); }  void PrintWarningCl(string format, ConsoleSystem.Arg arg = null) { if (arg != null && arg.Connection != null) SendReply(arg, format); PrintWarning(format); }  void SendReplyCl(ConsoleSystem.Arg arg, string format) { if (arg.Connection != null) SendReply(arg, format); Puts(format); }  void ClearDictionarys() { lootData.Clear(); lootContainers.Clear(); heliData.Clear(); bradleyData.Clear(); fancyDropData.Clear(); itemsDrop.Clear(); blueprintsDrop.Clear(); itemWeightsDrop.Clear(); blueprintWeightsDrop.Clear(); totalItemWeightDrop.Clear(); totalBlueprintWeightDrop.Clear(); Items.Clear(); Blueprints.Clear(); itemWeights.Clear(); blueprintWeights.Clear(); totalItemWeight.Clear(); totalBlueprintWeight.Clear(); newGameItems.Clear(); showNewGameItems.Clear(); rarityOverridesBlueprints.Clear(); rarityOverridesItems.Clear(); AllContainerTypes.Clear(); AllLootSpawns.Clear(); }  void GetItemSkins(ConsoleSystem.Arg arg = null) { if (skinsLoaded) return; foreach (var itemDef in ItemManager.GetItemDefinitions()) { List<ulong> skins; skins = new List<ulong> { 0 }; skins.AddRange(ItemSkinDirectory.ForItem(itemDef).Select(skin => Convert.ToUInt64(skin.id))); skinsCache.Add(itemDef.shortname, skins); } bool skinBoxEnabled = SkinBox && useSkinBoxSkins; skinsLoaded = true; if (includeWorkShopSkins && !skinBoxEnabled) { GetWorkshopSkins(arg); return; } if (skinBoxEnabled) { GetSkinBoxSkins(arg); return; } if (includeWorkShopSkins) { GetWorkshopSkins(arg); } }  void GetWorkshopSkins(ConsoleSystem.Arg arg = null) { int updated = 0; foreach (var shopskin in Rust.Workshop.Approved.All.Where(skin => skin.Skinnable.ItemName != null && skin.Skinnable.ItemName != "")) { if (!skinsCache.ContainsKey(shopskin.Skinnable.ItemName)) skinsCache[shopskin.Skinnable.ItemName] = new List<ulong>(); if (!skinsCache[shopskin.Skinnable.ItemName].Contains(shopskin.WorkshopdId)) { skinsCache[shopskin.Skinnable.ItemName].Add(shopskin.WorkshopdId); updated++; } } if (updated > 0) PutsCl($"SkinCache filled with '{updated}' skins", arg); }  void OnSkinCacheUpdate(Dictionary<string, LinkedList<ulong>> skinsCall, bool loading) { if (!initialized || !skinsLoaded || !useSkinBoxSkins) return; skinsCache = new Dictionary<string, List<ulong>>(); foreach (var skinList in (skinsCall as Dictionary<string, LinkedList<ulong>>)) { skinsCache.Add(skinList.Key, new List<ulong>()); foreach (var skin in skinList.Value as LinkedList<ulong>) skinsCache[skinList.Key].Add(skin); } int count = 0; int items = 0; foreach (var skin in skinsCache) { if (skin.Value.Count > 1) { count += skin.Value.Count-1; items++; } } if (loading) Puts($"Reveived '{items}' items from SkinBox with '{count}' skins at all"); else Puts($"Reveived SkinBox skins update"); }  void GetSkinBoxSkins(ConsoleSystem.Arg arg = null) { var skinsCall = SkinBox?.Call("getSkincache") ?? null; if (skinsCall == null || skinsCall is bool) { GetWorkshopSkins(); return; } skinsCache = new Dictionary<string, List<ulong>>(); foreach (var skinList in (skinsCall as Dictionary<string, LinkedList<ulong>>)) { skinsCache.Add(skinList.Key, new List<ulong>()); foreach (var skin in skinList.Value as LinkedList<ulong>) skinsCache[skinList.Key].Add(skin); } int count = 0; int items = 0; foreach (var skin in skinsCache) { if (skin.Value.Count > 1) { count += skin.Value.Count-1; items++; } } PutsCl($"Reveived '{items}' items from SkinBox with '{count}' skins at all", arg); }  object OnFancyDropCrate(Dictionary<string, object> cratesettings, bool internalCall = false) { if(!internalCall) if (!enableFancyDropLoot || !cratesettings.ContainsKey("droptype")) return null; string crateName = string.Empty; if (internalCall) crateName = "regular"; else crateName =(string)cratesettings["droptype"]; if (fancyDropData.ContainsKey(crateName)) { if ( ((fancyDropData[crateName] as Dictionary<string,object>)["ItemsList"] as Dictionary<string,object>).Count > 0) { var crateType = fancyDropData[crateName] as Dictionary<string,object>; var maxItemCount = (crateType["ItemsList"] as Dictionary<string,object>).Count; var itemCount = 6; if (crateType.ContainsKey("ItemMin") && crateType.ContainsKey("ItemMax")) { if ((int)crateType["ItemMin"] <= (int)crateType["ItemMax"]) itemCount = UnityEngine.Random.Range((int)crateType["ItemMin"], (int)crateType["ItemMax"]); else itemCount = UnityEngine.Random.Range((int)crateType["ItemMax"], (int)crateType["ItemMin"]); } if (itemCount > maxItemCount) itemCount = maxItemCount; var items = new List<Item>(); var itemNames = new List<string>(); var itemBlueprints = new List<int>(); var maxRetry = 10 * itemCount; int divider = 1; if (crateType.ContainsKey("ItemDivider")) divider = (int)crateType["ItemDivider"]; int conMaxBlueprintSpawns = (int)fancyDropLoot["CrateSettings","MaxBlueprintSpawns"]; for (int i = 0; i < itemCount; ++i) { if (maxRetry == 0) break; Item item = null; item = MightyRNGDrop(crateName, divider, itemCount, (bool)(itemBlueprints.Count >= conMaxBlueprintSpawns)); if (item == null) { --maxRetry; --i; continue; } if (itemNames.Contains(item.info.shortname) || (item.IsBlueprint() && itemBlueprints.Contains(item.blueprintTarget))) { item.Remove(0f); --maxRetry; --i; continue; } else if (item.IsBlueprint()) itemBlueprints.Add(item.blueprintTarget); else itemNames.Add(item.info.shortname); items.Add(item); if (!item.IsBlueprint() && item.info.category == ItemCategory.Weapon && weaponAmmoConfig.ContainsKey(item.info.shortname)) { var setup = weaponAmmoConfig[item.info.shortname] as Dictionary<string, object>; var magazine = (item.GetHeldEntity() as BaseProjectile).primaryMagazine; if ((int)setup["roundsWeaponAmount"] >= 0) magazine.contents = Math.Min(magazine.capacity, (int)setup["roundsWeaponAmount"]); var ammo = ItemManager.FindItemDefinition((string)setup["roundsWeaponType"]); if (ammo != null) magazine.ammoType = ammo; if ((bool)setup["xtraRoundsEnabled"]) { var xType = ItemManager.FindItemDefinition((string)setup["xtraRoundsType"]); if (xType != null) { var xAmmo = ItemManager.Create(xType, (int)setup["xtraRoundsAmount"]); if (xAmmo != null) items.Add(xAmmo); } } } } bool conLootFraction = (bool)fancyDropLoot["CrateSettings","LootFraction"]; int conScrapAmount = (int)fancyDropLoot["CrateSettings","ScrapAmount"]; int conScrapVariance = (int)fancyDropLoot["CrateSettings","ScrapVariance"]; if (conLootFraction) { foreach (Item current in items.ToList()) if (current.hasCondition) current.condition = UnityEngine.Random.Range(current.info.condition.foundCondition.fractionMin, current.info.condition.foundCondition.fractionMax) * current.info.condition.max; } if (conScrapAmount > 0) { int scrapCount = 0; if (conScrapVariance != 0) scrapCount = Mathf.RoundToInt(UnityEngine.Random.Range(Convert.ToSingle(Mathf.Min(conScrapAmount, conScrapAmount + conScrapVariance))*100f, Convert.ToSingle(Mathf.Max(conScrapAmount, conScrapAmount + conScrapVariance))*100f) / 100f); else scrapCount = conScrapAmount; Item item = ItemManager.Create(ItemManager.FindItemDefinition("scrap"), scrapCount, 0uL); items.Add(item); } return items; } } return null; }  void FixLoot() { var excludes = lootStackFixExclude.ConvertAll(obj => Convert.ToString(obj)); var spawns = UnityEngine.Object.FindObjectsOfType<LootContainer>().Where(c => !excludes.Contains(c.ShortPrefabName)).OrderBy(c => c.transform.position.x).ThenBy(c => c.transform.position.z).ThenBy(c => c.transform.position.z).ToList(); var count = spawns.Count(); var racelimit = count * count; var antirace = 0; var deleted = 0; for (var i = 0; i < count; i++) { var box = spawns[i]; var next = i + 1; var pos = new Vector2(box.transform.position.x, box.transform.position.z); if (++antirace > racelimit) return; while (next < count) { var box2 = spawns[next]; var pos2 = new Vector2(box2.transform.position.x, box2.transform.position.z); var distance = Vector2.Distance(pos, pos2); if (++antirace > racelimit) return; if (distance < lootStackFixRange) { spawns.RemoveAt(next); count--; if (box2.gameObject.GetComponent<SpawnPointInstance>()) box2.gameObject.GetComponent<SpawnPointInstance>().Invoke("OnDestroy", 0); (box2 as BaseEntity).Kill(); deleted++; } else break; } } if (deleted > 0) Puts($"Removed {deleted} stacked LootContainer."); }  Item MightyRNG(string type, int divider, int itemCount, bool blockBPs = false) { bool asBP = (rng.NextDouble() < blueprintProbability && !blockBPs); List<string> selectFrom; int limit = 0; string itemName; Item item; if (divider < 1) divider = 1; int maxRetry = 10 * itemCount; do { selectFrom = null; item = null; if (asBP) { var r = rng.Next(totalBlueprintWeight[type]); for (var i = 0; i < 5; ++i) { limit += blueprintWeights[type][i]; if (r < limit) { selectFrom = Blueprints[type][i]; break; } } } else { var r = rng.Next(totalItemWeight[type]); for (var i = 0; i < 5; ++i) { limit += itemWeights[type][i]; if (r < limit) { selectFrom = Items[type][i]; break; } } } if (selectFrom == null) { if (--maxRetry <= 0) break; continue; } itemName = selectFrom[rng.Next(0, selectFrom.Count)]; ItemDefinition itemDef =  ItemManager.FindItemDefinition(itemName); if (asBP && itemDef.Blueprint != null && itemDef.Blueprint.isResearchable) { var blueprintBaseDef = ItemManager.FindItemDefinition("blueprintbase"); item = ItemManager.Create(blueprintBaseDef, 1, 0uL); item.blueprintTarget = itemDef.itemid; } else { object limits; bool DropSkinned = false; if (lootCategoryLimits.TryGetValue(itemDef.category.ToString(), out limits)) DropSkinned = (bool)(limits as Dictionary<string, object>)["DropSkinned"]; if (DropSkinned && skinsCache[itemName].Count > 1) item = ItemManager.Create(itemDef, 1, skinsCache[itemName].GetRandom()); else item = ItemManager.CreateByName(itemName, 1); } if (item == null || item.info == null) continue; break; } while (true); if (item == null) return null; object itemLimit; if (!item.IsBlueprint() && (lootData[type] as Dictionary<string, object>).TryGetValue(item.info.shortname, out itemLimit)) { if ((itemLimit as Dictionary<string, object>) != null) { Dictionary<string, object> limits = itemLimit as Dictionary<string, object>; item.amount = UnityEngine.Random.Range(Math.Min((int)limits["Min"],(int)limits["Max"]), Math.Max((int)limits["Min"],(int)limits["Max"])); if (enableSkinIdFields && limits.ContainsKey("SkinId") && (int)limits["SkinId"] != 0) item.skin = Convert.ToUInt64(limits["SkinId"]); } else if ((int)itemLimit > 1) item.amount = UnityEngine.Random.Range(Mathf.CeilToInt(Convert.ToSingle(itemLimit) / divider), (int)itemLimit); } item.OnVirginSpawn(); return item; }  Item MightyRNGDrop(string type, int divider, int itemCount, bool blockBPs = false) { bool asBP = (rng.NextDouble() < fancyDropBpProbability && !blockBPs); List<string> selectFrom; int limit = 0; string itemName; Item item; if (divider < 1) divider = 1; int maxRetry = 10 * itemCount; do { selectFrom = null; item = null; if (asBP) { var r = rng.Next(totalBlueprintWeightDrop[type]); for (var i = 0; i < 5; ++i) { limit += blueprintWeightsDrop[type][i]; if (r < limit) { selectFrom = blueprintsDrop[type][i]; break; } } } else { var r = rng.Next(totalItemWeightDrop[type]); for (var i = 0; i < 5; ++i) { limit += itemWeightsDrop[type][i]; if (r < limit) { selectFrom = itemsDrop[type][i]; break; } } } if (selectFrom == null) { if (--maxRetry <= 0) break; continue; } itemName = selectFrom[rng.Next(0, selectFrom.Count)]; ItemDefinition itemDef =  ItemManager.FindItemDefinition(itemName); if (asBP && itemDef.Blueprint != null && itemDef.Blueprint.isResearchable) { var blueprintBaseDef = ItemManager.FindItemDefinition("blueprintbase"); item = ItemManager.Create(blueprintBaseDef, 1, 0uL); item.blueprintTarget = itemDef.itemid; } else { object limits; bool DropSkinned = false; if (lootCategoryLimits.TryGetValue(itemDef.category.ToString(), out limits)) DropSkinned = (bool)(limits as Dictionary<string, object>)["DropSkinned"]; if (DropSkinned && skinsCache[itemName].Count > 1) item = ItemManager.Create(itemDef, 1, skinsCache[itemName].GetRandom()); else item = ItemManager.CreateByName(itemName, 1); } if (item == null || item.info == null) continue; break; } while (true); if (item == null) return null; object itemLimit; if (!item.IsBlueprint() && ((fancyDropData[type] as Dictionary<string, object>)["ItemsList"] as Dictionary<string, object>).TryGetValue(item.info.shortname, out itemLimit)) { if ((itemLimit as Dictionary<string, object>) != null) { Dictionary<string, object> limits = itemLimit as Dictionary<string, object>; item.amount = UnityEngine.Random.Range(Math.Min((int)limits["Min"],(int)limits["Max"]), Math.Max((int)limits["Min"],(int)limits["Max"])); if (enableSkinIdFields && limits.ContainsKey("SkinId") && (int)limits["SkinId"] != 0) item.skin = Convert.ToUInt64(limits["SkinId"]); } else if ((int)itemLimit > 1) item.amount = UnityEngine.Random.Range(Mathf.CeilToInt(Convert.ToSingle(itemLimit) / divider), (int)itemLimit); } item.OnVirginSpawn(); return item; }  bool PopulateContainer(LootContainer container, bool isReload = true) { Dictionary<string, object> con; object containerobj; int lootitemcount = 0; if (lootContainers.TryGetValue(container.ShortPrefabName, out containerobj)) { con = containerobj as Dictionary<string, object>; if (!(bool)con["Enabled"]) { if (debugLogEnabled) LogToFile("population", $"{DateTime.Now.ToString()} - CANCELED > Setting for '{container.ShortPrefabName}' not active", this); return false; } if (isReload && !(bool)con["Repopulate"]) return false; object itemcount; if (lootData.TryGetValue(container.ShortPrefabName, out itemcount)) lootitemcount = (int)(itemcount as Dictionary<string, object>).Count(); else { if (debugLogEnabled) LogToFile("population", $"{DateTime.Now.ToString()} - CANCELED > no or too-few items in list for '{container.ShortPrefabName}'", this); return false; } } else { if (debugLogEnabled) LogToFile("population", $"{DateTime.Now.ToString()} - FAILED > container '{container.ShortPrefabName}' is not in loottable list", this); return false; } int itemCount = 0; if (con.ContainsKey("ItemsVariance") && (int)con["ItemsVariance"] != 0) itemCount = Mathf.RoundToInt(UnityEngine.Random.Range(Convert.ToSingle(Mathf.Min((int)con["Items"],(int)con["Items"] + (int)con["ItemsVariance"]))*100f, Convert.ToSingle(Mathf.Max((int)con["Items"],(int)con["Items"] + (int)con["ItemsVariance"]))*100f) / 100f); else itemCount = (int)con["Items"]; if (lootitemcount > 0 && itemCount > lootitemcount && lootitemcount < 36) itemCount = lootitemcount;   if (container.inventory == null) { container.inventory = new ItemContainer(); container.inventory.ServerInitialize(null, 36); container.inventory.GiveUID(); } else { while (container.inventory.itemList.Count > 0) { var item = container.inventory.itemList[0]; item.RemoveFromContainer(); item.Remove(0f); } container.inventory.capacity = 36; } if (blockPlayerItemInput) container.inventory.SetFlag(ItemContainer.Flag.NoItemInput, true); var items = new List<Item>(); var itemNames = new List<string>(); var itemBlueprints = new List<int>(); var maxRetry = 20; int divider = 1; if (con.ContainsKey("MinAmountDivider")) divider = (int)con["MinAmountDivider"]; for (int i = 0; i < itemCount; ++i) { if (maxRetry == 0) { break; } var item = MightyRNG(container.ShortPrefabName, divider, itemCount, (bool)(itemBlueprints.Count >= (int)con["MaxBlueprintSpawns"])); if (item == null) { --maxRetry; --i; continue; } if (itemNames.Contains(item.info.shortname) || (item.IsBlueprint() && itemBlueprints.Contains(item.blueprintTarget))) { item.Remove(0f); --maxRetry; --i; continue; } else if (item.IsBlueprint()) itemBlueprints.Add(item.blueprintTarget); else itemNames.Add(item.info.shortname); items.Add(item); if (!item.IsBlueprint() && item.info.category == ItemCategory.Weapon && weaponAmmoConfig.ContainsKey(item.info.shortname)) { var setup = weaponAmmoConfig[item.info.shortname] as Dictionary<string, object>; var magazine = (item.GetHeldEntity() as BaseProjectile).primaryMagazine; if ((int)setup["roundsWeaponAmount"] >= 0) magazine.contents = Math.Min(magazine.capacity, (int)setup["roundsWeaponAmount"]); var ammo = ItemManager.FindItemDefinition((string)setup["roundsWeaponType"]); if (ammo != null) magazine.ammoType = ammo; if ((bool)setup["xtraRoundsEnabled"]) { var xType = ItemManager.FindItemDefinition((string)setup["xtraRoundsType"]); if (xType != null) { var xAmmo = ItemManager.Create(xType, (int)setup["xtraRoundsAmount"]); if (xAmmo != null) items.Add(xAmmo); } } } } foreach (var item in items.Where(x => x != null && x.IsValid())) item.MoveToContainer(container.inventory, -1, false); if ((bool)con["LootFraction"]) foreach (Item current in container.inventory.itemList) if (current.hasCondition) current.condition = UnityEngine.Random.Range(current.info.condition.foundCondition.fractionMin, current.info.condition.foundCondition.fractionMax) * current.info.condition.max; if ((int)con["ScrapAmount"] > 0) { int scrapCount = 0; if (con.ContainsKey("ScrapVariance") && (int)con["ScrapVariance"] != 0) scrapCount = Mathf.RoundToInt(UnityEngine.Random.Range(Convert.ToSingle(Mathf.Min((int)con["ScrapAmount"],(int)con["ScrapAmount"] + (int)con["ScrapVariance"]))*100f, Convert.ToSingle(Mathf.Max((int)con["ScrapAmount"],(int)con["ScrapAmount"] + (int)con["ScrapVariance"]))*100f) / 100f); else scrapCount = (int)con["ScrapAmount"]; Item item = ItemManager.Create(ItemManager.FindItemDefinition("scrap"), scrapCount, 0uL); item.MoveToContainer(container.inventory, -1, false); } container.inventory.capacity = container.inventory.itemList.Count; if (container.inventory.itemList.Count < 7 && container.ShortPrefabName != "supply_drop") container.panelName = "crate"; else container.panelName = "generic"; container.inventory.MarkDirty(); if (debugLogEnabled) LogToFile("population", $"{DateTime.Now.ToString()} - SUCCESS > spawned '{container.inventory.capacity}' items in '{container}' > {ContentsStringHash(container.inventory)}", this); if (container is VisualStorageContainer) (container as VisualStorageContainer).PopulateLoot(); return true; }  bool PopulateSpecial(LootContainer container, bool isReload) { if (container == null) return false; string cName = container.ShortPrefabName; bool isHeli = false; bool isAPC = false; if (cName == "heli_crate") isHeli = true; if (cName == "bradley_crate") isAPC = true; if (!isHeli && !isAPC) return false; int index = 0; if (isHeli) { index = rngHeli.Next(heliData.Count); if (rngHeliList.Contains(index)) { NextFrame(()=>{ if (container) PopulateSpecial(container, isReload); }); return false; } rngHeliList.Add(index); } if (isAPC) { index = rngBradley.Next(bradleyData.Count); if (rngBradleyList.Contains(index)) { NextFrame(()=>{ if (container) PopulateSpecial(container, isReload); }); return false; } rngBradleyList.Add(index); } Dictionary<string, object> lootContent = null; bool conLootFraction = false; int conScrapAmount = 0; int conScrapVariance = 0; int conMinAmountDivider = 0; if (isHeli) { lootContent = heliData.ToArray()[index] as Dictionary<string, object>;  conLootFraction = (bool)heliLoot["CrateSettings","LootFraction"]; if (isReload && !(bool)heliLoot["CrateSettings","Repopulate"]) return false; conScrapAmount = (int)heliLoot["CrateSettings","ScrapAmount"]; conScrapVariance = (int)heliLoot["CrateSettings","ScrapVariance"]; if (!itemAmountMinMax) conMinAmountDivider = (int)heliLoot["CrateSettings","MinAmountDivider"];  } if (isAPC) { lootContent = bradleyData.ToArray()[index] as Dictionary<string, object>; if (isReload && !(bool)bradleyLoot["CrateSettings","Repopulate"]) return false; conLootFraction = (bool)bradleyLoot["CrateSettings","LootFraction"]; conScrapAmount = (int)bradleyLoot["CrateSettings","ScrapAmount"]; conScrapVariance = (int)bradleyLoot["CrateSettings","ScrapVariance"]; if (!itemAmountMinMax) conMinAmountDivider = (int)bradleyLoot["CrateSettings","MinAmountDivider"]; } int itemCount = lootContent.Count; if (itemCount == 0) return false; if (container.inventory == null) { container.inventory = new ItemContainer(); container.inventory.ServerInitialize(null, container.inventorySlots); container.inventory.GiveUID(); } else { while (container.inventory.itemList.Count > 0) { var item = container.inventory.itemList[0]; item.RemoveFromContainer(); item.Remove(0f); } container.inventory.capacity = container.inventorySlots; } if (blockPlayerItemInput) container.inventory.SetFlag(ItemContainer.Flag.NoItemInput, true); int divider = 1; if (!itemAmountMinMax) divider = conMinAmountDivider; if (divider < 1) divider = 1; foreach (var loot in lootContent.ToList()) { Item item; object limits; bool DropSkinned = false; string itemName = loot.Key; bool isBP = itemName.EndsWith(".blueprint") || itemName.EndsWith(".bp") ? true : false; if (isBP) itemName = itemName.Replace(".blueprint", "").Replace(".bp", ""); ItemDefinition itemDef =  ItemManager.FindItemDefinition(itemName); if (itemDef == null) continue; if (isBP && ( itemDef.Blueprint == null || !itemDef.Blueprint.isResearchable)) isBP = false; if (isBP) { var blueprintBaseDef = ItemManager.FindItemDefinition("blueprintbase"); item = ItemManager.Create(blueprintBaseDef, 1, 0uL); item.blueprintTarget = itemDef.itemid; } else { if (lootCategoryLimits.TryGetValue(itemDef.category.ToString(), out limits)) DropSkinned = (bool)(limits as Dictionary<string, object>)["DropSkinned"]; if (DropSkinned && skinsCache[itemName].Count > 1) item = ItemManager.CreateByName(itemName, 1, skinsCache[itemName].GetRandom()); else item = ItemManager.CreateByName(itemName, 1); } if (item == null || !item.IsValid()) continue; if (!item.IsBlueprint() && (loot.Value as Dictionary<string, object>) != null) { Dictionary<string, object> limit = loot.Value as Dictionary<string, object>; item.amount = UnityEngine.Random.Range((int)limit["Min"], (int)limit["Max"]); if (enableSkinIdFields && limit.ContainsKey("SkinId") && (int)limit["SkinId"] != 0) item.skin = Convert.ToUInt64(limit["SkinId"]); } else if (!item.IsBlueprint()) { int itemLimit = (int)loot.Value; if (itemLimit > 1) item.amount = UnityEngine.Random.Range(Mathf.CeilToInt(Convert.ToSingle(itemLimit) / divider), (int)itemLimit); } if (!item.IsBlueprint() && item.info.category == ItemCategory.Weapon && weaponAmmoConfig.ContainsKey(item.info.shortname)) { var setup = weaponAmmoConfig[item.info.shortname] as Dictionary<string, object>; var magazine = (item.GetHeldEntity() as BaseProjectile).primaryMagazine; if ((int)setup["roundsWeaponAmount"] >= 0) magazine.contents = Math.Min(magazine.capacity, (int)setup["roundsWeaponAmount"]); var ammo = ItemManager.FindItemDefinition((string)setup["roundsWeaponType"]); if (ammo != null) magazine.ammoType = ammo; } item.OnVirginSpawn(); item.MoveToContainer(container.inventory, -1, false); } if (conLootFraction) foreach (Item current in container.inventory.itemList) if (current.hasCondition) current.condition = UnityEngine.Random.Range(current.info.condition.foundCondition.fractionMin, current.info.condition.foundCondition.fractionMax) * current.info.condition.max; if (conScrapAmount > 0) { int scrapCount = 0; if (conScrapVariance != 0) scrapCount = Mathf.RoundToInt(UnityEngine.Random.Range(Convert.ToSingle(Mathf.Min(conScrapAmount, conScrapAmount + conScrapVariance))*100f, Convert.ToSingle(Mathf.Max(conScrapAmount, conScrapAmount + conScrapVariance))*100f) / 100f); else scrapCount = conScrapAmount; Item item = ItemManager.Create(ItemManager.FindItemDefinition("scrap"), scrapCount, 0uL); item.MoveToContainer(container.inventory, -1, false); } container.inventory.capacity = container.inventory.itemList.Count; if (container.inventory.capacity < 7) container.panelName = "crate"; else container.panelName = "generic"; container.inventory.MarkDirty(); if (debugLogEnabled) LogToFile("population", $"{DateTime.Now.ToString()} - SUCCESS > spawned '{container.inventory.capacity}' items in '{container}' > {ContentsStringHash(container.inventory)}", this); return true; }  string ContentsStringHash(ItemContainer itemCont) { string text = string.Empty; for (int i = 0; i < itemCont.capacity; i++) { global::Item slot = itemCont.GetSlot(i); if (slot != null) { text += slot.info.shortname; text += $"_x{slot.amount} "; } } return text; }  int ItemWeight(double baseRarity, int index) { return (int)(Math.Pow(baseRarity, 4 - index) * 1000); }  void LoadLootTables(bool doLog = true, ConsoleSystem.Arg arg = null) { try { lootTable = getFile("LootTables");} catch (JsonReaderException e) { PrintWarningCl($"JSON error in 'LootTables' > Line: {e.LineNumber} | {e.Path}", arg); pluginEnabled = false; return; } lootContainers = new Dictionary<string, object>(); lootData = new Dictionary<string, object>(); lootContainers = lootTable["LootContainer"] as Dictionary<string, object>; if (lootContainers == null) lootContainers = new Dictionary<string, object>(); lootData = lootTable["LootData"] as Dictionary<string, object>; if (lootData == null) lootData = new Dictionary<string, object>(); if (lootContainers.Count > 0 && lootData.Count > 0) { bool contRemoved = false; if (enableBradleyLoadOut && lootContainers.ContainsKey("bradley_crate")) { lootContainers.Remove("bradley_crate"); lootData.Remove("bradley_crate"); contRemoved = true; } if (enableHeliLoadOut && lootContainers.ContainsKey("heli_crate")) { lootContainers.Remove("heli_crate"); lootData.Remove("heli_crate"); contRemoved = true; } if (enableFancyDropLoot && FancyDrop && lootContainers.ContainsKey("supply_drop")) { lootContainers.Remove("supply_drop"); lootData.Remove("supply_drop"); contRemoved = true; } foreach (var con in lootContainers.ToList()) { if (!AllContainerTypes.ContainsKey(con.Key)) { if (AllContainerTypes.ContainsKey(con.Key.Trim())) { lootContainers.Add(con.Key.Trim(), con.Value); lootContainers.Remove(con.Key); contRemoved = true; } } } foreach (var lootprefab in AllContainerTypes) { if (lootprefab.Key.StartsWith("dm ") || lootprefab.Key.Contains("test") || lootContainers.ContainsKey(lootprefab.Key)) continue; LootContainer loot = GameManager.server.FindPrefab(AllContainerTypes[lootprefab.Key]).GetComponent<LootContainer>();  var container = new Dictionary<string, object>(); container.Add("Items", loot.maxDefinitionsToSpawn); if (loot.SpawnType == LootContainer.spawnType.ROADSIDE || loot.SpawnType == LootContainer.spawnType.TOWN || loot.SpawnType == LootContainer.spawnType.GENERIC) container.Add("ItemsVariance", 1); else container.Add("ItemsVariance", 0); container.Add("MaxBlueprintSpawns", 1); container.Add("Enabled", true); container.Add("UseMultiplier", true); container.Add("UsedMultiplier", 1); if (!itemAmountMinMax) container.Add("MinAmountDivider", 1); container.Add("ScrapAmount", loot.scrapAmount); container.Add("ScrapVariance", Mathf.CeilToInt(loot.scrapAmount / 2)); if (loot.SpawnType == LootContainer.spawnType.ROADSIDE || loot.SpawnType == LootContainer.spawnType.TOWN || loot.SpawnType == LootContainer.spawnType.GENERIC) container.Add("LootFraction", true); else container.Add("LootFraction", false); lootContainers.Add(loot.ShortPrefabName, container); if (AllLootSpawns.ContainsKey(lootprefab.Key)) GetLootSpawn(AllLootSpawns[lootprefab.Key], lootprefab.Key, (bool)(lootContainers[lootprefab.Key] as Dictionary<string, object>)["UseMultiplier"], (int)(lootContainers[lootprefab.Key] as Dictionary<string, object>)["UsedMultiplier"]); if (AllLootSlots.ContainsKey(lootprefab.Key)) GetLootSlots(AllLootSlots[lootprefab.Key], lootprefab.Key, (bool)(lootContainers[lootprefab.Key] as Dictionary<string, object>)["UseMultiplier"], (int)(lootContainers[lootprefab.Key] as Dictionary<string, object>)["UsedMultiplier"]); loot = null; contRemoved = true; } foreach (var con in lootContainers.ToList()) { var cont = lootContainers[con.Key] as Dictionary<string, object>; if (cont.ContainsKey("UseVanilla")) { bool tmpB = (bool)cont["UseVanilla"]; cont.Remove("UseVanilla"); cont.Add("UseMultiplier", tmpB); lootContainers[con.Key] = cont; contRemoved = true; } }  foreach (var con in lootContainers.ToList()) { var cont = lootContainers[con.Key] as Dictionary<string, object>; if (!cont.ContainsKey("Repopulate")) { bool notSet = con.Key == "heli_crate" || con.Key == "bradley_crate" || con.Key == "supply_drop" || con.Key == "codelockedhackablecrate"; cont.Add("Repopulate", !notSet); contRemoved = true; } }  if (newGameItems.Count > 0 ) foreach (var con in lootContainers.ToList()) { if (AllLootSpawns.ContainsKey(con.Key)) GetLootSpawn(AllLootSpawns[con.Key.ToString()], con.Key, (bool)(lootContainers[con.Key] as Dictionary<string, object>)["UseMultiplier"], (int)(lootContainers[con.Key] as Dictionary<string, object>)["UsedMultiplier"], true); if (AllLootSlots.ContainsKey(con.Key)) GetLootSlots(AllLootSlots[con.Key.ToString()], con.Key, (bool)(lootContainers[con.Key] as Dictionary<string, object>)["UseMultiplier"], (int)(lootContainers[con.Key] as Dictionary<string, object>)["UsedMultiplier"], true); } bool changedDivider = false; if (itemAmountMinMax) foreach (var con in lootContainers.ToList()) { if ((lootContainers[con.Key] as Dictionary<string, object>).ContainsKey("MinAmountDivider")) { (lootContainers[con.Key] as Dictionary<string, object>).Remove("MinAmountDivider"); changedDivider = true; } } else foreach (var con2 in lootContainers.ToList()) { if (!((lootContainers[con2.Key] as Dictionary<string, object>).ContainsKey("MinAmountDivider"))) { (lootContainers[con2.Key] as Dictionary<string, object>).Add("MinAmountDivider", 1); changedDivider = true; } } bool fractionAdded = false; foreach (var con in lootContainers.ToList()) { if (!((lootContainers[con.Key] as Dictionary<string, object>).ContainsKey("LootFraction"))) { LootContainer loot = GameManager.server.FindPrefab(AllContainerTypes[con.Key]).GetComponent<LootContainer>(); if (loot.SpawnType == LootContainer.spawnType.ROADSIDE || loot.SpawnType == LootContainer.spawnType.TOWN || loot.SpawnType == LootContainer.spawnType.GENERIC) (lootContainers[con.Key] as Dictionary<string, object>).Add("LootFraction", true); else (lootContainers[con.Key] as Dictionary<string, object>).Add("LootFraction", false); fractionAdded = true; loot = null; } } bool varianceAdded = false; foreach (var con in lootContainers.ToList()) { if (!(lootContainers[con.Key] as Dictionary<string, object>).ContainsKey("ItemsVariance")) { LootContainer loot = GameManager.server.FindPrefab(AllContainerTypes[con.Key]).GetComponent<LootContainer>(); if (loot.SpawnType == LootContainer.spawnType.ROADSIDE || loot.SpawnType == LootContainer.spawnType.TOWN || loot.SpawnType == LootContainer.spawnType.GENERIC) (lootContainers[con.Key] as Dictionary<string, object>).Add("ItemsVariance", 1); else (lootContainers[con.Key] as Dictionary<string, object>).Add("ItemsVariance", 0); varianceAdded = true; loot = null; } }  bool bpSpawnCountAdded = false; foreach (var con in lootContainers.ToList()) { if (!(lootContainers[con.Key] as Dictionary<string, object>).ContainsKey("MaxBlueprintSpawns")) { (lootContainers[con.Key] as Dictionary<string, object>).Add("MaxBlueprintSpawns", 1); bpSpawnCountAdded = true; } } bool scrapAdded = false; foreach (var con in lootContainers.ToList()) { if (!(lootContainers[con.Key] as Dictionary<string, object>).ContainsKey("ScrapAmount")) { LootContainer loot = GameManager.server.FindPrefab(AllContainerTypes[con.Key]).GetComponent<LootContainer>(); (lootContainers[con.Key] as Dictionary<string, object>).Add("ScrapAmount", loot.scrapAmount); scrapAdded = true; loot = null; } } bool scrapVarianceAdded = false; foreach (var con in lootContainers.ToList()) { if (!(lootContainers[con.Key] as Dictionary<string, object>).ContainsKey("ScrapVariance")) { LootContainer loot = GameManager.server.FindPrefab(AllContainerTypes[con.Key]).GetComponent<LootContainer>(); (lootContainers[con.Key] as Dictionary<string, object>).Add("ScrapVariance", Mathf.CeilToInt(loot.scrapAmount / 2)); scrapVarianceAdded = true; loot = null; } } bool itemDeleted = false; foreach (var data in lootData.ToList()) foreach (var limit in (data.Value as Dictionary<string, object>).ToList()) { string name = limit.Key; string trimName = name.Trim(); if (name != trimName) { object tmpData = (lootData[data.Key] as Dictionary<string, object>)[limit.Key]; name = trimName; (lootData[data.Key] as Dictionary<string, object>).Remove(limit.Key); (lootData[data.Key] as Dictionary<string, object>).Add(name, tmpData); itemDeleted = true; } bool isBP = name.EndsWith(".bp") || name.EndsWith(".blueprint") ? true : false; if (isBP) name = name.Replace(".bp", "").Replace(".blueprint", ""); var def = ItemManager.FindItemDefinition(name); if (def == null) { (lootData[data.Key] as Dictionary<string, object>).Remove(limit.Key); itemDeleted = true; continue; } } bool dataChanged = false; lootData = lootTable["LootData"] as Dictionary<string, object>; foreach (var con in lootData.ToList()) { if (itemAmountMinMax) { foreach (var options in (lootData[con.Key] as Dictionary<string, object>).ToList()) { if (!(options.Value is Dictionary<string, object>)) { object option = new Dictionary<string, object> { ["Min"] = (int)options.Value, ["Max"] = (int)options.Value }; if (enableSkinIdFields) (option as Dictionary<string, object>)["SkinId"] = 0uL; (lootData[con.Key] as Dictionary<string, object>)[options.Key] = option; dataChanged = true; } else if (enableSkinIdFields) { var option2 = options.Value as Dictionary<string, object>; if (!option2.ContainsKey("SkinId")) { option2["SkinId"] = 0uL; (lootData[con.Key] as Dictionary<string, object>)[options.Key] = option2; dataChanged = true; } }  } } else { foreach (var options in (lootData[con.Key] as Dictionary<string, object>).ToList()) { if ((options.Value is Dictionary<string, object>)) { int value = (int)(options.Value as Dictionary<string, object>)["Max"]; (lootData[con.Key] as Dictionary<string, object>)[options.Key] = value; dataChanged = true; } } } } if (dataChanged) { lootTable.Set("LootData", lootData); lootTable.Save(); } if (doLog) PutsCl($"Lootdata loaded for {lootContainers.Count()} LootContainer.", arg); if (itemDeleted || bpSpawnCountAdded || contRemoved || varianceAdded || scrapAdded || scrapVarianceAdded || fractionAdded || changedDivider || newGameItems.Count > 0) lootTable.Save(); lootTable.Clear(); return; } if (lootContainers.Count() == 0) { if (manualReload) { Changed = true; manualReload = false; pluginEnabled = false; } var containers = new Dictionary<string, object>(); foreach (var lootprefab in AllContainerTypes) { LootContainer loot = GameManager.server.FindPrefab(AllContainerTypes[lootprefab.Key]).GetComponent<LootContainer>(); if (loot.ShortPrefabName.StartsWith("dm ") || loot.ShortPrefabName.Contains("test")) continue; var container = new Dictionary<string, object>(); container.Add("Items", loot.maxDefinitionsToSpawn); if (loot.SpawnType == LootContainer.spawnType.ROADSIDE || loot.SpawnType == LootContainer.spawnType.TOWN || loot.SpawnType == LootContainer.spawnType.GENERIC) container.Add("ItemsVariance", 1); else container.Add("ItemsVariance", 0); container.Add("MaxBlueprintSpawns", 1); container.Add("Enabled", true); container.Add("UseMultiplier", true); container.Add("UsedMultiplier", 1); if (!itemAmountMinMax) container.Add("MinAmountDivider", 1); container.Add("ScrapAmount", loot.scrapAmount); container.Add("ScrapVariance", Mathf.CeilToInt(loot.scrapAmount / 2)); if (loot.SpawnType == LootContainer.spawnType.ROADSIDE || loot.SpawnType == LootContainer.spawnType.TOWN || loot.SpawnType == LootContainer.spawnType.GENERIC) container.Add("LootFraction", true); else container.Add("LootFraction", false); container.Add("Repopulate", !(loot.ShortPrefabName == "heli_crate" || loot.ShortPrefabName == "bradley_crate" || loot.ShortPrefabName == "supply_drop")); containers.Add(loot.ShortPrefabName, container); loot = null; } lootTable.Set("LootContainer", containers); lootContainers = new Dictionary<string, object>(containers); lootTable.Save(); firstSetup = true; } if (lootData.Count() == 0) { foreach (var con in lootContainers.ToList()) { if (AllLootSpawns.ContainsKey(con.Key)) GetLootSpawn(AllLootSpawns[con.Key], con.Key, (bool)(lootContainers[con.Key] as Dictionary<string, object>)["UseMultiplier"], (int)(lootContainers[con.Key] as Dictionary<string, object>)["UsedMultiplier"]); if (AllLootSlots.ContainsKey(con.Key)) GetLootSlots(AllLootSlots[con.Key], con.Key, (bool)(lootContainers[con.Key] as Dictionary<string, object>)["UseMultiplier"], (int)(lootContainers[con.Key] as Dictionary<string, object>)["UsedMultiplier"]); } lootTable.Set("LootData", lootData); lootTable.Save(); } else { bool dataChanged = false; lootData = lootTable["LootData"] as Dictionary<string, object>; foreach (var con in lootData.ToList()) { if (itemAmountMinMax) { (lootContainers[con.Key] as Dictionary<string, object>)["MinAmountDivider"] = -1; (lootContainers[con.Key] as Dictionary<string, object>).Remove("MinAmountDivider"); foreach (var options in lootData[con.Key] as Dictionary<string, object>) { if (!(options.Value is Dictionary<string, object>)) { object option = new Dictionary<string, object> { ["Min"] = (int)options.Value, ["Max"] = (int)options.Value }; if (enableSkinIdFields) (option as Dictionary<string, object>)["SkinId"] = 0uL; (lootData[con.Key] as Dictionary<string, object>)[options.Key] = option; dataChanged = true; } else if (enableSkinIdFields) { var option2 = options.Value as Dictionary<string, object>; if (!option2.ContainsKey("SkinId")) { option2["SkinId"] = 0uL; (lootData[con.Key] as Dictionary<string, object>)[options.Key] = option2; dataChanged = true; } } } } else { if((lootContainers[con.Key] as Dictionary<string, object>).ContainsKey("MinAmountDivider")) (lootContainers[con.Key] as Dictionary<string, object>)["MinAmountDivider"] = 1; else (lootContainers[con.Key] as Dictionary<string, object>).Add("MinAmountDivider", 1); foreach (var options in (lootData[con.Key] as Dictionary<string, object>).ToList()) { if ((options.Value is Dictionary<string, object>)) { int value = (int)(options.Value as Dictionary<string, object>)["Max"]; (lootData[con.Key] as Dictionary<string, object>)[options.Key] = value; dataChanged = true; } } } } if (dataChanged) { lootTable.Set("LootData", lootData); lootTable.Save(); } } if (doLog) PutsCl($"Lootdata generated for {(lootTable["LootContainer"] as Dictionary<string, object>).Count()} LootContainer.", arg); lootTable.Clear(); }  void GetLootSlots(LootContainer.LootSpawnSlot[] lootSlots, string main, bool mainvanilla = false, int mainmultipy = 1, bool addonly = false) { for (int i = 0; i < lootSlots.Length; i++) GetLootSpawn(lootSlots[i].definition, main, mainvanilla, mainmultipy, addonly); }  void GetLootSpawn(LootSpawn lootSpawn, string main, bool mainvanilla = false, int mainmultipy = 1, bool addonly = false) { if (lootSpawn.subSpawn != null && lootSpawn.subSpawn.Length > 0) { foreach (var entry in lootSpawn.subSpawn) GetLootSpawn(entry.category, main, mainvanilla, mainmultipy, addonly); return; } if (lootSpawn.items != null && lootSpawn.items.Length > 0) { if (!lootData.ContainsKey(main)) lootData.Add(main, new Dictionary<string, object>()); foreach (var amount in lootSpawn.items) { object options = 0; if (mainvanilla) { int multiplier = mainmultipy; if (multiplier <= 1) multiplier = 1; options = GetAmounts(amount, multiplier); } else { object limits; if (lootCategoryLimits.TryGetValue(amount.itemDef.category.ToString(), out limits)) { if ((int)(limits as Dictionary<string, object>)["LootMultiplier"] > 1) options = GetAmounts(amount, (int)(limits as Dictionary<string, object>)["LootMultiplier"]); else options = GetAmounts(amount); } else options = GetAmounts(amount); } string itemName = amount.itemDef.shortname; if (amount.itemDef.spawnAsBlueprint) itemName += ".blueprint"; if (!(lootData[main] as Dictionary<string, object>).ContainsKey(itemName)) { if (addonly) { if (newGameItems.Contains(itemName) || newGameItems.Contains(amount.itemDef.shortname)) (lootData[main] as Dictionary<string, object>).Add(itemName, options); } else { (lootData[main] as Dictionary<string, object>).Add(itemName, options); } } } } }  void GetFancyDropLoot(Dictionary<string, object> setupDropTypes, bool recreate = false, int forcedMulti = -1) { try { fancyDropLoot = getFile("FancyDropLoot"); if (!enableFancyDropLoot) { fancyDropLoot.Clear(); fancyDropLoot.Save(); return; } } catch (JsonReaderException e) { PrintWarning($"JSON error in 'FancyDropLoot' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } fancyDropData = new Dictionary<string,object>(); fancyDropData = fancyDropLoot["DropTypes"] as Dictionary<string,object>; if (recreate || fancyDropData == null) fancyDropData = new Dictionary<string,object>(); if (recreate || fancyDropData == null || fancyDropData.Count == 0) { fancyDropData = new Dictionary<string,object>(); if (forcedMulti != -1) { fancyDropLoot["CrateSettings","UsedMultiplier"] = forcedMulti; fancyDropLoot["CrateSettings","ScrapAmount"] = GameManager.server.FindPrefab("assets/prefabs/misc/supply drop/supply_drop.prefab").GetComponent<LootContainer>().scrapAmount * forcedMulti; fancyDropLoot["CrateSettings","ScrapVariance"] = Mathf.CeilToInt( (int)fancyDropLoot["CrateSettings","ScrapAmount"] / 2); } if (setupDropTypes == null || setupDropTypes.Count == 0) { if (FancyDrop && FancyDrop.Call("getFancyDropTypes") != null) { var call = FancyDrop.Call("getFancyDropTypes"); setupDropTypes = new Dictionary<string,object>(); setupDropTypes  = (Dictionary<string, object>)call; } if (setupDropTypes == null || setupDropTypes.Count == 0) return; } LootContainer loot = GameManager.server.FindPrefab("assets/prefabs/misc/supply drop/supply_drop.prefab").GetComponent<LootContainer>(); fancyDropLootSpawn = new Dictionary<string,object>(); if (fancyDropLoot["CrateSettings","UsedMultiplier"] == null) fancyDropLoot["CrateSettings","UsedMultiplier"] = 1; if (loot.LootSpawnSlots.Length > 0) { for (int i = 0; i < loot.LootSpawnSlots.Length; i++) GetFancyDropLootSpawn(loot.LootSpawnSlots[i].definition, loot.ShortPrefabName, true, forcedMulti == -1 ? (int)fancyDropLoot["CrateSettings","UsedMultiplier"] : forcedMulti); } else GetFancyDropLootSpawn(loot.lootDefinition, loot.ShortPrefabName, true, forcedMulti == -1 ? (int)fancyDropLoot["CrateSettings","UsedMultiplier"] : forcedMulti); foreach (var dropType in setupDropTypes.ToList()) { var settings = setupDropTypes[dropType.Key] as Dictionary<string,object>; var dropcontent = new Dictionary<string,object>(); dropcontent["ItemMin"] = (int)settings["minItems"]; dropcontent["ItemMax"] = (int)settings["maxItems"]; if (!itemAmountMinMax) dropcontent["ItemDivider"] = (int)settings["itemDivider"];  dropcontent["ItemsList"] = new Dictionary<string,object>(fancyDropLootSpawn); fancyDropData.Add(dropType.Key, dropcontent); } loot = null; fancyDropLootSpawn.Clear(); fancyDropLoot.Set("DropTypes", fancyDropData); fancyDropLoot.Save(); } itemsDrop.Clear(); blueprintsDrop.Clear(); itemWeightsDrop.Clear(); blueprintWeightsDrop.Clear(); totalItemWeightDrop.Clear(); bool dataChanged = false; foreach (var data in fancyDropData.ToList()) { var values = (Dictionary<string, object>)data.Value; var key = data.Key; if (itemAmountMinMax && values.ContainsKey("ItemDivider")) { ((fancyDropData as Dictionary<string, object>)[key] as Dictionary<string, object>).Remove("ItemDivider"); dataChanged = true; } if (!itemAmountMinMax && !values.ContainsKey("ItemDivider")) { ((fancyDropData as Dictionary<string, object>)[key] as Dictionary<string, object>).Add("ItemDivider", 2); dataChanged = true; } itemsDrop.Add(key, new List<string>[5]); blueprintsDrop.Add(key, new List<string>[5]); for (var i = 0; i < 5; ++i) { itemsDrop[key][i] = new List<string>(); blueprintsDrop[key][i] = new List<string>(); } var limits = new Dictionary<string, object>(); limits = (Dictionary<string, object>)values["ItemsList"]; foreach (var limit in limits.ToList()) { if (limit.Value is Dictionary<string, object>) { var testFields  = limit.Value as Dictionary<string, object>; if (!testFields.ContainsKey("Min") || !testFields.ContainsKey("Max")) { PrintWarning($"Item '{limit.Key}' of FancyDropLoot ignored by missing 'Min|Max'"); continue; } else if ((int)testFields["Min"] == 0 || (int)testFields["Max"] == 0) { PrintWarning($"Item '{limit.Key}' of FancyDropLoot ignored by having '0'"); continue; } if (enableSkinIdFields && !testFields.ContainsKey("SkinId")) { testFields["SkinId"] = 0uL; (limits as Dictionary<string, object>)[limit.Key] = testFields; dataChanged = true; } } else if ((int)limit.Value < 1) { PrintWarning($"Item '{limit.Key}' of FancyDropLoot ignored by having '0'"); continue; } if (!itemAmountMinMax && limit.Value is Dictionary<string, object>) { int value = (int)(limit.Value as Dictionary<string, object>)["Max"]; (limits as Dictionary<string, object>)[limit.Key] = value; dataChanged = true; } else if (itemAmountMinMax && !(limit.Value is Dictionary<string, object>)) { object option = new Dictionary<string, object> { ["Min"] = (int)limit.Value, ["Max"] = (int)limit.Value }; if (enableSkinIdFields) (option as Dictionary<string, object>)["SkinId"] = 0uL; (limits as Dictionary<string, object>)[limit.Key] = option; dataChanged = true; } string name = limit.Key; bool isBP = name.EndsWith(".bp") || name.EndsWith(".blueprint") ? true : false; if (isBP) name = name.Replace(".bp", "").Replace(".blueprint", ""); ItemDefinition def = ItemManager.FindItemDefinition(name); if (def != null) { if (def.GetComponent<ItemModEntity>() != null && def.GetComponent<ItemModEntity>().entityPrefab != null && !guidToPathCopy.ContainsKey(def.GetComponent<ItemModEntity>().entityPrefab.guid)) continue; if (isBP && def.Blueprint != null && def.Blueprint.isResearchable) { { var r = rarityOverridesBlueprints.ContainsKey(name) ? (int)rarityOverridesBlueprints[name] : (int)def.rarity; if (!blueprintsDrop[data.Key][alignBlueprintRarity ? 0 : r].Contains(name)) blueprintsDrop[data.Key][alignBlueprintRarity ? 0 : r].Add(name); } } { var r = rarityOverridesItems.ContainsKey(name) ? (int)rarityOverridesItems[name] : (int)def.rarity; if (!isBP && !itemsDrop[data.Key][alignItemRarity ? 0 : r].Contains(name)) itemsDrop[data.Key][alignItemRarity ? 0 : r].Add(name); } }  } totalItemWeightDrop[key] = 0; totalBlueprintWeightDrop[key] = 0; itemWeightsDrop.Add(key, new int[5]); blueprintWeightsDrop.Add(key, new int[5]); for (var i = 0; i < 5; ++i) { totalItemWeightDrop[key] += (itemWeightsDrop[key][i] = ItemWeight(baseItemRarity, i) * itemsDrop[key][i].Count); totalBlueprintWeightDrop[key] += (blueprintWeightsDrop[key][i] = ItemWeight(baseItemRarity, i) * blueprintsDrop[key][i].Count); } } if (fancyDropLoot["BlueprintProbability"] != null) fancyDropBpProbability = Convert.ToDouble(fancyDropLoot["BlueprintProbability"]); else { fancyDropLoot["BlueprintProbability"] = 0.11; dataChanged = true; } if (fancyDropLoot["CrateSettings","LootFraction"] == null) { fancyDropLoot["CrateSettings","LootFraction"] = false; dataChanged = true; } if (fancyDropLoot["CrateSettings","ScrapAmount"] == null) { fancyDropLoot["CrateSettings","ScrapAmount"] = GameManager.server.FindPrefab("assets/prefabs/misc/supply drop/supply_drop.prefab").GetComponent<LootContainer>().scrapAmount; dataChanged = true; } if (fancyDropLoot["CrateSettings","ScrapVariance"] == null) { fancyDropLoot["CrateSettings","ScrapVariance"] = Mathf.CeilToInt( (int)fancyDropLoot["CrateSettings","ScrapAmount"] / 2); dataChanged = true; } if (fancyDropLoot["CrateSettings","UsedMultiplier"] == null) { fancyDropLoot["CrateSettings","UsedMultiplier"] = 1; dataChanged = true; } if (fancyDropLoot["CrateSettings","MaxBlueprintSpawns"] == null) { fancyDropLoot["CrateSettings","MaxBlueprintSpawns"] = 1; dataChanged = true; } if (dataChanged) { fancyDropLoot.Set("DropTypes", fancyDropData); fancyDropLoot.Save(); } }  void GetFancyDropLootSpawn(LootSpawn lootSpawn, string main, bool mainvanilla = false, int mainmultipy = 1) { if (lootSpawn.subSpawn != null && lootSpawn.subSpawn.Length > 0) { foreach (var entry in lootSpawn.subSpawn) GetFancyDropLootSpawn(entry.category, main, mainvanilla, mainmultipy); return; } if (lootSpawn.items != null && lootSpawn.items.Length > 0) { foreach (var amount in lootSpawn.items) { object options = 0; if (mainvanilla) { int multiplier = mainmultipy; if (multiplier <= 1) multiplier = 1; options = GetAmounts(amount, multiplier); } else { object limits; if (lootCategoryLimits.TryGetValue(amount.itemDef.category.ToString(), out limits)) { if ((int)(limits as Dictionary<string, object>)["LootMultiplier"] > 1) options = GetAmounts(amount, (int)(limits as Dictionary<string, object>)["LootMultiplier"]); else options = GetAmounts(amount); } else options = GetAmounts(amount); } string itemName = amount.itemDef.shortname; if (amount.itemDef.spawnAsBlueprint) itemName += ".blueprint"; if (!fancyDropLootSpawn.ContainsKey(itemName)) fancyDropLootSpawn.Add(itemName, options); } } }  void GetHeliLoot(bool recreate = false, int forcedMulti = -1) { try { heliLoot = getFile("HeliLoot"); if (!enableHeliLoadOut) { heliLoot.Clear(); heliLoot.Save(); return; } } catch (JsonReaderException e) { PrintWarning($"JSON error in 'HeliLoot' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } List<object> heliDataPre = new List<object>(); heliDataPre = heliLoot["LoadOut"] as List<object>; if (recreate || heliDataPre == null) heliDataPre = new List<object>(); if (recreate || heliDataPre.Count == 0) { heliData = new List<object>(); if (forcedMulti != -1) { heliLoot["CrateSettings","UsedMultiplier"] = forcedMulti; heliLoot["CrateSettings","ScrapAmount"] = GameManager.server.FindPrefab("assets/prefabs/npc/patrol helicopter/heli_crate.prefab").GetComponent<LootContainer>().scrapAmount * forcedMulti; heliLoot["CrateSettings","ScrapVariance"] = Mathf.CeilToInt( (int)heliLoot["CrateSettings","ScrapAmount"] / 2); } LootContainer loot = GameManager.server.FindPrefab("assets/prefabs/npc/patrol helicopter/heli_crate.prefab").GetComponent<LootContainer>(); if (heliLoot["CrateSettings","UsedMultiplier"] == null) heliLoot["CrateSettings","UsedMultiplier"] = 1; GetHeliLootSpawn(loot.lootDefinition, loot.ShortPrefabName, true, forcedMulti == -1 ? (int)heliLoot["CrateSettings","UsedMultiplier"] : forcedMulti); loot = null; heliDataPre = new List<object>(heliData); heliLoot.Set("LoadOut", heliDataPre); heliLoot.Save(); } bool dataChanged = false; foreach (var setData in heliDataPre.ToList()) { foreach (var set in (setData as Dictionary<string, object>).ToList()) { if ((set.Value is Dictionary<string, object>)) { var testFields  = set.Value as Dictionary<string, object>; if (!testFields.ContainsKey("Min") || !testFields.ContainsKey("Max")) { (setData as Dictionary<string, object>).Remove(set.Key); PrintWarning($"Item '{set.Key}' of HeliLoot ignored by missing 'Min|Max'"); continue; } else if ((int)testFields["Min"] == 0 || (int)testFields["Max"] == 0) { (setData as Dictionary<string, object>).Remove(set.Key); PrintWarning($"Item '{set.Key}' of HeliLoot ignored by having '0'"); continue; } if (enableSkinIdFields && !testFields.ContainsKey("SkinId")) { testFields["SkinId"] = 0uL; (setData as Dictionary<string, object>)[set.Key] = testFields; dataChanged = true; } } else if ((int)set.Value < 1) { PrintWarning($"Item '{set.Key}' of HeliLoot ignored by having '0'"); continue; } } if (!itemAmountMinMax) { foreach (var set in (setData as Dictionary<string, object>).ToList()) { if ((set.Value is Dictionary<string, object>)) { int value = (int)(set.Value as Dictionary<string, object>)["Max"]; (setData as Dictionary<string, object>)[set.Key] = value; dataChanged = true; } } } else { foreach (var set in (setData as Dictionary<string, object>).ToList()) { if (!(set.Value is Dictionary<string, object>)) { object option = new Dictionary<string, object> { ["Min"] = (int)set.Value, ["Max"] = (int)set.Value }; if (enableSkinIdFields) (option as Dictionary<string, object>)["SkinId"] = 0uL; (setData as Dictionary<string, object>)[set.Key] = option; dataChanged = true; } } } } if (heliLoot["CrateSettings","CratesToSpawn"] != null) { int crates = (int)heliLoot["CrateSettings","CratesToSpawn"]; if (crates > 0) { /*if (crates > heliDataPre.ToList().Count) crates = heliDataPre.ToList().Count;*/ GameManager.server.FindPrefab("assets/prefabs/npc/patrol helicopter/patrolhelicopter.prefab").GetComponent<BaseHelicopter>().maxCratesToSpawn = crates; /*Debug.Log(">> "+crates); Debug.Log(">> "+heliDataPre.ToList().Count);*/ } } else { heliLoot["CrateSettings","CratesToSpawn"] = GameManager.server.FindPrefab("assets/prefabs/npc/patrol helicopter/patrolhelicopter.prefab").GetComponent<BaseHelicopter>().maxCratesToSpawn; dataChanged = true; } if (heliLoot["CrateSettings","LootFraction"] == null) { heliLoot["CrateSettings","LootFraction"] = false; dataChanged = true; } if (heliLoot["CrateSettings","ScrapAmount"] == null) { heliLoot["CrateSettings","ScrapAmount"] = GameManager.server.FindPrefab("assets/prefabs/npc/patrol helicopter/heli_crate.prefab").GetComponent<LootContainer>().scrapAmount; dataChanged = true; } if (heliLoot["CrateSettings","ScrapVariance"] == null) { heliLoot["CrateSettings","ScrapVariance"] = Mathf.CeilToInt( (int)heliLoot["CrateSettings","ScrapAmount"] / 2); dataChanged = true; } if (heliLoot["CrateSettings","UsedMultiplier"] == null) { heliLoot["CrateSettings","UsedMultiplier"] = 1; dataChanged = true; } if (heliLoot["CrateSettings","Repopulate"] == null) { heliLoot["CrateSettings","Repopulate"] = false; dataChanged = true; } if (!itemAmountMinMax && heliLoot["CrateSettings","MinAmountDivider"] == null) { heliLoot["CrateSettings","MinAmountDivider"] = 1; dataChanged = true; } if (itemAmountMinMax && heliLoot["CrateSettings","MinAmountDivider"] != null) { (heliLoot.Get("CrateSettings") as Dictionary<string, object>).Remove("MinAmountDivider"); dataChanged = true; } if (heliLoot["CratesToSpawn"] != null) { heliLoot.Remove("CratesToSpawn"); dataChanged = true; } heliData = new List<object>(heliDataPre); if (dataChanged) { heliLoot.Set("LoadOut", heliDataPre); heliLoot.Save(); heliDataPre.Clear(); } }  void GetHeliLootSpawn(LootSpawn lootSpawn, string main, bool mainvanilla = false, int mainmultipy = 1) { if (lootSpawn.subSpawn != null && lootSpawn.subSpawn.Length > 0) { foreach (var entry in lootSpawn.subSpawn) GetHeliLootSpawn(entry.category, main, mainvanilla, mainmultipy); return; } if (lootSpawn.items != null && lootSpawn.items.Length > 0) { var content = new Dictionary<string, object>(); foreach (var amount in lootSpawn.items) { object options = 0; if (mainvanilla) { int multiplier = mainmultipy; if (multiplier <= 1) multiplier = 1; options = GetAmounts(amount, multiplier); } else { object limits; if (lootCategoryLimits.TryGetValue(amount.itemDef.category.ToString(), out limits)) { if ((int)(limits as Dictionary<string, object>)["LootMultiplier"] > 1) options = GetAmounts(amount, (int)(limits as Dictionary<string, object>)["LootMultiplier"]); else options = GetAmounts(amount); } else options = GetAmounts(amount); } string itemName = amount.itemDef.shortname; if (amount.itemDef.spawnAsBlueprint) itemName += ".blueprint"; content.Add(itemName, options); } heliData.Add(content); } }  static string GetConName(string i) => !string.IsNullOrEmpty(i) ? new string(i.Select(x =>(x >= 'a' && x <= 'z') ? (char)((x - 'a' + 13) % 26 + 'a') : (x >= 'A' && x <= 'Z') ? (char)((x - 'A' + 13) % 26 + 'A') : x).ToArray()) : i;  void GetBradleyLoot(bool recreate = false, int forcedMulti = -1) { try { bradleyLoot = getFile("BradleyLoot"); if (!enableBradleyLoadOut) { bradleyLoot.Clear(); bradleyLoot.Save(); return; } } catch (JsonReaderException e) { PrintWarning($"JSON error in 'BradleyLoot' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } List<object> bradleyDataPre = new List<object>(); bradleyDataPre = bradleyLoot["LoadOut"] as List<object>; if (recreate || bradleyDataPre == null) bradleyDataPre = new List<object>(); if (recreate || bradleyDataPre.Count == 0) { bradleyData = new List<object>(); if (forcedMulti != -1) { bradleyLoot["CrateSettings","UsedMultiplier"] = forcedMulti; bradleyLoot["CrateSettings","ScrapAmount"] = GameManager.server.FindPrefab("assets/prefabs/npc/m2bradley/bradley_crate.prefab").GetComponent<LootContainer>().scrapAmount * forcedMulti; bradleyLoot["CrateSettings","ScrapVariance"] = Mathf.CeilToInt( (int)bradleyLoot["CrateSettings","ScrapAmount"] / 2); }LootContainer loot = GameManager.server.FindPrefab("assets/prefabs/npc/m2bradley/bradley_crate.prefab").GetComponent<LootContainer>(); if (bradleyLoot["CrateSettings","UsedMultiplier"] == null) bradleyLoot["CrateSettings","UsedMultiplier"] = 1; if (loot.LootSpawnSlots?.Length > 0){ for (int i = 0; i < loot.LootSpawnSlots.Length; i++) { GetBradleyLootSpawn(loot.LootSpawnSlots[i].definition, loot.ShortPrefabName, true, forcedMulti == -1 ? (int)bradleyLoot["CrateSettings", "UsedMultiplier"] : forcedMulti);}} loot = null; bradleyDataPre = new List<object>(bradleyData); bradleyLoot.Set("LoadOut", bradleyDataPre); bradleyLoot.Save(); } bool dataChanged = false; foreach (var setData in bradleyDataPre.ToList()) { foreach (var set in (setData as Dictionary<string, object>).ToList()) { if ((set.Value is Dictionary<string, object>)) { var testFields  = set.Value as Dictionary<string, object>; if (!testFields.ContainsKey("Min") || !testFields.ContainsKey("Max")) { (setData as Dictionary<string, object>).Remove(set.Key); PrintWarning($"Item '{set.Key}' of BradleyLoot ignored by missing 'Min|Max'"); continue; } else if ((int)testFields["Min"] == 0 || (int)testFields["Max"] == 0) { (setData as Dictionary<string, object>).Remove(set.Key); PrintWarning($"Item '{set.Key}' of BradleyLoot ignored by having '0'"); continue; } if (enableSkinIdFields && !testFields.ContainsKey("SkinId")) { testFields["SkinId"] = 0uL; (setData as Dictionary<string, object>)[set.Key] = testFields; dataChanged = true; } } else if ((int)set.Value < 1) { PrintWarning($"Item '{set.Key}' of BradleyLoot ignored by having '0'"); continue; } } if (!itemAmountMinMax) { foreach (var set in (setData as Dictionary<string, object>).ToList()) { if ((set.Value is Dictionary<string, object>)) { int value = (int)(set.Value as Dictionary<string, object>)["Max"]; (setData as Dictionary<string, object>)[set.Key] = value; dataChanged = true; } } } else { foreach (var set in (setData as Dictionary<string, object>).ToList()) { if (!(set.Value is Dictionary<string, object>)) { object option = new Dictionary<string, object> { ["Min"] = (int)set.Value, ["Max"] = (int)set.Value }; if (enableSkinIdFields) (option as Dictionary<string, object>)["SkinId"] = 0uL; (setData as Dictionary<string, object>)[set.Key] = option; dataChanged = true; } } } } if (bradleyLoot["CrateSettings","CratesToSpawn"] != null) { int crates = (int)bradleyLoot["CrateSettings","CratesToSpawn"]; if (crates > 0) GameManager.server.FindPrefab("assets/prefabs/npc/m2bradley/bradleyapc.prefab").GetComponent<BradleyAPC>().maxCratesToSpawn = crates; } else { bradleyLoot["CrateSettings","CratesToSpawn"] = GameManager.server.FindPrefab("assets/prefabs/npc/m2bradley/bradleyapc.prefab").GetComponent<BradleyAPC>().maxCratesToSpawn; dataChanged = true; } if (bradleyLoot["CrateSettings","LootFraction"] == null) { bradleyLoot["CrateSettings","LootFraction"] = false; dataChanged = true; } if (bradleyLoot["CrateSettings","ScrapAmount"] == null) { bradleyLoot["CrateSettings","ScrapAmount"] = GameManager.server.FindPrefab("assets/prefabs/npc/m2bradley/bradley_crate.prefab").GetComponent<LootContainer>().scrapAmount; dataChanged = true; } if (bradleyLoot["CrateSettings","ScrapVariance"] == null) { bradleyLoot["CrateSettings","ScrapVariance"] = Mathf.CeilToInt( (int)bradleyLoot["CrateSettings","ScrapAmount"] / 2); dataChanged = true; } if (bradleyLoot["CrateSettings","UsedMultiplier"] == null) { bradleyLoot["CrateSettings","UsedMultiplier"] = 1; dataChanged = true; } if (bradleyLoot["CrateSettings","Repopulate"] == null) { bradleyLoot["CrateSettings","Repopulate"] = false; dataChanged = true; } if (!itemAmountMinMax && bradleyLoot["CrateSettings","MinAmountDivider"] == null) { bradleyLoot["CrateSettings","MinAmountDivider"] = 1; dataChanged = true; } if (itemAmountMinMax && bradleyLoot["CrateSettings","MinAmountDivider"] != null) { (bradleyLoot.Get("CrateSettings") as Dictionary<string, object>).Remove("MinAmountDivider"); dataChanged = true; } if (bradleyLoot["CratesToSpawn"] != null) { bradleyLoot.Remove("CratesToSpawn"); dataChanged = true; } bradleyData = new List<object>(bradleyDataPre); if (dataChanged) { bradleyLoot.Set("LoadOut", bradleyDataPre); bradleyLoot.Save(); bradleyDataPre.Clear(); } }  void GetBradleyLootSpawn(LootSpawn lootSpawn, string main, bool mainvanilla = false, int mainmultipy = 1) { if (lootSpawn.subSpawn != null && lootSpawn.subSpawn.Length > 0) { foreach (var entry in lootSpawn.subSpawn) GetBradleyLootSpawn(entry.category, main, mainvanilla, mainmultipy); return; } if (lootSpawn.items != null && lootSpawn.items.Length > 0) { var content = new Dictionary<string, object>(); foreach (var amount in lootSpawn.items) { object options = 0; if (mainvanilla) { int multiplier = mainmultipy; if (multiplier <= 1) multiplier = 1;  options = GetAmounts(amount, multiplier); } else { object limits; if (lootCategoryLimits.TryGetValue(amount.itemDef.category.ToString(), out limits)) { if ((int)(limits as Dictionary<string, object>)["LootMultiplier"] > 1) options = GetAmounts(amount, (int)(limits as Dictionary<string, object>)["LootMultiplier"]); else options =GetAmounts(amount); } else options = GetAmounts(amount); } string itemName = amount.itemDef.shortname; if (amount.itemDef.spawnAsBlueprint) itemName += ".blueprint"; content.Add(itemName, options); } bradleyData.Add(content); } }  object GetAmounts(ItemAmount amount, int mul = 1) { object options = 0; if (amount.itemDef.isWearable || (amount.itemDef.condition.enabled && amount.itemDef.GetComponent<ItemModDeployable>() == null && !multiplyConditionedItems)) mul = 1; if (itemAmountMinMax) { options = new Dictionary<string, object> { ["Min"] = (int)amount.amount * mul, ["Max"] = (amount as ItemAmountRanged).maxAmount > 0f && (amount as ItemAmountRanged).maxAmount > amount.amount ? (int)(amount as ItemAmountRanged).maxAmount * mul : (int)amount.amount * mul }; if (enableSkinIdFields) (options as Dictionary<string, object>)["SkinId"] = 0uL; } else options = (int)amount.amount * mul; return options; }  void LoadItemRaritys(bool doLog = true) { bool changed = false; bool isNewProtocol = (renewRaritysNewProtocol && oldProtocol > 0 && oldProtocol != Rust.Protocol.network) ? true : false; rarityOverridesItems = null; rarityOverridesBlueprints = null; try { itemRaritys = getFile("ItemRaritys"); } catch (JsonReaderException e) { PrintWarning($"JSON error in 'ItemRaritys' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } if (isNewProtocol || itemRaritys["ItemRaritys"] == null) { var items = new Dictionary<string, object>(); foreach (var item in ItemManager.GetItemDefinitions()) items.Add(item.shortname, item.rarity); itemRaritys.Set("ItemRaritys", items); itemRaritys.Save(); } else { foreach (var item in (itemRaritys["ItemRaritys"] as Dictionary<string, object>).ToList()) { if (ItemManager.FindItemDefinition(item.Key) == null) { (itemRaritys["ItemRaritys"] as Dictionary<string, object>).Remove(item.Key); changed = true; } else { if ((int)item.Value < 0) { (itemRaritys["ItemRaritys"] as Dictionary<string, object>)[item.Key] = 0; changed = true; } else if ((int)item.Value > 4) { (itemRaritys["ItemRaritys"] as Dictionary<string, object>)[item.Key] = 4; changed = true; } } } foreach (var item in ItemManager.GetItemDefinitions()) { if (!(itemRaritys["ItemRaritys"] as Dictionary<string, object>).ContainsKey(item.shortname)) { (itemRaritys["ItemRaritys"] as Dictionary<string, object>).Add(item.shortname, item.rarity); changed = true; } } if (changed) itemRaritys.Save(); } rarityOverridesItems = itemRaritys["ItemRaritys"] as Dictionary<string, object>;  if (isNewProtocol || itemRaritys["ItemBlueprintRaritys"] == null) { var blueprints = new Dictionary<string, object>(); foreach (var bp in ItemManager.GetBlueprints()) blueprints.Add(bp.targetItem.shortname, bp.rarity); itemRaritys.Set("ItemBlueprintRaritys", blueprints); itemRaritys.Save(); } else { foreach (var bp in (itemRaritys["ItemBlueprintRaritys"] as Dictionary<string, object>).ToList()) { ItemDefinition def = ItemManager.FindItemDefinition(bp.Key); if (def != null && ItemManager.FindBlueprint(ItemManager.FindItemDefinition(bp.Key)) == null) { (itemRaritys["ItemBlueprintRaritys"] as Dictionary<string, object>).Remove(bp.Key); changed = true; } else { if ((int)bp.Value < 0) { (itemRaritys["ItemBlueprintRaritys"] as Dictionary<string, object>)[bp.Key] = 0; changed = true; } else if ((int)bp.Value > 4) { (itemRaritys["ItemBlueprintRaritys"] as Dictionary<string, object>)[bp.Key] = 4; changed = true; } } } foreach (var bp in ItemManager.GetBlueprints()) { if (!(itemRaritys["ItemBlueprintRaritys"] as Dictionary<string, object>).ContainsKey(bp.targetItem.shortname)) { (itemRaritys["ItemBlueprintRaritys"] as Dictionary<string, object>).Add(bp.targetItem.shortname, bp.rarity); changed = true; } } if (changed) itemRaritys.Save(); } rarityOverridesBlueprints = itemRaritys["ItemBlueprintRaritys"] as Dictionary<string, object>; itemRaritys.Clear(); if (isNewProtocol) Puts($"Loaded default rarities for new protocol number '{Rust.Protocol.network}'..."); }  void LoadLootFractions(bool doLog = true) { bool changed = false; fractionOverrides = null; try { itemLootFractions = getFile("LootFractions"); } catch (JsonReaderException e) { PrintWarning($"JSON error in 'LootFractions' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } if (itemLootFractions["FoundContitions"] == null) { var items = new Dictionary<string, object>(); foreach (var item in ItemManager.GetItemDefinitions().Where(i => i.condition.enabled)) { items.Add(item.shortname, new Dictionary<string, float> { ["fractionMin"] = item.condition.foundCondition.fractionMin, ["fractionMax"] = item.condition.foundCondition.fractionMax }); } itemLootFractions.Set("FoundContitions", items); itemLootFractions.Save(); } else { fractionOverrides = itemLootFractions["FoundContitions"] as Dictionary<string, object>; foreach (var item in (itemLootFractions["FoundContitions"] as Dictionary<string, object>).ToList()) { if (ItemManager.FindItemDefinition(item.Key) == null) { (itemLootFractions["FoundContitions"] as Dictionary<string, object>).Remove(item.Key); changed = true; } else { var readData = item.Value as Dictionary<string, object>; var itemDef = ItemManager.FindItemDefinition(item.Key); itemDef.condition.foundCondition.fractionMin = Convert.ToSingle(readData["fractionMin"]); itemDef.condition.foundCondition.fractionMax = Convert.ToSingle(readData["fractionMax"]); } } foreach (var item in ItemManager.GetItemDefinitions().Where(i => i.condition.enabled)) { if (!(itemLootFractions["FoundContitions"] as Dictionary<string, object>).ContainsKey(item.shortname)) { fractionOverrides.Add(item.shortname, new Dictionary<string, float> { ["fractionMin"] = item.condition.foundCondition.fractionMin, ["fractionMax"] = item.condition.foundCondition.fractionMax }); changed = true; } } if (changed) { itemLootFractions.Set("FoundContitions", fractionOverrides); itemLootFractions.Save(); } } itemLootFractions.Clear(); }  void LoadGunConfig() { weaponAmmoConfig = (Dictionary<string, object>)Config["WeaponSpawnSetup"]; if (weaponAmmoConfig != null && weaponAmmoConfig.Count() > 0) { var chkweapons = ItemManager.GetItemDefinitions().Where(p => p.category == ItemCategory.Weapon); foreach (var weapon in chkweapons) { if (!guidToPathCopy.ContainsKey(weapon.GetComponent<ItemModEntity>().entityPrefab.guid)) continue; if (weaponAmmoConfig.ContainsKey(weapon.shortname)) continue; var item = ItemManager.Create(weapon); if (item.GetHeldEntity() is BaseProjectile) { Dictionary<string, object> wData = new Dictionary<string, object>(); wData.Add("xtraRoundsEnabled", false); wData.Add("roundsWeaponAmount", weapon.GetComponent<ItemModEntity>().entityPrefab.Get().GetComponent<BaseProjectile>().primaryMagazine.contents); wData.Add("roundsWeaponType", weapon.GetComponent<ItemModEntity>().entityPrefab.Get().GetComponent<BaseProjectile>().primaryMagazine.ammoType.shortname); wData.Add("xtraRoundsAmount", weapon.GetComponent<ItemModEntity>().entityPrefab.Get().GetComponent<BaseProjectile>().primaryMagazine.definition.builtInSize); wData.Add("xtraRoundsType", weapon.GetComponent<ItemModEntity>().entityPrefab.Get().GetComponent<BaseProjectile>().primaryMagazine.ammoType.shortname); weaponAmmoConfig.Add(weapon.shortname, wData); } item.Remove(0f); } Config["WeaponSpawnSetup"] = weaponAmmoConfig; Config.Save(); return; } else { weaponAmmoConfig = new Dictionary<string, object>(); var weapons = ItemManager.GetItemDefinitions().Where(p => p.category == ItemCategory.Weapon); foreach (var weapon in weapons) { if (!guidToPathCopy.ContainsKey(weapon.GetComponent<ItemModEntity>().entityPrefab.guid)) continue; var item = ItemManager.CreateByName(weapon.shortname); if (item.GetHeldEntity() is BaseProjectile) { Dictionary<string, object> wData = new Dictionary<string, object>(); wData.Add("xtraRoundsEnabled", false); wData.Add("roundsWeaponAmount", weapon.GetComponent<ItemModEntity>().entityPrefab.Get().GetComponent<BaseProjectile>().primaryMagazine.contents); wData.Add("roundsWeaponType", weapon.GetComponent<ItemModEntity>().entityPrefab.Get().GetComponent<BaseProjectile>().primaryMagazine.ammoType.shortname); wData.Add("xtraRoundsAmount", weapon.GetComponent<ItemModEntity>().entityPrefab.Get().GetComponent<BaseProjectile>().primaryMagazine.definition.builtInSize); wData.Add("xtraRoundsType", weapon.GetComponent<ItemModEntity>().entityPrefab.Get().GetComponent<BaseProjectile>().primaryMagazine.ammoType.shortname); weaponAmmoConfig.Add(weapon.shortname, wData); } item.Remove(0f); } Config["WeaponSpawnSetup"] = weaponAmmoConfig; Config.Save(); } }  void LoadAllContainers() { var filter = Oxide.Game.Rust.RustExtension.Filter.ToList(); filter.Add("[BUNDLE] Not found in bundle"); Oxide.Game.Rust.RustExtension.Filter = filter.ToArray(); var allTypes = Resources.FindObjectsOfTypeAll<GameObject>().Where(lc => lc.GetComponent<LootContainer>() != null).GroupBy(l => l.GetComponent<LootContainer>().ShortPrefabName).Select(g => g.First()).ToList(); filter = Oxide.Game.Rust.RustExtension.Filter.ToList(); filter.Remove("[BUNDLE] Not found in bundle"); Oxide.Game.Rust.RustExtension.Filter = filter.ToArray(); LootContainer loot = null; foreach (var allType in allTypes) { loot = allType.GetComponent<LootContainer>(); if (loot == null || loot.ShortPrefabName == string.Empty || loot.PrefabName == string.Empty) continue; if (AllContainerTypes.ContainsKey(loot.ShortPrefabName)) continue; if (enableBradleyLoadOut && loot.ShortPrefabName == "bradley_crate") continue; if (enableHeliLoadOut && loot.ShortPrefabName == "heli_crate") continue; if (enableFancyDropLoot && loot.ShortPrefabName == "supply_drop" && FancyDrop) continue; if (loot.lootDefinition == null) if (loot.LootSpawnSlots.Length == 0) continue; AllContainerTypes[loot.ShortPrefabName] = loot.PrefabName; if (!AllLootSpawns.ContainsKey(loot.ShortPrefabName) && loot.lootDefinition != null) AllLootSpawns[loot.ShortPrefabName] = loot.lootDefinition; if (!AllLootSlots.ContainsKey(loot.ShortPrefabName) && loot.LootSpawnSlots.Length > 0) AllLootSlots[loot.ShortPrefabName] = loot.LootSpawnSlots; } loot = null; }  [ConsoleCommand("al.reload")] void consoleReload(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; manualReload = true; LoadConfig(); LoadVariables(); NextFrame(()=>ServerMgr.Instance.StartCoroutine(UpdateInternals(arg : arg))); }  [ConsoleCommand("al.enable")] void consoleEnable(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (pluginEnabled && (bool)Config["Generic", "pluginEnabled"]) { if (firstSetup) { firstSetup = false; NextFrame(() => { ServerMgr.Instance.StartCoroutine(UpdateInternals(arg : arg)); SendReplyCl(arg, "Plugin is now active and running"); }); return; } SendReplyCl(arg, "Plugin already active and running"); firstSetup = false; Changed = false; return; } LoadConfig(); LoadVariables(); Config["Generic", "pluginEnabled"] = true; pluginEnabled = true; SaveConfig(); firstSetup = false; NextFrame(() => { ServerMgr.Instance.StartCoroutine(UpdateInternals(arg : arg)); SendReplyCl(arg, "Plugin is now active and running"); }); }  [ConsoleCommand("al.disable")] void consoleDisable(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (!pluginEnabled && !(bool)Config["Generic", "pluginEnabled"]) { SendReplyCl(arg, "Plugin already disabled"); return; } LoadConfig(); LoadVariables(); Config["Generic", "pluginEnabled"] = false; pluginEnabled = false; SaveConfig(); SendReplyCl(arg, "Plugin is now disabled"); }  [ConsoleCommand("al.repopulateloot")] void consoleRepopulate(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (!pluginEnabled) { SendReply(arg, "Plugin is disabled by config"); return; } int populatedContainers = 0; NextFrame(()=> { foreach (var container in UnityEngine.Object.FindObjectsOfType<LootContainer>().ToList()) { if (enableHeliLoadOut && container.ShortPrefabName == "heli_crate") { if (PopulateSpecial(container, true)) populatedContainers++; continue; } if (enableBradleyLoadOut && container.ShortPrefabName == "bradley_crate") { if (PopulateSpecial(container, true)) populatedContainers++; continue; } if (enableFancyDropLoot && container is SupplyDrop && FancyDrop) continue; if (PopulateContainer(container, true)) populatedContainers++; } SendReply(arg, $"Repopulated '{populatedContainers}' LootContainer"); }); }  [ConsoleCommand("al.rarityreload")] void consoleRarityReload(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; LoadItemRaritys(); SendReply(arg, $"New raritys will be active after running 'al.reload'"); }  [ConsoleCommand("al.rarityset")] void consoleRaritySet(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || arg.Args.Length <= 1 || arg.Args.Length > 2) { SendReply(arg, "Example: al.rarityset <name> <x|rarity-num> "); return; } ItemDefinition def = null; if (arg.Args != null && arg.Args.Length > 1) { def = ItemManager.FindItemDefinition(arg.Args[0]); if (def == null) { SendReply(arg, $"Item \"{arg.Args[0]}\" not found"); return; } int num = -1; if (arg.Args.Length > 1) if (!int.TryParse(arg.Args[1], out num)) { SendReply(arg, $"Set a full number for the rarity (0..4)"); return; } if (rarityOverridesItems.ContainsKey(arg.Args[0])) rarityOverridesItems[arg.Args[0]] = num; else rarityOverridesItems.Add(arg.Args[0], num); try { itemRaritys = getFile("ItemRaritys"); } catch (JsonReaderException e) { PrintWarning($"JSON error in 'ItemRaritys' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } itemRaritys.Set("ItemRaritys", rarityOverridesItems); itemRaritys.Set("ItemBlueprintRaritys", rarityOverridesBlueprints); itemRaritys.Save(); itemRaritys.Clear(); SendReply(arg, $"The new rarity will be active after running 'al.reload'"); } }  [ConsoleCommand("al.raritysetbp")] void consoleRaritySetBp(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || arg.Args.Length <= 1 || arg.Args.Length > 2) { SendReply(arg, "Example: al.raritysetbp <name> <x|rarity-num> "); return; } ItemBlueprint defBP = null; if (arg.Args != null && arg.Args.Length > 1) { defBP = ItemManager.FindBlueprint(ItemManager.FindItemDefinition(arg.Args[0])); if (defBP == null) { SendReply(arg, $"Item \"{arg.Args[0]}\" not found"); return; } int num = -1; if (arg.Args.Length > 1) if (!int.TryParse(arg.Args[1], out num)) { SendReply(arg, $"Set a full number for the rarity (0..4)"); return; } if (rarityOverridesBlueprints.ContainsKey(arg.Args[0])) rarityOverridesBlueprints[arg.Args[0]] = num; else rarityOverridesBlueprints.Add(arg.Args[0], num); try { itemRaritys = getFile("ItemRaritys"); } catch (JsonReaderException e) { PrintWarning($"JSON error in 'ItemRaritys' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } itemRaritys.Set("ItemRaritys", rarityOverridesItems); itemRaritys.Set("ItemBlueprintRaritys", rarityOverridesBlueprints); itemRaritys.Save(); itemRaritys.Clear(); SendReply(arg, $"The new rarity will be active after running 'al.reload'"); } }  void InitConNames() => Author = GetConName("ShWvXhEn");  [ConsoleCommand("al.lootreset")] void consoleLootReset(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; string data = string.Empty; if (arg.Args == null || arg.Args.Length < 1) { SendReply(arg, "\nWill reset/recalculate itemlists to their defaults based on any given 'UsedMultiplier's\nYou need to provide 'all', 'tables', 'heli', 'bradley' or 'fancy'"); return; } data = arg.Args[0]; try { lootTable = getFile("LootTables"); } catch (JsonReaderException e) { PrintWarning($"JSON error in 'LootTables' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } if (data == "all" || data == "tables") { var lootcont = lootTable.Get("LootContainer"); lootTable.Clear(); lootTable.Set("LootContainer", lootcont); lootTable.Save(); LoadConfig(); LoadVariables(); pluginEnabled = false; Config["Generic", "pluginEnabled"] = false; Config.Save(); } NextFrame(()=> { if (data == "all") { ServerMgr.Instance.StartCoroutine(UpdateInternals(true, true, true, true, arg : arg)); SendReply(arg, $"All loot contents successfully recreated"); } else if (data == "tables") { ServerMgr.Instance.StartCoroutine(UpdateInternals(true, arg : arg)); SendReply(arg, $"LootTables successfully recreated"); } else if (data == "heli") { GetHeliLoot(true); SendReply(arg, $"HeliLoot successfully recreated"); } else if (data == "bradley") { GetBradleyLoot(true); SendReply(arg, $"BradleyLoot successfully recreated"); } else if (data == "fancy") { GetFancyDropLoot(new Dictionary<string, object>(), true); SendReply(arg, $"FancyDropLoot successfully recreated"); } else SendReply(arg, "You need to provide 'all', 'tables', 'heli', 'bradley' or 'fancy'"); }); }  [ConsoleCommand("al.lootmultiplier")] void consoleLootMultiplier(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; string data = string.Empty; if (arg.Args == null || arg.Args.Length < 2 ) { SendReply(arg, "Usage: lootmultiplier <x> <all | tables | heli | bradley | fancy> | Multiplies the default loot by 'x'"); return; } int num = -1; int.TryParse(arg.Args[0], out num); if (num < 1) { SendReply(arg, "The multiplier must be a full number and greater then zero"); return; } data = arg.Args[1];  if (data == "tables" || data == "all") { try { lootTable = getFile("LootTables"); } catch (JsonReaderException e) { PrintWarningCl($"JSON error in 'LootTables' > Line: {e.LineNumber} | {e.Path}", arg); pluginEnabled = false; return; } var lootcont = lootTable.Get("LootContainer") as Dictionary <string,object>; if (data == "all") { if (enableHeliLoadOut) GetHeliLoot(true, num); if (enableBradleyLoadOut) GetBradleyLoot(true, num); if (FancyDrop && enableFancyDropLoot) GetFancyDropLoot(new Dictionary<string, object>(), true, num); } foreach (var cont in lootcont) { (lootcont[cont.Key] as Dictionary <string,object>)["UseMultiplier"] = true; (lootcont[cont.Key] as Dictionary <string,object>)["UsedMultiplier"] = num; LootContainer loot = GameManager.server.FindPrefab(AllContainerTypes[cont.Key]).GetComponent<LootContainer>(); (lootcont[cont.Key] as Dictionary<string, object>)["ScrapAmount"] = loot.scrapAmount * num; (lootcont[cont.Key] as Dictionary<string, object>)["ScrapVariance"] = Mathf.CeilToInt(loot.scrapAmount * num / 2); loot = null; } lootTable.Clear(); lootTable.Set("LootContainer", lootcont); lootTable.Save(); if (data == "all") SendReplyCl(arg, $"All LootTables successfully recreated"); else SendReplyCl(arg, $"LootTables.json successfully recreated"); LoadConfig(); LoadVariables(); NextFrame(()=> ServerMgr.Instance.StartCoroutine(UpdateInternals(true, arg : arg))); } else if (data == "heli") { if (!enableHeliLoadOut) { SendReply(arg, $"Aborted. HeliLoadOut not enabled", arg); return; } GetHeliLoot(true, num); SendReply(arg, $"HeliLoot successfully multiplied by '{num}' and being activated"); } else if (data == "bradley") { if (!enableBradleyLoadOut) { SendReply(arg, $"Aborted. BradleyLoadOut not enabled"); return; } GetBradleyLoot(true, num); SendReply(arg, $"BradleyLoot successfully multiplied by '{num}' and being activated"); } else if (data == "fancy") { if (!FancyDrop || (FancyDrop && !enableFancyDropLoot) || (!FancyDrop && enableFancyDropLoot)) { SendReply(arg, $"Aborted. FancyDropLoot not enabled"); return; } GetFancyDropLoot(new Dictionary<string, object>(), true, num); SendReply(arg, $"FancyDropLoot successfully multiplied by '{num}' and being activated");  } else SendReply(arg, "You need to provide 'all', 'tables', 'heli', 'bradley' or 'fancy'"); }  [ConsoleCommand("al.searchitems")] void consoleSearchItems(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || arg.Args.Length != 1) { SendReply(arg, "Usage: searchitems <partial name|itemid>"); return; } string searchFor = arg.Args[0].ToLower(); int count = 0; TextTable textTable = new TextTable(); textTable.AddColumn("Shortname"); textTable.AddColumn("Displayname"); textTable.AddColumn("ItemId"); textTable.AddColumn("Category"); textTable.AddColumn("Rarity/Default"); List<ItemDefinition> addedDefs = new List<ItemDefinition>(); foreach (var itemDef in ItemManager.GetItemDefinitions()) { if (itemDef.shortname.Contains(searchFor) || itemDef.displayDescription.english.ToLower().Contains(searchFor) || itemDef.displayName.english.ToLower().Contains(searchFor) || itemDef.itemid.ToString().Contains(searchFor)) { if (addedDefs.Contains(itemDef)) continue; addedDefs.Add(itemDef); count++; textTable.AddRow(new string[] { itemDef.shortname, itemDef.displayName.english, itemDef.itemid.ToString(), itemDef.category.ToString(), (rarityOverridesItems.ContainsKey(itemDef.shortname) ? (int)rarityOverridesItems[itemDef.shortname] : (int)itemDef.rarity).ToString()+"/"+((int)itemDef.rarity).ToString() }); } if ( count > 15 ) break; } string result = ""; if (count > 15) result = $"\nSearchresult for '{searchFor}' returned more then 15 hits:"; else result = $"\nSearchresult for '{searchFor}':"; SendReply(arg, result + "\n"+textTable.ToString()); }  [ConsoleCommand("al.shownewitems")] void consoleShowNewItems(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (showNewGameItems == null || showNewGameItems.Count == 0) { SendReply(arg, "Now new items found OR the 'NamesList.json' did not exist before the recent patch"); return; } TextTable textTable = new TextTable(); textTable.AddColumn("Shortname"); textTable.AddColumn("Displayname"); textTable.AddColumn("ItemId"); textTable.AddColumn("Category"); textTable.AddColumn("Rarity/Default"); foreach (var itemDef in showNewGameItems) { textTable.AddRow(new string[] { itemDef.shortname, itemDef.displayName.english, itemDef.itemid.ToString(), itemDef.category.ToString(), (rarityOverridesItems.ContainsKey(itemDef.shortname) ? (int)rarityOverridesItems[itemDef.shortname] : (int)itemDef.rarity).ToString()+"/"+((int)itemDef.rarity).ToString() }); } SendReply(arg, "\n"+textTable.ToString()); }   [ConsoleCommand("al.itemremove")] void consoleItemRemove(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || arg.Args.Length != 1) { SendReply(arg, "Usage: itemremove shortname"); return; } if (ItemManager.FindItemDefinition(arg.Args[0].ToLower()) == null) { SendReply(arg, $"Item name '{arg.Args[0].ToLower()}' not found in game"); return; } var name = arg.Args[0].ToLower(); int modified = 0; foreach (var data in lootData) { foreach (var limit in (data.Value as Dictionary<string, object>).ToList()) { if (name == limit.Key.ToString()) { (lootData[data.Key] as Dictionary<string, object>).Remove(limit.Key); modified++; } } } if (modified > 0) { SendReply(arg, $"Removed '{modified}'entries for item: '{name}'"); SendReply(arg, $"New settings will be active in the loot tables after running reload/lootreload or serverrestart"); try { lootTable = getFile("LootTables"); } catch (JsonReaderException e) { PrintWarning($"JSON error in 'LootTables' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } lootTable.Set("LootData", lootData); lootTable.Save(); lootTable.Clear(); } else SendReply(arg, $"No entries for item '{name}' found"); }  [ConsoleCommand("al.itemfind")] void consoleItemFind(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || arg.Args.Length != 1) { SendReply(arg, "Usage: itemfind shortname"); return; } if (ItemManager.FindItemDefinition(arg.Args[0].ToLower()) == null) { SendReply(arg, $"Item name '{arg.Args[0].ToLower()}' not found in game"); return; } var name = arg.Args[0].ToLower(); int found = 0; SendReply(arg, $"Searching limits for item '{name}':"); foreach (var data in lootData) foreach (var limit in (data.Value as Dictionary<string, object>).ToList()) if (name == limit.Key.ToString()) { if (itemAmountMinMax) { var limits = limit.Value as Dictionary<string, object>; SendReply(arg, $"LootContainer '{data.Key.ToString()}': '{(int)limits["Min"]} / {(int)limits["Max"]}'"); } else SendReply(arg, $"LootContainer '{data.Key.ToString()}': '{limit.Value.ToString()}'"); found++; } if (found == 0) SendReply(arg, $"No entries found"); }  [ConsoleCommand("al.itemlimit")] void consoleItemLimit(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || (itemAmountMinMax && arg.Args.Length < 3) || (!itemAmountMinMax && arg.Args.Length < 2)) { if (itemAmountMinMax) { SendReply(arg, "Usage: itemlimit <shortname> min max"); SendReply(arg, "Example: itemlimit mace 2 4"); } else { SendReply(arg, "Usage: itemlimit <shortname> x"); SendReply(arg, "Example: itemlimit wood 100"); } return; } if (ItemManager.FindItemDefinition(arg.Args[0]) == null) { SendReply(arg, $"Item name '{arg.Args[0]}' not found in game"); return; } var name = arg.Args[0].ToLower(); int num = 0; int.TryParse(arg.Args[1], out num); if (num == 0) { if (itemAmountMinMax) SendReply(arg, "The Min Limit must be a full number and greater then zero"); else SendReply(arg, "The Limit must be a full number and greater then zero"); return; } int num2 = 0; if (itemAmountMinMax) { int.TryParse(arg.Args[2], out num2); if (num2 == 0) { SendReply(arg, "The Max Limit must be a full number and greater then zero"); return; } } bool modified = false; foreach (var data in lootData) { foreach (var limit in (data.Value as Dictionary<string, object>).ToList()) { if (name == limit.Key.ToString()) { if (itemAmountMinMax) { var olimits = limit.Value as Dictionary<string, object>; if ((int)olimits["Min"] == num && (int)olimits["Max"] == num2) continue; SendReply(arg, $"Set '{name}' in '{data.Key}' from '{(int)olimits["Min"]}/{(int)olimits["Max"]}' to '{num}/{num2}'"); olimits["Min"] = num; olimits["Max"] = num2; (lootData[data.Key] as Dictionary<string, object>)[name] = olimits; } else { if ((int)limit.Value == num) continue; SendReply(arg, $"Set '{name}' in '{data.Key}' from '{(int)limit.Value}' to '{num}'"); (lootData[data.Key] as Dictionary<string, object>)[name] = num; } modified = true; } } } if (modified) { SendReply(arg, $"New settings will be active in LootTables after running reload/lootreload or serverrestart"); try { lootTable = getFile("LootTables"); } catch (JsonReaderException e) { PrintWarning($"JSON error in 'LootTables' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } lootTable.Set("LootData", lootData); lootTable.Save(); lootTable.Clear(); } else SendReply(arg, $"No changes made to LootTables"); }  [ConsoleCommand("al.itemadd")] void consoleItemAdd(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || (itemAmountMinMax && arg.Args.Length < 4) || (!itemAmountMinMax && arg.Args.Length < 3)) { if (itemAmountMinMax) { SendReply(arg, "Usage: itemadd <shortname> min max <containername> (container container ...)"); SendReply(arg, "Example: itemadd mace 2 4 crate_normal crate_normal_2"); } else { SendReply(arg, "Usage: itemadd <shortname> x <containername> (container container ...)"); SendReply(arg, "Example: itemadd wood 100 crate_normal crate_normal_2"); } return; } if (ItemManager.FindItemDefinition(arg.Args[0].ToLower()) == null) { SendReply(arg, $"Item name '{arg.Args[0]}' not found in game"); return; } var name = arg.Args[0].ToLower(); int num = 0; int.TryParse(arg.Args[1], out num); if (num == 0) { SendReply(arg, "The Min Limit must be a full number and greater then zero"); return; } int num2 = 0; if (itemAmountMinMax) { int.TryParse(arg.Args[2], out num2); if (num2 == 0) { SendReply(arg, "The Max Limit must be a full number and greater then zero"); return; } } bool modified = false; int start = 2; if (itemAmountMinMax) start = 3; for (int i = start; i < arg.Args.Length; i++) { object data; if (lootData.TryGetValue(arg.Args[i].ToLower(), out data)) { var limits = data as Dictionary<string, object>; object limit; if (limits.TryGetValue(name, out limit)) { if (itemAmountMinMax) { var olimits = limit as Dictionary<string, object>; SendReply(arg, $"Set '{name}' in '{arg.Args[i].ToLower()}' from '{(int)olimits["Min"]} / {(int)olimits["Max"]}' to '{num} / {num2}'"); olimits["Min"] = num; olimits["Max"] = num2; (lootData[arg.Args[i].ToLower()] as Dictionary<string, object>)[name] = olimits; } else { SendReply(arg, $"Set '{name}' in '{arg.Args[i].ToLower()}' from '{(int)limit}' to '{num}'"); (lootData[arg.Args[i].ToLower()] as Dictionary<string, object>)[name] = num; } modified = true; } else { if (itemAmountMinMax) { var nlimits = new Dictionary<string, object>(); nlimits["Min"] = num; nlimits["Max"] = num2; SendReply(arg, $"Added '{name}' to '{arg.Args[i]}' with '{(int)nlimits["Min"]} / {(int)nlimits["Max"]}'"); (lootData[arg.Args[i].ToString()] as Dictionary<string, object>).Add(name, nlimits); } else { SendReply(arg, $"Added '{name}' to '{arg.Args[i]}' with '{num}'"); (lootData[arg.Args[i].ToString()] as Dictionary<string, object>).Add(name, num); } modified = true; } } else SendReply(arg, $"Skipped not existing container '{arg.Args[i]}'"); } if (modified) { SendReply(arg, $"New settings will be active in the loot tables after running reload/lootreload or serverrestart"); try { lootTable = getFile("LootTables"); } catch (JsonReaderException e) { PrintWarning($"JSON error in 'LootTables' > Line: {e.LineNumber} | {e.Path}"); pluginEnabled = false; return; } lootTable.Set("LootData", lootData); lootTable.Save(); lootTable.Clear(); } else SendReply(arg, $"No entries added or modified"); }  [ConsoleCommand("al.categorylist")] void consoleCategoryList(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; TextTable textTable = new TextTable(); textTable.AddColumn("Category"); textTable.AddColumn("LootMultiplier"); textTable.AddColumn("DropSkinned"); foreach (var category in lootCategoryLimits) { var setting = lootCategoryLimits[category.Key] as Dictionary<string, object>; textTable.AddRow(new string[] { category.Key.ToString(), Convert.ToString(setting["LootMultiplier"]), (Convert.ToBoolean(setting["DropSkinned"]) ? "Yes" : "No") }); } SendReply(arg, "\n" + textTable.ToString()); }  [ConsoleCommand("al.containertypes")] void consoleContainerTypes(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; TextTable textTable = new TextTable(); textTable.AddColumn("Container"); textTable.AddColumn("Items (+/-)"); textTable.AddColumn("Enabled"); textTable.AddColumn("Multiplier (x)"); textTable.AddColumn("Scrap (+/-)"); foreach (var category in lootContainers) { var setting = lootContainers[category.Key] as Dictionary<string, object>; textTable.AddRow(new string[] { category.Key.ToString(), $"{Convert.ToInt32(setting["Items"])} ({Convert.ToInt32(setting["ItemsVariance"])})", (Convert.ToBoolean(setting["Enabled"]) ? "Yes" : "No"), $" {(Convert.ToBoolean(setting["UseMultiplier"]) ? "Yes" : "No")} ({Convert.ToInt32(setting["UsedMultiplier"])})", $"{Convert.ToInt32(setting["ScrapAmount"])} ({Convert.ToInt32(setting["ScrapVariance"])})" }); } SendReply(arg, "\n\nContainertypes of 'LootTables.json':\n" + textTable.ToString()); }  [ConsoleCommand("al.containeritemweights")] void consoleContainerItemWeights(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; TextTable textTable = new TextTable(); textTable.AddColumn("Container"); textTable.AddColumn("None|0"); textTable.AddColumn("Common|1"); textTable.AddColumn("Uncommon|2"); textTable.AddColumn("Rare|3"); textTable.AddColumn("VeryRare|4"); textTable.AddColumn("Σ Items"); textTable.AddColumn("Σ BPs"); foreach (var con in lootContainers) { var setting = lootContainers[con.Key] as Dictionary<string, object>; if (!setting.ContainsKey("Enabled") || !(bool)setting["Enabled"]) continue; textTable.AddRow(new string[] { con.Key.ToString(), getContainerRarityChance(con.Key, 0)+ $"% (Σ {Items[con.Key][0].Count})", getContainerRarityChance(con.Key, 1)+ $"% (Σ {Items[con.Key][1].Count})", getContainerRarityChance(con.Key, 2)+ $"% (Σ {Items[con.Key][2].Count})", getContainerRarityChance(con.Key, 3)+ $"% (Σ {Items[con.Key][3].Count})", getContainerRarityChance(con.Key, 4)+ $"% (Σ {Items[con.Key][4].Count})", (lootData[con.Key] as Dictionary<string, object>).Count.ToString(), getContainerBpCount(con.Key).ToString() }); } SendReply(arg, $"\n\nCalculated and used itemweights of 'LootTables.json' (BlueprintProbability {blueprintProbability} ~ ({blueprintProbability*100d}%) ):\n" + textTable.ToString()); }  string getContainerRarityChance(string key, int rarity, string format = "F1") { double prob = 0d; for (var i = 0; i < 5; ++i) { prob += Blueprints[key][i].Count; } if (prob > 0d) prob = blueprintProbability; return ((1 - prob) * 100d * itemWeights[key][rarity] / totalItemWeight[key]).ToString(format); }  int getContainerBpCount(string key) { int ct = 0; for (var i = 0; i < 5; ++i) { ct += Blueprints[key][i].Count; } return ct; }  void consoleListLoadoutHeli(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; TextTable textTable = new TextTable(); textTable.AddColumn("Set N°"); textTable.AddColumn("Sum"); textTable.AddColumn("Items");  int i = 1; foreach (var set in heliData) { var loot = set as Dictionary<string, object>; textTable.AddRow(new string[] { i.ToString(), loot.Count.ToString(), ItemSetStringHash(loot) +"\n" }); i++; } SendReply(arg, "\n\nItemsets of 'HeliLoot.json':\n" + textTable.ToString()); }  string ItemSetStringHash(Dictionary<string, object> items) { string text = string.Empty; foreach (var item in items) { if((item.Value as Dictionary<string, object>) != null) { Dictionary<string, object> limit = item.Value as Dictionary<string, object>; text += item.Key+ $" ({limit["Min"]}/{limit["Max"]} )"; } else { text += item.Key + $" ( {item.Value.ToString()} )"; } text += " | "; } return text.TrimEnd(new char[] {'|',' '}); }  [ConsoleCommand("al.containeradd")] void consoleContainerAdd(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || arg.Args.Length > 1) { var sb = new StringBuilder(); var n = 0; foreach (var container in AllContainerTypes) { if (!lootContainers.ContainsKey(container.Key)) { if (n > 0) sb.Append(", "); sb.Append(container.Key); n++; } } var sb2 = new StringBuilder(); sb2.AppendLine("\n> Available containertypes:"); sb2.AppendLine(sb.ToString()); sb2.AppendLine("> Names with whitespace need to be typed within quotes \"...\". Choose only one per command"); SendReply(arg, sb2.ToString()); return; } if (arg.Args != null && arg.Args.Length == 1) { if (lootContainers.ContainsKey(arg.Args[0])) { SendReply(arg, $"Container '{arg.Args[0]}' already included"); return; } if (!AllContainerTypes.ContainsKey(arg.Args[0])) { SendReply(arg, $"Container '{arg.Args[0]}' does not exist"); return; } ContainerAddOrReset(arg.Args[0], false, arg); } }  [ConsoleCommand("al.containerreset")] void consoleContainerReset(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || arg.Args.Length > 1) { var sb = new StringBuilder(); var n = 0; foreach (var container in AllContainerTypes) { if (!lootContainers.ContainsKey(container.Key)) { if (n > 0) sb.Append(", "); sb.Append(container.Key); n++; } } var sb2 = new StringBuilder(); sb2.AppendLine("\n> Available containertypes:"); sb2.AppendLine(sb.ToString()); sb2.AppendLine("> Names with whitespace need to be typed within quotes \"...\". Choose only one per command"); SendReply(arg, sb2.ToString()); return; } if (arg.Args != null && arg.Args.Length == 1) { if (!lootContainers.ContainsKey(arg.Args[0])) { SendReply(arg, $"Container '{arg.Args[0]}' not yet added"); return; } if (!AllContainerTypes.ContainsKey(arg.Args[0])) { SendReply(arg, $"Container '{arg.Args[0]}' does not exist"); return; } lootContainers.Remove(arg.Args[0]); lootData.Remove(arg.Args[0]); ContainerAddOrReset(arg.Args[0], true, arg); } }  void ContainerAddOrReset(string cName, bool wasReset = false, ConsoleSystem.Arg arg = null) { LootContainer loot = GameManager.server.FindPrefab(AllContainerTypes[cName]).GetComponent<LootContainer>(); var container = new Dictionary<string, object>(); container.Add("Items", loot.maxDefinitionsToSpawn); if (loot.SpawnType == LootContainer.spawnType.ROADSIDE || loot.SpawnType == LootContainer.spawnType.TOWN || loot.SpawnType == LootContainer.spawnType.GENERIC) container.Add("ItemsVariance", 1); else container.Add("ItemsVariance", 0); container.Add("MaxBlueprintSpawns", 1); container.Add("Enabled", true); container.Add("UseMultiplier", true); container.Add("UsedMultiplier", 1); if (!itemAmountMinMax) container.Add("MinAmountDivider", 1); container.Add("ScrapAmount", loot.scrapAmount); container.Add("ScrapVariance", Mathf.CeilToInt(loot.scrapAmount / 2)); if (loot.SpawnType == LootContainer.spawnType.ROADSIDE || loot.SpawnType == LootContainer.spawnType.TOWN || loot.SpawnType == LootContainer.spawnType.GENERIC) container.Add("LootFraction", true); else container.Add("LootFraction", false); container.Add("Repopulate", !(loot.ShortPrefabName == "heli_crate" || loot.ShortPrefabName == "bradley_crate" || loot.ShortPrefabName == "supply_drop")); if (AllLootSpawns.ContainsKey(cName)) GetLootSpawn(AllLootSpawns[cName], cName); if (AllLootSlots.ContainsKey(cName)) GetLootSlots(AllLootSlots[cName], cName); if ((lootData[cName] as Dictionary<string, object>) != null && (lootData[cName] as Dictionary<string, object>).Count() < (loot.maxDefinitionsToSpawn)) { container["Items"] = (lootData[cName] as Dictionary<string, object>).Count(); } lootContainers.Add(loot.ShortPrefabName, container); loot = null;  if (arg != null ) { try { lootTable = getFile("LootTables"); } catch (JsonReaderException e) { PrintWarningCl($"JSON error in 'LootTables' > Line: {e.LineNumber} | {e.Path}", arg); pluginEnabled = false; return; } } else lootTable = getFile("LootTables"); lootTable.Set("LootContainer", lootContainers); lootTable.Set("LootData", lootData); lootTable.Save(); lootTable.Clear();  if (arg != null) { if (wasReset) SendReply(arg, $"Container '{cName}' was reset. 'al.reload' required"); else SendReply(arg, $"Container '{cName}' was added. 'al.reload' required"); } }  [ConsoleCommand("al.containerremove")] void consoleContainerRemove(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || arg.Args.Length > 1) { SendReply(arg, "You need to type one included containertype. Check those by 'al.containertypes'"); return; } if (arg.Args != null && arg.Args.Length == 1) { if (!lootContainers.ContainsKey(arg.Args[0])) { SendReply(arg, $"Container '{arg.Args[0]}' not included"); return; } lootContainers.Remove(arg.Args[0]); try { lootTable = getFile("LootTables"); } catch (JsonReaderException e) { PrintWarningCl($"JSON error in 'LootTables' > Line: {e.LineNumber} | {e.Path}", arg); pluginEnabled = false; return; } lootTable.Set("LootContainer", lootContainers); lootData.Remove(arg.Args[0]); lootTable.Set("LootData", lootData); lootTable.Save(); lootTable.Clear(); SendReply(arg, $"Container '{arg.Args[0]}' was removed. 'al.reload' required"); } }  [ConsoleCommand("al.categoryset")] void consoleCategorySet(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; if (arg.Args == null || arg.Args.Length < 3) { SendReply(arg, "You need to type one included category. Check those by 'al.categorylist'"); SendReply(arg, "Example: al.categoryset <name> <x(LootMultiplier)> <true|false(DropSkinned)> "); return; } if (arg.Args != null && arg.Args.Length > 1) { if (!lootCategoryLimits.ContainsKey(arg.Args[0])) { SendReply(arg, $"Category '{arg.Args[0]}' not included"); return; } int multi = -1; if (arg.Args.Length > 1) if (!int.TryParse(arg.Args[1], out multi)) { SendReply(arg, $"Set a full number for minLimit"); return; } bool skinned = false; if (arg.Args.Length > 2) if (!bool.TryParse(arg.Args[2], out skinned)) { SendReply(arg, $"Set 'true(enable)' or 'false(disable)'"); return; } var category = lootCategoryLimits[arg.Args[0]] as Dictionary<string, object>; category["DropSkinned"] = skinned; if (multi < 1) multi = 1; category["LootMultiplier"] = multi; lootCategoryLimits[arg.Args[0]] = category; SendReply(arg, $"New Setting for '{arg.Args[0]}' | DropSkinned: {(bool)category["DropSkinned"]} | LootMultiplier: {(int)category["LootMultiplier"]}"); Config["LootCategorys", "Limits"] = lootCategoryLimits; Config.Save(); SendReply(arg, $"Category '{arg.Args[0]}' was modified. Plugin reload required for instant effect on DropSkinned"); SendReply(arg, $"Changes to Vanilla usage need 'al.lootreload reset' to take effect  on the tables"); } }  [ConsoleCommand("al.containeronmap")] void consoleContainersOnMap(ConsoleSystem.Arg arg) { if (arg.Connection != null && arg.Connection.authLevel < setupAuthLevel) return; var LootContainers = UnityEngine.Object.FindObjectsOfType<LootContainer>(); Dictionary<string, int> LootCounter = new Dictionary<string, int>(); foreach (var container in LootContainers.ToList()) { if (!LootCounter.ContainsKey(container.ShortPrefabName)) LootCounter.Add(container.ShortPrefabName, 0); LootCounter[container.ShortPrefabName] += 1; } TextTable textTable = new TextTable(); textTable.AddColumn("Type"); textTable.AddColumn("Count"); textTable.AddColumn("Enabled"); foreach (var counter in LootCounter) { string active; object check; if (lootContainers.TryGetValue(counter.Key, out check)) { active = (check as Dictionary<string, object>)["Enabled"].ToString(); } else active = "Not in tables"; textTable.AddRow(new string[] { counter.Key.ToString(), counter.Value.ToString(), active }); } SendReply(arg, "\n\nCurrent on map spawned lootcontainer types:\n" + textTable.ToString()); }  bool isSupplyDropActive() { if (!pluginEnabled) return false; object drop; if (lootContainers.TryGetValue("supply_drop", out drop)) { if ((bool)(drop as Dictionary<string, object>)["Enabled"]) return true; } return false; }  void OnHammerHit(BasePlayer player, HitInfo info) { if (!initialized || !pluginEnabled || !adminInputLootRefresh || info == null || info.HitEntity == null || info.HitEntity.GetComponent<LootContainer>() == null || player.net.connection.authLevel < setupAuthLevel) return;  var loot = info.HitEntity.GetComponent<StorageContainer>(); if (lootContainers.ContainsKey(loot.ShortPrefabName) && (bool)(lootContainers[loot.ShortPrefabName] as Dictionary<string, object>)["Enabled"] || enableHeliLoadOut && loot.ShortPrefabName == "heli_crate" || enableBradleyLoadOut && loot.ShortPrefabName == "bradley_crate") { if (showAdminLootInfo) player.ChatMessage($"Starting admin lootcheck of type '<color=#ffff00>{info.HitEntity.ShortPrefabName}</color>'"); loot.gameObject.AddComponent<AdminLootHandler>(); player.inventory.loot.StartLootingEntity(loot, false); player.inventory.loot.AddContainer(loot.inventory); player.inventory.loot.SendImmediate(); player.ClientRPCPlayer(null, player, "RPC_OpenLootPanel",  loot.panelName); } }  class StoredExportNames { public int version; public Dictionary<string, object> AllItemsAvailable = new Dictionary<string, object>();  public StoredExportNames() { } }  void SaveExportNames() { storedExportNames = Interface.GetMod().DataFileSystem.ReadObject<StoredExportNames>($"{Title}\\NamesList"); oldProtocol = (int)storedExportNames.version; if (storedExportNames.AllItemsAvailable.Count == 0 || (int)storedExportNames.version != Rust.Protocol.network) { bool zeroCount = storedExportNames.AllItemsAvailable.Count == 0; Dictionary<string, object> oldItems = new Dictionary<string, object>(); if (storedExportNames.AllItemsAvailable.Count > 0) oldItems = storedExportNames.AllItemsAvailable; storedExportNames = new StoredExportNames(); storedExportNames.version = Rust.Protocol.network; foreach (var it in ItemManager.GetItemDefinitions()) { var dp = new Dictionary<string, object>(); if (!zeroCount && !oldItems.ContainsKey(it.shortname)) { dp.Add("NEWITEM", true); Puts($"NEW item '{it.displayName.english} ({it.shortname})' was added to game"); newGameItems.Add(it.shortname); showNewGameItems.Add(it); } dp.Add("displayName", it.displayName.english.ToString()); dp.Add("category", it.category.ToString()); dp.Add("rarity", it.rarity.ToString()); dp.Add("itemid", it.itemid); dp.Add("spawnAsBlueprint", it.spawnAsBlueprint); if (it.Blueprint != null) { var dp0 = new Dictionary<string, object>(); dp0.Add("isResearchable", it.Blueprint.isResearchable); dp0.Add("userCraftable", it.Blueprint.userCraftable); dp0.Add("defaultBlueprint", it.Blueprint.defaultBlueprint); dp.Add("Blueprint", dp0); } storedExportNames.AllItemsAvailable.Add(it.shortname, dp); } Interface.GetMod().DataFileSystem.WriteObject($"{Title}\\NamesList", storedExportNames); Puts($"Exported {storedExportNames.AllItemsAvailable.Count} items to 'NamesList' for protocol '{Rust.Protocol.network}'"); } else if(storedExportNames.AllItemsAvailable.Count > 0) { foreach (var it in ItemManager.GetItemDefinitions()) { if (storedExportNames.AllItemsAvailable.ContainsKey(it.shortname)) { var oldItem = (storedExportNames.AllItemsAvailable[it.shortname] as JObject).ToObject<Dictionary<string, object>>(); if (oldItem.ContainsKey("NEWITEM")) showNewGameItems.Add(it); } } } }  class AdminLootHandler : FacepunchBehaviour { void Awake() { if (!al.initialized || !al.pluginEnabled) return; InvokeRepeating(Repeater, al.adminLootRefreshInterval, al.adminLootRefreshInterval); }  void Repeater() { if (!al.initialized || !al.pluginEnabled) return; LootContainer loot = GetComponent<LootContainer>(); if (al.enableHeliLoadOut && loot.ShortPrefabName == "heli_crate") { al.PopulateSpecial(loot, false); al.timer.Once(al.adminLootRefreshInterval * 3, () => { al.rngHeli = new Random(); al.rngHeliList = new List<int>(); }); return; } if (al.enableBradleyLoadOut && loot.ShortPrefabName == "bradley_crate") { al.PopulateSpecial(loot, false); al.timer.Once(al.adminLootRefreshInterval * 3, () => { al.rngBradley = new Random(); al.rngBradleyList = new List<int>(); }); return; } if (al.enableFancyDropLoot && loot is SupplyDrop && al.FancyDrop && al.FancyDrop.IsLoaded) { var items = al.OnFancyDropCrate(null, true); loot.inventory.Clear(); ItemManager.DoRemoves(); loot.inventory.capacity = 18; foreach (var item in (items as List<Item>).Where(x => x != null && x.IsValid())) item.MoveToContainer(loot.inventory, -1, false); loot.inventory.capacity = loot.inventory.itemList.Count; loot.inventory.MarkDirty(); return; } al.PopulateContainer(loot, false); }  private void PlayerStoppedLooting(BasePlayer player) { CancelInvoke(Repeater); Destroy(this); } } } }
+﻿using Facepunch;
+using Newtonsoft.Json;
+using Oxide.Core;
+using Oxide.Core.Configuration;
+using Oxide.Core.Plugins;
+using Steamworks;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+namespace Oxide.Plugins
+{
+    [Info("AlphaLoot", "k1lly0u", "3.1.3")]
+    class AlphaLoot : RustPlugin
+    {
+        #region Fields
+        [PluginReference] Plugin CustomLootSpawns, EventLoot, FancyDrop, SkinBox;
+
+        private StoredData storedData;
+        private StoredData bradleyData;
+        private StoredData heliData;
+
+        private DynamicConfigFile data, bradley, heli, skinData;
+
+        private bool updateContainerCapacities = false;
+
+        private static Hash<string, HashSet<SkinEntry>> weightedSkinIds;
+        private static Hash<string, List<ulong>> importedSkinIds;
+        private static Hash<string, int> defaultScrapAmounts;
+
+        private const string ADMIN_PERMISSION = "alphaloot.admin";
+
+        private const string HELI_CRATE = "heli_crate";
+        private const string BRADLEY_CRATE = "bradley_crate";
+        #endregion
+
+        #region Oxide Hooks
+        private void Loaded()
+        {
+            defaultScrapAmounts = new Hash<string, int>();
+
+            permission.RegisterPermission(ADMIN_PERMISSION, this);
+            
+            LoadData();
+
+            if (updateContainerCapacities)
+                SetCapacityLimits();
+        }
+
+        private void OnServerInitialized()
+        {
+            PopulateContainerDefinitions(ref storedData, ref heliData, ref bradleyData);
+            SaveData();
+            Puts($"Loaded {storedData.loot_advanced.Count + storedData.loot_simple.Count} loot container definitions and {storedData.npcs_advanced.Count + storedData.npcs_simple.Count} npc loot definitions");
+            Puts($"Loaded {heliData.loot_advanced.Count + heliData.loot_simple.Count} heli loot profiles");
+            Puts($"Loaded {bradleyData.loot_advanced.Count + bradleyData.loot_simple.Count} bradley loot profiles");
+
+            if (configData.AutoUpdate)
+                AutoUpdateItemLists();
+            
+            if (configData.UseSkinboxSkins || configData.UseApprovedSkins)
+            {
+                if ((Steamworks.SteamInventory.Definitions?.Length ?? 0) == 0)
+                {
+                    PrintWarning("Waiting for Steamworks to initialize to load item skins");
+                    Steamworks.SteamInventory.OnDefinitionsUpdated += LoadSkins;
+                }
+                else LoadSkins();
+            } 
+            else RefreshLootContents();
+        }
+
+        private void OnEntitySpawned(BradleyAPC bradleyApc)
+        {
+            if (bradleyApc != null)
+                bradleyApc.maxCratesToSpawn = configData.BradleyCrates;
+        }
+
+        private void OnEntitySpawned(BaseHelicopter baseHelicopter)
+        {
+            if (baseHelicopter != null)
+                baseHelicopter.maxCratesToSpawn = configData.HelicopterCrates;
+        }
+
+        private object OnCorpsePopulate(BaseEntity entity, LootableCorpse corpse)
+        {
+            if (entity == null || corpse == null)
+                return null;
+
+            object obj = Interface.CallHook("CanPopulateLoot", entity, corpse);
+            if (obj != null)
+                return null;
+
+            return PopulateLoot(entity, corpse) ? corpse : null;
+        }
+
+        private object OnLootSpawn(LootContainer container)
+        {
+            if (container == null)
+                return null;
+
+            if (CustomLootSpawns && (bool)CustomLootSpawns.Call("IsLootBox", container as BaseEntity))
+                return null;
+
+            if (EventLoot && (bool)EventLoot.Call("IsEventLootContainer", container as BaseEntity))
+                return null;
+
+            if (FancyDrop && container is SupplyDrop && !configData.OverrideFancyDrop)
+                return null;
+
+            object obj = Interface.CallHook("CanPopulateLoot", container);
+            if (obj != null)
+                return null;
+            
+            if (PopulateLoot(container))
+                return true;
+
+            return null;
+        }
+
+        private void OnHammerHit(BasePlayer player, HitInfo info)
+        {
+            if (player == null || info == null)
+                return;
+
+            if (!permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+                return;
+
+            LootContainer lootContainer = info?.HitEntity?.GetComponent<LootContainer>();
+            if (lootContainer == null)
+                return;
+
+            player.ChatMessage($"Viewing loot generation for: <color=#ffff00>{lootContainer.ShortPrefabName}</color>");
+            lootContainer.gameObject.AddComponent<LootCycler>();
+            player.inventory.loot.StartLootingEntity(lootContainer, false);
+            player.inventory.loot.AddContainer(lootContainer.inventory);
+            player.inventory.loot.SendImmediate();
+            player.ClientRPCPlayer(null, player, "RPC_OpenLootPanel", lootContainer.panelName);
+        }
+
+        private void OnLootEntityEnd(BasePlayer player, StorageContainer container)
+        {
+            LootCycler lootCycler = container?.GetComponent<LootCycler>();
+            if (lootCycler != null)
+                UnityEngine.Object.Destroy(lootCycler);
+        }
+
+        private void Unload()
+        {
+            RefreshLootContents(null, true);
+            configData = null;
+
+            weightedSkinIds = null;
+            importedSkinIds = null;
+            defaultScrapAmounts = null;
+        }
+        #endregion
+
+        #region Skins
+        private void LoadSkins()
+        {
+            Steamworks.SteamInventory.OnDefinitionsUpdated -= LoadSkins;
+
+            if (configData.UseSkinboxSkins)
+                PopulateSkinListFromSkinBox();
+
+            if (configData.UseApprovedSkins)
+                PopulateSkinListFromApproved();
+
+            RefreshLootContents();
+        }
+
+        private void PopulateSkinListFromSkinBox()
+        {
+            Dictionary<string, LinkedList<ulong>> dictionary = SkinBox?.Call("getSkincache") as Dictionary<string, LinkedList<ulong>>;
+            if (dictionary != null)
+            {
+                importedSkinIds = new Hash<string, List<ulong>>();
+
+                foreach(KeyValuePair<string, LinkedList<ulong>> kvp in dictionary)
+                {
+                    List<ulong> list = new List<ulong>();
+                    list.AddRange(kvp.Value);
+                    importedSkinIds[kvp.Key] = list;
+                }
+
+                Puts($"Imported {importedSkinIds.Sum(x => x.Value.Count)} skins from SkinBox");
+            }            
+        }
+
+        private void PopulateSkinListFromApproved()
+        {
+            if (importedSkinIds == null)
+                importedSkinIds = new Hash<string, List<ulong>>();
+
+            List<int> itemSkinDirectory = Pool.GetList<int>();
+            itemSkinDirectory.AddRange(ItemSkinDirectory.Instance.skins.Select(x => x.id));
+
+            int count = 0;
+
+            foreach (InventoryDef item in Steamworks.SteamInventory.Definitions)
+            {
+                string shortname = item.GetProperty("itemshortname");
+                if (string.IsNullOrEmpty(shortname) || item.Id < 100)
+                    continue;
+
+                ulong wsid;
+                if (itemSkinDirectory.Contains(item.Id))
+                    wsid = (ulong)item.Id;
+                else
+                {
+                    if (!ulong.TryParse(item.GetProperty("workshopid"), out wsid))
+                        continue;
+                }
+
+                if (!importedSkinIds.ContainsKey(shortname))
+                    importedSkinIds[shortname] = new List<ulong>();
+
+                if (!importedSkinIds[shortname].Contains(wsid))
+                {
+                    importedSkinIds[shortname].Add(wsid);
+                    count++;
+                }
+            }
+
+            Puts($"Imported {count} approved skins that weren't already in the list");
+            Pool.FreeList(ref itemSkinDirectory);
+        }
+        #endregion
+
+        #region Container Population
+        private void RefreshLootContents(ConsoleSystem.Arg arg = null, bool setDefaultScrap = false)
+        {
+            LootContainer[] lootContainers = UnityEngine.Object.FindObjectsOfType<LootContainer>();
+            
+            if (arg != null)
+                SendReply(arg, $"Repopulating loot for {lootContainers?.Length} containers");
+            else Puts($"Repopulating loot for {lootContainers?.Length} containers");
+
+            for (int i = 0; i < lootContainers?.Length; i++)
+            {
+                LootContainer lootContainer = lootContainers[i];
+                if (lootContainer != null && !lootContainer.IsDestroyed)
+                {
+                    if (lootContainer.inventory == null)
+                    {
+                        lootContainer.CreateInventory(true);
+                        lootContainer.OnInventoryFirstCreated(lootContainer.inventory);
+                    }
+
+                    if (setDefaultScrap)
+                    {
+                        int scrapAmount;
+                        if (defaultScrapAmounts.TryGetValue(lootContainer.ShortPrefabName, out scrapAmount))
+                            lootContainer.scrapAmount = scrapAmount;
+                    }
+
+                    lootContainer.inventory.capacity = lootContainer.inventorySlots;
+                    lootContainer.CancelInvoke(lootContainer.SpawnLoot);
+                    lootContainer.Invoke(lootContainer.SpawnLoot, UnityEngine.Random.Range(1f, 20f));
+                }
+            }
+        }
+
+        private void PopulateContainerDefinitions(ref StoredData storedData, ref StoredData heliData, ref StoredData bradleyData)
+        {
+            storedData.IsBaseLootTable = true;
+
+            List<LootContainer> containers = Resources.FindObjectsOfTypeAll<LootContainer>().OrderBy(x => x.ShortPrefabName).ToList();
+
+            for (int i = 0; i < containers.Count; i++)
+            {
+                LootContainer lootContainer = containers[i];
+
+                if (!defaultScrapAmounts.ContainsKey(lootContainer.ShortPrefabName))
+                    defaultScrapAmounts[lootContainer.ShortPrefabName] = lootContainer.scrapAmount;
+
+                if (lootContainer.ShortPrefabName.Equals(HELI_CRATE))
+                {
+                    BaseLootContainerProfile lootContainerProfile;
+
+                    if (storedData.TryGetLootProfile(HELI_CRATE, out lootContainerProfile))
+                    {
+                        heliData.CloneLootProfile(HELI_CRATE, lootContainerProfile);
+                        storedData.RemoveProfile(HELI_CRATE);
+                        Debug.LogWarning($"Helicopter loot profiles have been removed from your loot table and placed in its own data file. (/data/AlphaLoot/LootProfiles/{configData.HeliProfileName}.json)");
+                    }
+                    else
+                    {
+                        if (heliData.HasAnyProfiles)
+                            continue;
+
+                        heliData.CreateDefaultLootProfile(lootContainer);
+                    }
+                }
+                else if (lootContainer.ShortPrefabName.Equals(BRADLEY_CRATE))
+                {
+                    BaseLootContainerProfile lootContainerProfile;
+
+                    if (storedData.TryGetLootProfile(BRADLEY_CRATE, out lootContainerProfile))
+                    {
+                        bradleyData.CloneLootProfile(BRADLEY_CRATE, lootContainerProfile);
+                        storedData.RemoveProfile(BRADLEY_CRATE);
+                        Debug.LogWarning($"Bradley loot profiles have been removed from your loot table and placed in its own data file. (/data/AlphaLoot/LootProfiles/{configData.BradleyProfileName}.json)");
+                    }
+                    else
+                    {
+                        if (bradleyData.HasAnyProfiles)
+                            continue;
+
+                        bradleyData.CreateDefaultLootProfile(lootContainer);
+                    }
+                }
+                else storedData.CreateDefaultLootProfile(containers[i]);
+            }
+
+            for (int i = 0; i < npcPrefabs.Count; i++)
+            {
+                string prefab = npcPrefabs[i];
+                GameObject obj = GameManager.server.FindPrefab(prefab);
+
+                prefab = ToShortName(prefab);
+
+                HTNPlayer htnPlayer = obj.GetComponent<HTNPlayer>();
+                if (htnPlayer != null)
+                {
+                    BaseNpcDefinition baseDefinition = htnPlayer.AiDefinition;
+                    if (baseDefinition is Rust.Ai.HTN.Murderer.MurdererDefinition)
+                    {
+                        storedData.CreateDefaultLootProfile(prefab, (baseDefinition as Rust.Ai.HTN.Murderer.MurdererDefinition).Loot);
+                        continue;
+                    }
+
+                    if (baseDefinition is Rust.Ai.HTN.Scientist.ScientistDefinition)
+                    {
+                        storedData.CreateDefaultLootProfile(prefab, (baseDefinition as Rust.Ai.HTN.Scientist.ScientistDefinition).Loot);
+                        continue;
+                    }
+
+                    if (baseDefinition is Rust.Ai.HTN.NPCTurret.NPCTurretDefinition)
+                    {
+                        storedData.CreateDefaultLootProfile(prefab, (baseDefinition as Rust.Ai.HTN.NPCTurret.NPCTurretDefinition).Loot);
+                        continue;
+                    }
+
+                    if (baseDefinition is Rust.Ai.HTN.ScientistAStar.ScientistAStarDefinition)
+                    {
+                        storedData.CreateDefaultLootProfile(prefab, (baseDefinition as Rust.Ai.HTN.ScientistAStar.ScientistAStarDefinition).Loot);
+                        continue;
+                    }
+
+                    if (baseDefinition is Rust.Ai.HTN.ScientistJunkpile.ScientistJunkpileDefinition)
+                    {
+                        storedData.CreateDefaultLootProfile(prefab, (baseDefinition as Rust.Ai.HTN.ScientistJunkpile.ScientistJunkpileDefinition).Loot);
+                        continue;
+                    }
+
+                    continue;
+                }
+
+                global::HumanNPC humanNPC = obj.GetComponent<global::HumanNPC>();
+                if (humanNPC != null)
+                {
+                    storedData.CreateDefaultLootProfile(prefab, humanNPC.LootSpawnSlots);
+                    continue;
+                }
+
+                NPCMurderer npcMurderer = obj.GetComponent<NPCMurderer>();
+                if (npcMurderer != null)
+                {
+                    storedData.CreateDefaultLootProfile(prefab, npcMurderer.LootSpawnSlots);
+                    continue;
+                }
+
+                Scientist scientist = obj.GetComponent<Scientist>();
+                if (scientist != null)
+                {
+                    storedData.CreateDefaultLootProfile(prefab, scientist.LootSpawnSlots);
+                    continue;
+                }
+            }            
+        }
+
+        private bool PopulateLoot(LootContainer container)
+        {            
+            BaseLootContainerProfile lootProfile;
+
+            if (container.ShortPrefabName.Equals(HELI_CRATE))
+            {
+                if (heliData.GetRandomLootProfile(out lootProfile))
+                {
+                    PopulateLootContainer(container, lootProfile);
+                    return true;
+                }
+            }
+            else if (container.ShortPrefabName.Equals(BRADLEY_CRATE))
+            {
+                if (bradleyData.GetRandomLootProfile(out lootProfile))
+                {
+                    PopulateLootContainer(container, lootProfile);
+                    return true;
+                }
+            }
+            else
+            {
+                if (storedData.TryGetLootProfile(container.ShortPrefabName, out lootProfile) && lootProfile.Enabled)
+                {                    
+                    PopulateLootContainer(container, lootProfile);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void PopulateLootContainer(LootContainer container, BaseLootContainerProfile lootProfile)
+        {
+            container.destroyOnEmpty = lootProfile.DestroyOnEmpty;
+
+            lootProfile.PopulateLoot(container.inventory);
+
+            container.CancelInvoke(container.SpawnLoot);
+
+            if (lootProfile.ShouldRefreshContents)
+                container.Invoke(container.SpawnLoot, UnityEngine.Random.Range(lootProfile.MinSecondsBetweenRefresh, lootProfile.MaxSecondsBetweenRefresh));
+        }
+
+        private bool PopulateLoot(BaseEntity entity, LootableCorpse corpse)
+        {
+            BaseLootProfile lootProfile;
+            if (storedData.TryGetNPCProfile(entity.ShortPrefabName, out lootProfile))
+            {
+                if (!lootProfile.Enabled)
+                    return false;
+
+                lootProfile.PopulateLoot(corpse.containers[0]);
+                return true;
+            }
+            return false;
+        }
+        #endregion
+
+        #region Functions
+        private string ToShortName(string name)
+        {
+            return name.Split('/').Last().Replace(".prefab", "");
+        }
+
+        private LootContainer FindContainer(BasePlayer player)
+        {
+            RaycastHit raycastHit;
+            if (Physics.Raycast(player.eyes.HeadRay(), out raycastHit, 20f))
+            {
+                LootContainer lootContainer = raycastHit.GetEntity() as LootContainer;
+                return lootContainer;
+            }
+            return null;
+        }
+
+        private object WantsToHandleFancyDropLoot() => configData.OverrideFancyDrop ? (object)true : null;
+        #endregion
+
+        #region Auto-Updater
+        private void AutoUpdateItemLists()
+        {
+            const string lastDefaultTable = "AlphaLoot/AutoUpdater/do_not_edit_this_file";
+            
+            ItemList lastItemList;
+
+            if (Interface.Oxide.DataFileSystem.ExistsDatafile(lastDefaultTable))
+            {
+                lastItemList = Interface.Oxide.DataFileSystem.GetFile(lastDefaultTable).ReadObject<ItemList>();
+
+                if (lastItemList != null)
+                {
+                    if (lastItemList.protocol == Rust.Protocol.printable)
+                    {
+                        Debug.Log("[AlphaLoot Auto Updater] - Last item list protocol matches current protocol. No new items added");
+                        return;
+                    }
+
+                    List<int> newItems = Pool.GetList<int>();
+
+                    ItemManager.itemList.ForEach(x =>
+                    {
+                        if (!lastItemList.itemIds.Contains(x.itemid))
+                            newItems.Add(x.itemid);
+                    });
+
+                    if (newItems.Count > 0)
+                    {
+                        int additions = 0;
+
+                        Debug.Log($"[AlphaLoot Auto Updater] - Found {newItems.Count} new game items. Adding them to your loot table");
+
+                        AddItemsToLootTable(newItems, out additions);
+
+                        if (additions > 0)
+                        {
+                            Debug.Log($"[AlphaLoot Auto Updater] - Added {additions} new loot definitions to the loot table");
+                            SaveData();
+                            Interface.Oxide.DataFileSystem.WriteObject<ItemList>(lastDefaultTable, new ItemList() { itemIds = ItemManager.itemDictionary.Keys.ToList(), protocol = Rust.Protocol.printable });
+                        }
+                    }
+                    else Debug.Log("[AlphaLoot Auto Updater] - No new items in game");
+
+                    Pool.FreeList(ref newItems);
+                }
+            }
+            else
+            {
+                Debug.Log("[AlphaLoot Auto Updater] - Generating item list for auto-updater. Future game updates will automatically add new items to your loot table. You can disable this feature in the config");
+                Interface.Oxide.DataFileSystem.WriteObject<ItemList>(lastDefaultTable, new ItemList() { itemIds = ItemManager.itemDictionary.Keys.ToList(), protocol = Rust.Protocol.printable });
+            }
+        }
+
+        private void AddSpecifiedItemsToLootTable(params string[] args)
+        {
+            int additions = 0;
+
+            List<int> items = Pool.GetList<int>();
+
+            foreach(string str in args)
+            {
+                ItemDefinition itemDefinition = ItemManager.FindItemDefinition(str);
+                if (itemDefinition != null)
+                    items.Add(itemDefinition.itemid);
+            }
+
+            if (items.Count > 0)
+            {
+                Debug.Log($"[AlphaLoot] - Adding {items.Count} specified items to your loot table");
+
+                AddItemsToLootTable(items, out additions);
+
+                if (additions > 0)
+                {
+                    Debug.Log($"[AlphaLoot] - Successfully added {additions} new loot definitions to the loot table");
+                    SaveData();
+                }
+            }
+            else Debug.Log("[AlphaLoot] - Failed to find item definitions for the shortname's supplied");
+
+            Pool.FreeList(ref items);
+        }
+
+        private void AddItemsToLootTable(List<int> items, out int additions)
+        {
+            additions = 0;
+
+            StoredData defaultLootTable = new StoredData();
+            StoredData defaultHeliLootTable = new StoredData();
+            StoredData defaultBradleyLootTable = new StoredData();
+
+            PopulateContainerDefinitions(ref defaultLootTable, ref defaultHeliLootTable, ref defaultBradleyLootTable);
+
+            foreach (KeyValuePair<string, AdvancedLootContainerProfile> kvp in defaultLootTable.loot_advanced)
+            {
+                foreach (int itemid in items)
+                {
+                    string shortname = ItemManager.itemDictionary[itemid].shortname;
+
+                    NewLootItem newLootItem = new NewLootItem();
+                    float score = 0;
+                    int multiplier = 1;
+
+                    foreach (LootSpawnSlot lootSpawnSlot in kvp.Value.LootSpawnSlots)
+                    {
+                        FindItemAndCalculateScoreRecursive(lootSpawnSlot.LootDefinition, shortname, ref newLootItem, ref multiplier);
+                        score += (lootSpawnSlot.Probability * newLootItem.Score) * lootSpawnSlot.NumberToSpawn;
+                    }
+
+                    if (score > 0)
+                    {
+                        AdvancedLootContainerProfile advancedLootProfile;
+                        if (storedData.loot_advanced.TryGetValue(kvp.Key, out advancedLootProfile))
+                        {
+                            LootSpawnSlot newLootSpawnSlot = new LootSpawnSlot
+                            {
+                                LootDefinition = new LootSpawn()
+                                {
+                                    Items = new ItemAmountRanged[] { newLootItem.Item },
+                                    SubSpawn = new LootSpawn.Entry[0]
+                                },
+                                NumberToSpawn = 1,
+                                Probability = Mathf.Clamp01(score * multiplier)
+                            };
+
+                            int index = advancedLootProfile.LootSpawnSlots.Length;
+
+                            System.Array.Resize(ref advancedLootProfile.LootSpawnSlots, index + 1);
+
+                            advancedLootProfile.LootSpawnSlots[index] = newLootSpawnSlot;
+
+                            additions++;
+                            Debug.Log($"[AlphaLoot] - Added {shortname} to advanced loot profile ({kvp.Key}) with a calculated probability of {newLootSpawnSlot.Probability}");
+                        }
+                        else
+                        {
+                            SimpleLootContainerProfile simpleLootContainerProfile;
+                            if (storedData.loot_simple.TryGetValue(kvp.Key, out simpleLootContainerProfile))
+                            {
+                                ItemAmountWeighted itemAmountWeighted = new ItemAmountWeighted()
+                                {
+                                    BlueprintChance = newLootItem.Item.BlueprintChance,
+                                    Condition = new ItemAmount.ConditionItem() { MinCondition = newLootItem.Item.Condition.MinCondition, MaxCondition = newLootItem.Item.Condition.MaxCondition },
+                                    MaxAmount = newLootItem.Item.MaxAmount,
+                                    MinAmount = newLootItem.Item.MinAmount,
+                                    Shortname = shortname,
+                                    Weight = Mathf.Max(Mathf.RoundToInt(((float)simpleLootContainerProfile.Items.Sum(x => x.Weight) * score) * multiplier), 1)
+                                };
+
+                                int index = simpleLootContainerProfile.Items.Length;
+
+                                System.Array.Resize(ref simpleLootContainerProfile.Items, index + 1);
+
+                                simpleLootContainerProfile.Items[index] = itemAmountWeighted;
+
+                                additions++;
+                                Debug.Log($"[AlphaLoot] - Added {shortname} to simple loot profile ({kvp.Key}) with a calculated weight of {itemAmountWeighted.Weight}");
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            foreach (KeyValuePair<string, AdvancedLootContainerProfile> kvp in defaultHeliLootTable.loot_advanced)
+            {
+                foreach (int itemid in items)
+                {
+                    string shortname = ItemManager.itemDictionary[itemid].shortname;
+
+                    NewLootItem newLootItem = new NewLootItem();
+                    float score = 0;
+                    int multiplier = 1;
+
+                    foreach (LootSpawnSlot lootSpawnSlot in kvp.Value.LootSpawnSlots)
+                    {
+                        FindItemAndCalculateScoreRecursive(lootSpawnSlot.LootDefinition, shortname, ref newLootItem, ref multiplier);
+                        score += (lootSpawnSlot.Probability * newLootItem.Score) * lootSpawnSlot.NumberToSpawn;
+                    }
+
+                    if (score > 0)
+                    {
+                        AdvancedLootContainerProfile advancedLootProfile;
+                        if (heliData.loot_advanced.TryGetValue(kvp.Key, out advancedLootProfile))
+                        {
+                            LootSpawnSlot newLootSpawnSlot = new LootSpawnSlot
+                            {
+                                LootDefinition = new LootSpawn()
+                                {
+                                    Items = new ItemAmountRanged[] { newLootItem.Item },
+                                    SubSpawn = new LootSpawn.Entry[0]
+                                },
+                                NumberToSpawn = 1,
+                                Probability = Mathf.Clamp01(score * multiplier)
+                            };
+
+                            int index = advancedLootProfile.LootSpawnSlots.Length;
+
+                            System.Array.Resize(ref advancedLootProfile.LootSpawnSlots, index + 1);
+
+                            advancedLootProfile.LootSpawnSlots[index] = newLootSpawnSlot;
+
+                            additions++;
+                            Debug.Log($"[AlphaLoot] - Added {shortname} to advanced heli loot profile ({kvp.Key}) with a calculated probability of {newLootSpawnSlot.Probability}");
+                        }
+                        else
+                        {
+                            SimpleLootContainerProfile simpleLootContainerProfile;
+                            if (heliData.loot_simple.TryGetValue(kvp.Key, out simpleLootContainerProfile))
+                            {
+                                ItemAmountWeighted itemAmountWeighted = new ItemAmountWeighted()
+                                {
+                                    BlueprintChance = newLootItem.Item.BlueprintChance,
+                                    Condition = new ItemAmount.ConditionItem() { MinCondition = newLootItem.Item.Condition.MinCondition, MaxCondition = newLootItem.Item.Condition.MaxCondition },
+                                    MaxAmount = newLootItem.Item.MaxAmount,
+                                    MinAmount = newLootItem.Item.MinAmount,
+                                    Shortname = shortname,
+                                    Weight = Mathf.Max(Mathf.RoundToInt(((float)simpleLootContainerProfile.Items.Sum(x => x.Weight) * score) * multiplier), 1)
+                                };
+
+                                int index = simpleLootContainerProfile.Items.Length;
+
+                                System.Array.Resize(ref simpleLootContainerProfile.Items, index + 1);
+
+                                simpleLootContainerProfile.Items[index] = itemAmountWeighted;
+
+                                additions++;
+                                Debug.Log($"[AlphaLoot] - Added {shortname} to simple heli loot profile ({kvp.Key}) with a calculated weight of {itemAmountWeighted.Weight}");
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            foreach (KeyValuePair<string, AdvancedLootContainerProfile> kvp in defaultBradleyLootTable.loot_advanced)
+            {
+                foreach (int itemid in items)
+                {
+                    string shortname = ItemManager.itemDictionary[itemid].shortname;
+
+                    NewLootItem newLootItem = new NewLootItem();
+                    float score = 0;
+                    int multiplier = 1;
+
+                    foreach (LootSpawnSlot lootSpawnSlot in kvp.Value.LootSpawnSlots)
+                    {
+                        FindItemAndCalculateScoreRecursive(lootSpawnSlot.LootDefinition, shortname, ref newLootItem, ref multiplier);
+                        score += (lootSpawnSlot.Probability * newLootItem.Score) * lootSpawnSlot.NumberToSpawn;
+                    }
+
+                    if (score > 0)
+                    {
+                        AdvancedLootContainerProfile advancedLootProfile;
+                        if (bradleyData.loot_advanced.TryGetValue(kvp.Key, out advancedLootProfile))
+                        {
+                            LootSpawnSlot newLootSpawnSlot = new LootSpawnSlot
+                            {
+                                LootDefinition = new LootSpawn()
+                                {
+                                    Items = new ItemAmountRanged[] { newLootItem.Item },
+                                    SubSpawn = new LootSpawn.Entry[0]
+                                },
+                                NumberToSpawn = 1,
+                                Probability = Mathf.Clamp01(score * multiplier)
+                            };
+
+                            int index = advancedLootProfile.LootSpawnSlots.Length;
+
+                            System.Array.Resize(ref advancedLootProfile.LootSpawnSlots, index + 1);
+
+                            advancedLootProfile.LootSpawnSlots[index] = newLootSpawnSlot;
+
+                            additions++;
+                            Debug.Log($"[AlphaLoot] - Added {shortname} to advanced bradley loot profile ({kvp.Key}) with a calculated probability of {newLootSpawnSlot.Probability}");
+                        }
+                        else
+                        {
+                            SimpleLootContainerProfile simpleLootContainerProfile;
+                            if (bradleyData.loot_simple.TryGetValue(kvp.Key, out simpleLootContainerProfile))
+                            {
+                                ItemAmountWeighted itemAmountWeighted = new ItemAmountWeighted()
+                                {
+                                    BlueprintChance = newLootItem.Item.BlueprintChance,
+                                    Condition = new ItemAmount.ConditionItem() { MinCondition = newLootItem.Item.Condition.MinCondition, MaxCondition = newLootItem.Item.Condition.MaxCondition },
+                                    MaxAmount = newLootItem.Item.MaxAmount,
+                                    MinAmount = newLootItem.Item.MinAmount,
+                                    Shortname = shortname,
+                                    Weight = Mathf.Max(Mathf.RoundToInt(((float)simpleLootContainerProfile.Items.Sum(x => x.Weight) * score) * multiplier), 1)
+                                };
+
+                                int index = simpleLootContainerProfile.Items.Length;
+
+                                System.Array.Resize(ref simpleLootContainerProfile.Items, index + 1);
+
+                                simpleLootContainerProfile.Items[index] = itemAmountWeighted;
+
+                                additions++;
+                                Debug.Log($"[AlphaLoot] - Added {shortname} to simple bradley loot profile ({kvp.Key}) with a calculated weight of {itemAmountWeighted.Weight}");
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        
+        private void FindItemAndCalculateScoreRecursive(LootSpawn lootSpawn, string shortname, ref NewLootItem newLootItem, ref int multiplier)
+        {            
+            if (lootSpawn.SubSpawn.Length > 0)
+            {
+                foreach(LootSpawn.Entry lootSpawnEntry in lootSpawn.SubSpawn)
+                {
+                    FindItemAndCalculateScoreRecursive(lootSpawnEntry.Category, shortname, ref newLootItem, ref multiplier);
+
+                    if (newLootItem.HasItem)
+                    {
+                        if (newLootItem.Score == 0)
+                            newLootItem.Score = (float)lootSpawnEntry.Weight / (float)lootSpawn.SubSpawn.Sum(x => x.Weight);
+                        else newLootItem.Score *= (float)lootSpawnEntry.Weight / (float)lootSpawn.SubSpawn.Sum(x => x.Weight);
+
+                        return;
+                    }
+                }
+            }
+            else if (lootSpawn.Items.Length > 0)
+            {
+                foreach(ItemAmountRanged itemAmountRanged in lootSpawn.Items)
+                {
+                    if (itemAmountRanged.Shortname == shortname)
+                    {
+                        if (newLootItem.HasItem)
+                            multiplier++;
+                        newLootItem.Item = itemAmountRanged;
+                    }
+                }
+            }
+        }
+
+        private class NewLootItem
+        {
+            public ItemAmountRanged Item;
+            public float Score;
+
+            public bool HasItem => Item != null;
+
+            public void Clear()
+            {
+                Item = null;
+                Score = 0;
+            }
+        }
+
+        private class ItemList
+        {
+            public List<int> itemIds = new List<int>();
+            public string protocol;
+        }
+        #endregion
+
+        #region Components
+        private class LootCycler : MonoBehaviour
+        {
+            private LootContainer lootContainer;
+
+            private void Awake()
+            {
+                lootContainer = GetComponent<LootContainer>();
+                InvokeHandler.InvokeRepeating(this, lootContainer.SpawnLoot, 3f, 3f);
+            }
+        }
+        #endregion
+
+        #region Commands
+        [ChatCommand("aloot")]
+        private void cmdRepopulateTarget(BasePlayer player, string command, string[] args)
+        {
+            if (!permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+            {
+                SendReply(player, "You do not have permission to use this command");
+                return;
+            }
+            
+            if (args == null || args.Length == 0)
+            {
+                SendReply(player, "/aloot repopulate - Repopulate the container you are looking at");
+                SendReply(player, "/aloot view - List the contents of the container you are looking at");
+                SendReply(player, "/aloot repopulateall - Repopulate every loot container on the map (can take upto 20 seconds)");
+                return;
+            }
+
+            switch (args[0].ToLower())
+            {
+                case "repopulate":
+                    {
+                        LootContainer lootContainer = FindContainer(player);
+                        if (lootContainer != null)
+                        {
+                            lootContainer.CancelInvoke(lootContainer.SpawnLoot);
+                            lootContainer.SpawnLoot();
+
+                            SendReply(player, $"Refreshed loot contents for {lootContainer.ShortPrefabName}");
+                        }
+                        else SendReply(player, "No loot container found");
+                    }
+                    return;
+                case "view":
+                    {
+                        LootContainer lootContainer = FindContainer(player);
+                        if (lootContainer != null)
+                        {                            
+                            SendReply(player, $"Loot contents for {lootContainer.ShortPrefabName};");
+                            SendReply(player, lootContainer.inventory.itemList.Select(x => $"{x.info.displayName.english} x{x.amount}").ToSentence());
+                        }
+                        else SendReply(player, "No loot container found");
+                    }
+                    return;
+                case "repopulateall":
+                    {
+                        SendReply(player, "Refreshing all loot containers...");
+                        RefreshLootContents();
+                    }
+                    return;
+                default:
+                    SendReply(player, "Invalid syntax!");
+                    break;
+            }            
+        }        
+
+        [ConsoleCommand("al.repopulateall")]
+        private void ccmdRepopulateAll(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection != null)
+            {
+                BasePlayer player = arg.Player();
+                if (player != null && !permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+                {
+                    SendReply(arg, "You do not have permission to use this command");
+                    return;
+                }
+            }
+
+            RefreshLootContents(arg);
+        }
+
+        [ConsoleCommand("al.additems")]
+        private void ccmdAddItemsl(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection != null)
+            {
+                BasePlayer player = arg.Player();
+                if (player != null && !permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+                {
+                    SendReply(arg, "You do not have permission to use this command");
+                    return;
+                }
+            }
+
+            if (arg.Args == null || arg.Args.Length == 0)
+            {
+                SendReply(arg, "al.additems <shortname> <opt:shortname> <opt:shortname>... - Add the specified item(s) to your loot table.\nThis finds the containers the items are in from the default loot table, calculates a score and adds it to your existing loot table.\nYou can enter as many shortnames as you like");
+                return;
+            }
+
+            AddSpecifiedItemsToLootTable(arg.Args);
+        }
+
+        [ConsoleCommand("al.search")]
+        private void ccmdSearchItem(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection != null)
+            {
+                BasePlayer player = arg.Player();
+                if (player != null && !permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+                {
+                    SendReply(arg, "You do not have permission to use this command");
+                    return;
+                }
+            }
+
+            string shortname = arg.GetString(0);
+            if (string.IsNullOrEmpty(shortname) || !ItemManager.itemDictionaryByName.ContainsKey(shortname))
+            {
+                SendReply(arg, "You must enter a valid item shortname to search");
+                return;
+            }
+
+            Hash<string, int> containers = new Hash<string, int>();
+
+            foreach (KeyValuePair<string, AdvancedLootContainerProfile> profile in storedData.loot_advanced)
+            {
+                int count = 0;
+                foreach (LootSpawnSlot lootSpawnSlot in profile.Value.LootSpawnSlots)
+                {
+                    FindItemCountRecursive(lootSpawnSlot.LootDefinition, shortname, ref count);
+                }
+
+                if (count > 0)
+                    containers[profile.Key] = count;
+            }
+
+            foreach (KeyValuePair<string, AdvancedNPCLootProfile> profile in storedData.npcs_advanced)
+            {
+                int count = 0;
+                foreach (LootSpawnSlot lootSpawnSlot in profile.Value.LootSpawnSlots)
+                {
+                    FindItemCountRecursive(lootSpawnSlot.LootDefinition, shortname, ref count);
+                }
+
+                if (count > 0)
+                    containers[profile.Key] = count;
+            }
+
+            foreach (KeyValuePair<string, SimpleLootContainerProfile> profile in storedData.loot_simple)
+            {
+                int count = 0;
+                foreach (ItemAmountWeighted itemAmountWeighted in profile.Value.Items)
+                {
+                    if (itemAmountWeighted.Shortname == shortname)
+                        count++;
+                }
+
+                if (count > 0)
+                    containers[profile.Key] = count;
+            }
+
+            foreach (KeyValuePair<string, SimpleNPCLootProfile> profile in storedData.npcs_simple)
+            {
+                int count = 0;
+                foreach (ItemAmountWeighted itemAmountWeighted in profile.Value.Items)
+                {
+                    if (itemAmountWeighted.Shortname == shortname)
+                        count++;
+                }
+
+                if (count > 0)
+                    containers[profile.Key] = count;
+            }
+
+            if (containers.Count == 0)
+            {
+                SendReply(arg, $"The item {shortname} was not found in any loot profiles");
+                return;
+            }
+            else
+            {
+                SendReply(arg, $"Found item {shortname} {containers.Sum(x => x.Value)} times in {containers.Count} loot profiles;{containers.Select(x => $"\n{x.Key} (x{x.Value})").ToSentence()}");
+                return;
+            }
+        }
+
+        private void FindItemCountRecursive(LootSpawn lootSpawn, string shortname, ref int count)
+        {
+            if (lootSpawn.SubSpawn.Length > 0)
+            {
+                foreach (LootSpawn.Entry lootSpawnEntry in lootSpawn.SubSpawn)                
+                    FindItemCountRecursive(lootSpawnEntry.Category, shortname, ref count);                
+            }
+            else if (lootSpawn.Items.Length > 0)
+            {
+                foreach (ItemAmountRanged itemAmountRanged in lootSpawn.Items)
+                {
+                    if (itemAmountRanged.Shortname == shortname)                    
+                        count++;                    
+                }
+            }
+        }
+
+        [ConsoleCommand("al.setloottable")]
+        private void ccmdChangeConfig(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection != null)
+            {
+                BasePlayer player = arg.Player();
+                if (player != null && !permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+                {
+                    SendReply(arg, "You do not have permission to use this command");
+                    return;
+                }
+            }
+
+            if (arg.Args == null || arg.Args.Length != 1)
+            {
+                SendReply(arg, "Invalid arguments supplied! al.setloottable \"file name\"");
+                return;
+            }
+
+            if (!Interface.Oxide.DataFileSystem.ExistsDatafile($"AlphaLoot/LootProfiles/{arg.Args[0]}"))
+            {
+                SendReply(arg, $"Unable to find a loot table with the name {arg.Args[0]}");
+                return;
+            }
+
+            configData.ProfileName = arg.Args[0];
+            SaveConfig();
+           
+            SendReply(arg, $"Loot table set to: {configData.ProfileName}");
+
+            LoadLootTable();
+
+            RefreshLootContents(arg);
+        }
+
+        [ConsoleCommand("al.setheliloottable")]
+        private void ccmdChangeHeliConfig(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection != null)
+            {
+                BasePlayer player = arg.Player();
+                if (player != null && !permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+                {
+                    SendReply(arg, "You do not have permission to use this command");
+                    return;
+                }
+            }
+
+            if (arg.Args == null || arg.Args.Length != 1)
+            {
+                SendReply(arg, "Invalid arguments supplied! al.setheliloottable \"heli file name\"");
+                return;
+            }
+
+            if (!Interface.Oxide.DataFileSystem.ExistsDatafile($"AlphaLoot/LootProfiles/{arg.Args[0]}"))
+            {
+                SendReply(arg, $"Unable to find a heli loot table with the name {arg.Args[0]}");
+                return;
+            }
+
+            configData.HeliProfileName = arg.Args[0];
+            SaveConfig();
+
+            SendReply(arg, $"Heli Loot table set to: {configData.HeliProfileName}");
+
+            LoadHeliTable();
+        }
+
+        [ConsoleCommand("al.setbradleyloottable")]
+        private void ccmdChangeBradleyConfig(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection != null)
+            {
+                BasePlayer player = arg.Player();
+                if (player != null && !permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+                {
+                    SendReply(arg, "You do not have permission to use this command");
+                    return;
+                }
+            }
+
+            if (arg.Args == null || arg.Args.Length != 1)
+            {
+                SendReply(arg, "Invalid arguments supplied! al.setbradleyloottable \"heli file name\"");
+                return;
+            }
+
+            if (!Interface.Oxide.DataFileSystem.ExistsDatafile($"AlphaLoot/LootProfiles/{arg.Args[0]}"))
+            {
+                SendReply(arg, $"Unable to find a bradley loot table with the name {arg.Args[0]}");
+                return;
+            }
+
+            configData.BradleyProfileName = arg.Args[0];
+            SaveConfig();
+
+            SendReply(arg, $"Bradley Loot table set to: {configData.BradleyProfileName}");
+
+            LoadBradleyTable();
+        }
+
+        [ConsoleCommand("al.generatetable")]
+        private void ccmdGenerateTable(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection != null)
+            {
+                BasePlayer player = arg.Player();
+                if (player != null && !permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+                {
+                    SendReply(arg, "You do not have permission to use this command");
+                    return;
+                }
+            }
+
+            if (arg.Args == null || arg.Args.Length < 3)
+            {
+                SendReply(arg, "al.generatetable <filename> <heli_filename> <bradley_filename> - Generate the default loot table to the specified file");
+                return;
+            }
+
+            string fileName = arg.GetString(0);
+            if (fileName.Equals(configData.ProfileName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                SendReply(arg, "The filename you entered is the same as the loot table currently being used. Change the filename to something else");
+                return;
+            }
+
+            string heliFileName = arg.GetString(1);
+            if (fileName.Equals(configData.HeliProfileName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                SendReply(arg, "The heli filename you entered is the same as the heli loot table currently being used. Change the filename to something else");
+                return;
+            }
+
+            string bradleyFileName = arg.GetString(2);
+            if (fileName.Equals(configData.BradleyProfileName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                SendReply(arg, "The bradley filename you entered is the same as the bradley loot table currently being used. Change the filename to something else");
+                return;
+            }
+
+            StoredData storedData = new StoredData();
+            StoredData heliData = new StoredData();
+            StoredData bradleyData = new StoredData();
+
+            PopulateContainerDefinitions(ref storedData, ref heliData, ref bradleyData);
+
+            Interface.Oxide.DataFileSystem.WriteObject<StoredData>($"AlphaLoot/LootProfiles/{fileName}", storedData);
+            Interface.Oxide.DataFileSystem.WriteObject<StoredData>($"AlphaLoot/LootProfiles/{heliFileName}", heliData);
+            Interface.Oxide.DataFileSystem.WriteObject<StoredData>($"AlphaLoot/LootProfiles/{bradleyFileName}", bradleyData);
+
+            SendReply(arg, $"Generated a default loot table to /oxide/data/AlphaLoot/LootProfiles/ ({fileName}.json, {heliFileName}.json and {bradleyFileName}.json)");
+        }
+
+        [ConsoleCommand("al.skins")]
+        private void ccmdALSkins(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection != null)
+            {
+                BasePlayer player = arg.Player();
+                if (player != null && !permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION))
+                {
+                    SendReply(arg, "You do not have permission to use this command");
+                    return;
+                }
+            }
+
+            if (arg.Args == null || arg.Args.Length == 0)
+            {
+                SendReply(arg, "al.skins add <shortname> <skinid> <opt:weight> - Add a single skin to the random skin list, with a optional argument to specify the weight of this skin");
+                SendReply(arg, "al.skins remove <shortname> - Remove all skins for the specified item");
+                SendReply(arg, "al.skins remove <shortname> <skinid> - Remove an individual skin");
+                return;
+            }
+
+            switch (arg.Args[0].ToLower())
+            {
+                case "add":
+                    {                        
+                        string shortname = arg.GetString(1, string.Empty);
+                        ulong skinId = arg.GetULong(2, 0UL);
+                        int weight = arg.GetInt(3, 1);
+
+                        if (string.IsNullOrEmpty(shortname) || ItemManager.FindItemDefinition(shortname) == null)
+                        {
+                            SendReply(arg, "You must enter a valid item shortname");
+                            return;
+                        }
+                                                
+                        if (!weightedSkinIds.ContainsKey(shortname))
+                            weightedSkinIds[shortname] = new HashSet<SkinEntry>();
+
+                        weightedSkinIds[shortname].Add(new SkinEntry(skinId, weight));
+                        skinData.WriteObject(weightedSkinIds);
+
+                        SendReply(arg, $"You have added the skin {skinId} for item {shortname} with a weight of {weight}");
+                    }
+                    return;
+                case "remove":
+                    {
+                        string shortname = arg.GetString(1, string.Empty);
+                        if (string.IsNullOrEmpty(shortname) || ItemManager.FindItemDefinition(shortname) == null)
+                        {
+                            SendReply(arg, "You must enter a valid item shortname");
+                            return;
+                        }
+
+                        if (arg.Args.Length < 3)
+                        {
+                            weightedSkinIds.Remove(shortname);
+                            skinData.WriteObject(weightedSkinIds);
+                            SendReply(arg, $"You have removed all skins for item {shortname}");
+                        }
+                        else
+                        {
+                            ulong skinId = arg.GetULong(2, 0UL);
+                            
+                            HashSet<SkinEntry> list;
+                            if (weightedSkinIds.TryGetValue(shortname, out list))
+                            {
+                                for (int i = list.Count - 1; i >= 0; i--)
+                                {
+                                    SkinEntry skinEntry = list.ElementAt(i);
+                                    if (skinEntry.SkinID == skinId)
+                                    {
+                                        weightedSkinIds[shortname].Remove(skinEntry);
+                                        skinData.WriteObject(weightedSkinIds);
+                                        SendReply(arg, $"You have removed the skin {skinId} for item {shortname}");
+                                        return;
+                                    }
+                                }                                
+                            }
+                            else
+                            {
+                                SendReply(arg, $"There are no skins saved for item {shortname}");
+                                return;
+                            }
+                        }                        
+                    }
+                    return;
+                default:
+                    break;
+            }
+        }
+        #endregion
+
+        #region Config        
+        private static ConfigData configData;
+
+        private class ConfigData
+        {
+            [JsonProperty(PropertyName = "Auto-update loot tables with new items")]
+            public bool AutoUpdate { get; set; }
+
+            [JsonProperty(PropertyName = "Global Loot Multiplier (multiplies all loot amounts by the number specified)")]
+            public float GlobalMultiplier { get; set; }
+
+            [JsonProperty(PropertyName = "Apply global and individual loot multipliers to un-stackable items")]
+            public bool MultiplyUnstackable { get; set; }
+
+            [JsonProperty(PropertyName = "Loot Table Name")]
+            public string ProfileName { get; set; }
+
+            [JsonProperty(PropertyName = "Heli Loot Table Name")]
+            public string HeliProfileName { get; set; }
+
+            [JsonProperty(PropertyName = "Bradley Loot Table Name")]
+            public string BradleyProfileName { get; set; }
+
+            [JsonProperty(PropertyName = "Amount of crates to drop (Bradley APC - default 3)")]
+            public int BradleyCrates { get; set; }
+
+            [JsonProperty(PropertyName = "Amount of crates to drop (Patrol Helicopter - default 4)")]
+            public int HelicopterCrates { get; set; }
+
+            [JsonProperty(PropertyName = "Override FancyDrop containers with supply drop profile")]
+            public bool OverrideFancyDrop { get; set; }
+
+            [JsonProperty(PropertyName = "Use skins from the SkinBox skin list")]
+            public bool UseSkinboxSkins { get; set; }
+
+            [JsonProperty(PropertyName = "Use skins from the approved skin list")]
+            public bool UseApprovedSkins { get; set; }
+                        
+            public Oxide.Core.VersionNumber Version { get; set; }
+        }
+
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            configData = Config.ReadObject<ConfigData>();
+
+            if (configData.Version < Version)
+                UpdateConfigValues();
+
+            Config.WriteObject(configData, true);
+        }
+
+        protected override void LoadDefaultConfig() => configData = GetBaseConfig();
+
+        private ConfigData GetBaseConfig()
+        {
+            return new ConfigData
+            {
+                AutoUpdate = false,
+                GlobalMultiplier = 1f,
+                MultiplyUnstackable = false,
+                ProfileName = "default_loottable",
+                HeliProfileName = "default_heli_loottable",
+                BradleyProfileName = "default_bradley_loottable",
+                BradleyCrates = 3,
+                HelicopterCrates = 4,
+                OverrideFancyDrop = false,
+                UseSkinboxSkins = false,
+                UseApprovedSkins = false,
+                Version = Version
+            };
+        }
+
+        protected override void SaveConfig() => Config.WriteObject(configData, true);
+
+        private void UpdateConfigValues()
+        {
+            PrintWarning("Config update detected! Updating config values...");
+
+            ConfigData baseConfig = GetBaseConfig();
+
+            if (configData.Version < new VersionNumber(3, 0, 1))
+            {
+                configData.BradleyCrates = 3;
+                configData.HelicopterCrates = 4;
+            }
+
+            if (configData.Version < new VersionNumber(3, 0, 4))
+            {
+                configData.UseApprovedSkins = false;
+                configData.UseSkinboxSkins = false;
+            }
+
+            if (configData.Version < new VersionNumber(3, 0, 5))
+            {
+                updateContainerCapacities = true;
+            }
+
+            if (configData.Version < new VersionNumber(3, 0, 14))
+            {
+                configData.HeliProfileName = baseConfig.HeliProfileName;
+                configData.BradleyProfileName = baseConfig.BradleyProfileName;
+            }
+
+            configData.Version = Version;
+            PrintWarning("Config update completed!");
+        }
+
+        #endregion
+
+        #region Data Management
+        private void SaveData()
+        {
+            data.WriteObject(storedData);
+            heli.WriteObject(heliData);
+            bradley.WriteObject(bradleyData);
+        }
+
+        private void LoadData()
+        {
+            LoadLootTable();
+            LoadHeliTable();
+            LoadBradleyTable();
+            LoadSkinsData();
+        }
+
+        private void LoadLootTable()
+        {
+            PrintWarning($"Loading Loot Table from {configData.ProfileName}.json!");
+
+            data = Interface.Oxide.DataFileSystem.GetFile($"AlphaLoot/LootProfiles/{configData.ProfileName}");
+
+            try
+            {
+                storedData = data.ReadObject<StoredData>();
+            }
+            catch
+            {
+                storedData = new StoredData();
+            }
+
+            if (!storedData.IsValid)
+            {
+                PrintWarning("Invalid loot table file loaded, it contains no loot definitions! If this is a fresh install you can ignore this message, otherwise are you trying to load a ALv2.x.x loot table in to v3.x.x?");
+                storedData = new StoredData();
+            }
+        }
+
+        private void LoadHeliTable()
+        {
+            PrintWarning($"Loading Heli Loot Table from {configData.HeliProfileName}.json!");
+
+            heli = Interface.Oxide.DataFileSystem.GetFile($"AlphaLoot/LootProfiles/{configData.HeliProfileName}");
+            try
+            {
+                heliData = heli.ReadObject<StoredData>();
+            }
+            catch
+            {
+                heliData = new StoredData();
+            }
+
+            heliData.IsBaseLootTable = false;
+            heliData.ProfileName = "heli_crate";
+        }
+
+        private void LoadBradleyTable()
+        {
+            PrintWarning($"Loading Bradley Loot Table from {configData.BradleyProfileName}.json!");
+
+            bradley = Interface.Oxide.DataFileSystem.GetFile($"AlphaLoot/LootProfiles/{configData.BradleyProfileName}");
+            try
+            {
+                bradleyData = bradley.ReadObject<StoredData>();
+            }
+            catch
+            {
+                bradleyData = new StoredData();
+            }
+
+            bradleyData.IsBaseLootTable = false;
+            bradleyData.ProfileName = "bradley_crate";
+        }
+
+        private void LoadSkinsData()
+        {
+            skinData = Interface.Oxide.DataFileSystem.GetFile("AlphaLoot/item_skin_ids");
+
+            try
+            {
+                weightedSkinIds = skinData.ReadObject<Hash<string, HashSet<SkinEntry>>>();
+            }
+            catch
+            {
+                weightedSkinIds = new Hash<string, HashSet<SkinEntry>>();
+            }
+
+            if (weightedSkinIds == null)
+                weightedSkinIds = new Hash<string, HashSet<SkinEntry>>();
+        }
+
+        private void SetCapacityLimits()
+        {
+            int count = 0;
+
+            foreach (KeyValuePair<string, AdvancedLootContainerProfile> kvp in storedData.loot_advanced)
+            {
+                if (kvp.Value.MaximumItems == -1)
+                {
+                    string prefabPath = string.Empty;
+                    for (int i = 0; i < GameManifest.Current.entities.Length; i++)
+                    {
+                        string path = GameManifest.Current.entities[i];
+
+                        if (path.EndsWith($"{kvp.Key}.prefab", System.StringComparison.OrdinalIgnoreCase))
+                        {
+                            prefabPath = path;
+                            break;
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(prefabPath))
+                    {
+                        LootContainer container = GameManager.server.FindPrefab(prefabPath.ToLower()).GetComponent<LootContainer>();                       
+                        kvp.Value.MaximumItems = container.inventorySlots;
+                        count++;
+                    }
+                }
+            }
+
+            if (count > 0)
+            {
+                Puts($"Updated capacity limits for {count} advanced loot profiles");
+                SaveData();
+            }
+        }
+
+        #region Data Structure
+        public class BaseLootProfile
+        {
+            public bool Enabled = true;
+
+            public bool AllowSkinnedItems = true;
+
+            public float LootMultiplier = 1;
+
+            public int MinScrapAmount;
+            public int MaxScrapAmount;
+
+            [JsonIgnore]
+            private static ItemDefinition _scrapDefinition;
+
+            [JsonIgnore]
+            public ItemDefinition ScrapDefinition
+            {
+                get
+                {
+                    if (_scrapDefinition == null)
+                        _scrapDefinition = ItemManager.FindItemDefinition("scrap");
+                    return _scrapDefinition;
+                }
+            }
+
+            [JsonIgnore]
+            private static ItemDefinition _blueprintBase;
+
+            [JsonIgnore]
+            public ItemDefinition BlueprintBaseDefinition
+            {
+                get
+                {
+                    if (_blueprintBase == null)
+                        _blueprintBase = ItemManager.FindItemDefinition("blueprintbase");
+                    return _blueprintBase;
+                }
+            }
+
+
+            public int GetScrapAmount() => UnityEngine.Random.Range(MinScrapAmount, MaxScrapAmount);
+
+            public virtual void PopulateLoot(ItemContainer container)
+            {
+                int scrapAmount = Mathf.RoundToInt(GetScrapAmount() * configData.GlobalMultiplier);
+                if (scrapAmount > 0)
+                {
+                    container.capacity = container.itemList.Count + 1;
+
+                    if (container.entityOwner is LootContainer)
+                    {
+                        (container.entityOwner as LootContainer).scrapAmount = scrapAmount;
+                        (container.entityOwner as LootContainer).GenerateScrap();
+                    }
+                    else ItemManager.Create(ScrapDefinition, scrapAmount).MoveToContainer(container);
+                }
+                else container.capacity = container.itemList.Count;
+            }
+        }
+
+        public class BaseLootContainerProfile : BaseLootProfile
+        {
+            public bool DestroyOnEmpty = true;
+            public bool ShouldRefreshContents;
+            
+            public int MinSecondsBetweenRefresh = 3600;
+            public int MaxSecondsBetweenRefresh = 7200;
+        }
+
+        public class SimpleNPCLootProfile : BaseLootProfile
+        {
+            public int MinimumItems;
+            public int MaximumItems;
+
+            public ItemAmountWeighted[] Items;
+
+            public SimpleNPCLootProfile() { }
+
+            public SimpleNPCLootProfile(SimpleNPCLootProfile lootContainerProfile)
+            {
+                AllowSkinnedItems = lootContainerProfile.AllowSkinnedItems;
+               
+                MinScrapAmount = lootContainerProfile.MinScrapAmount;
+                MaxScrapAmount = lootContainerProfile.MaxScrapAmount;
+
+                MinimumItems = lootContainerProfile.MinimumItems;
+                MaximumItems = lootContainerProfile.MaximumItems;
+
+                Items = lootContainerProfile.Items;
+
+                Enabled = lootContainerProfile.Enabled;
+            }
+
+            public override void PopulateLoot(ItemContainer container)
+            {
+                int count = UnityEngine.Random.Range(MinimumItems, MaximumItems + 1);
+
+                container.capacity = count;
+
+                List<ItemAmountWeighted> items = Pool.GetList<ItemAmountWeighted>();
+                items.AddRange(Items);
+
+                int itemCount = 0;
+                while (itemCount < count)
+                {
+                    int totalWeight = items.Sum((ItemAmountWeighted x) => x.Weight);
+
+                    int random = UnityEngine.Random.Range(0, totalWeight);
+
+                    for (int y = 0; y < items.Count; y++)
+                    {
+                        ItemAmountWeighted itemAmountWeighted = items[y];
+                        ItemDefinition itemDefinition = ItemManager.FindItemDefinition(itemAmountWeighted.Shortname);
+
+                        totalWeight -= items[y].Weight;
+                        if (random >= totalWeight)
+                        {
+                            items.Remove(itemAmountWeighted);
+
+                            Item item = null;
+                            if (itemAmountWeighted.WantsBlueprint())
+                            {
+                                ItemDefinition blueprintBaseDef = BlueprintBaseDefinition;
+                                if (blueprintBaseDef == null)
+                                    continue;
+
+                                item = ItemManager.Create(blueprintBaseDef);
+                                item.blueprintTarget = itemAmountWeighted.ItemID;
+                            }
+                            else
+                            {
+                                item = ItemManager.CreateByItemID(itemAmountWeighted.ItemID, (int)itemAmountWeighted.GetAmount(LootMultiplier), AllowSkinnedItems ? itemAmountWeighted.RandomSkinID() : 0UL);
+
+                                if (item.hasCondition)
+                                    item.condition = itemAmountWeighted.GetConditionFraction() * item.info.condition.max;
+                            }
+                            if (item != null)
+                            {
+                                item.OnVirginSpawn();
+                                if (!item.MoveToContainer(container, -1, true))
+                                    item.Remove(0f);
+                            }
+
+                            itemCount++;
+                            break;
+                        }
+                    }
+
+                    if (items.Count == 0)
+                        items.AddRange(Items);
+                }
+
+                Pool.FreeList(ref items);
+                base.PopulateLoot(container);
+            }
+        }
+
+        public class AdvancedNPCLootProfile : BaseLootProfile
+        {       
+            public LootSpawnSlot[] LootSpawnSlots;
+
+            public int MaximumItems = -1;
+
+            public AdvancedNPCLootProfile() { }
+
+            public AdvancedNPCLootProfile(LootContainer.LootSpawnSlot[] lootSpawnSlots)
+            {                
+                LootSpawnSlots = new LootSpawnSlot[lootSpawnSlots?.Length ?? 0];
+
+                for (int i = 0; i < lootSpawnSlots?.Length; i++)
+                {
+                    LootSpawnSlots[i] = new LootSpawnSlot(lootSpawnSlots[i], true);
+                }
+            }
+
+            public AdvancedNPCLootProfile(AdvancedNPCLootProfile lootContainerProfile)
+            {                
+                MinScrapAmount = lootContainerProfile.MinScrapAmount;
+                MaxScrapAmount = lootContainerProfile.MaxScrapAmount;
+
+                MaximumItems = lootContainerProfile.MaximumItems;
+
+                LootSpawnSlots = lootContainerProfile.LootSpawnSlots;
+
+                AllowSkinnedItems = lootContainerProfile.AllowSkinnedItems;
+
+                LootMultiplier = lootContainerProfile.LootMultiplier;
+
+                Enabled = lootContainerProfile.Enabled;
+            }
+
+            public override void PopulateLoot(ItemContainer container)
+            {
+                if (LootSpawnSlots != null && LootSpawnSlots.Length != 0)
+                {
+                    container.capacity = MaximumItems == -1 ? 36 : MaximumItems;
+                    for (int i = 0; i < LootSpawnSlots.Length; i++)
+                    {
+                        LootSpawnSlot lootSpawnSlot = LootSpawnSlots[i];
+                        for (int j = 0; j < lootSpawnSlot.NumberToSpawn; j++)
+                        {
+                            if (UnityEngine.Random.Range(0f, 1f) <= lootSpawnSlot.Probability)
+                            {
+                                lootSpawnSlot.LootDefinition.SpawnIntoContainer(container, this);
+                            }
+                        }
+                    }
+                }
+
+                base.PopulateLoot(container);
+            }
+        }
+
+        public class SimpleLootContainerProfile : BaseLootContainerProfile
+        {
+            public int MinimumItems;
+            public int MaximumItems;
+
+            public ItemAmountWeighted[] Items;
+
+            public SimpleLootContainerProfile() { }
+
+            public SimpleLootContainerProfile(SimpleLootContainerProfile lootContainerProfile)
+            {                
+                DestroyOnEmpty = lootContainerProfile.DestroyOnEmpty;
+
+                AllowSkinnedItems = lootContainerProfile.AllowSkinnedItems;
+                ShouldRefreshContents = lootContainerProfile.ShouldRefreshContents;
+                MinSecondsBetweenRefresh = lootContainerProfile.MinSecondsBetweenRefresh;
+                MaxSecondsBetweenRefresh = lootContainerProfile.MaxSecondsBetweenRefresh;
+
+                MinScrapAmount = lootContainerProfile.MinScrapAmount;
+                MaxScrapAmount = lootContainerProfile.MaxScrapAmount;
+
+                MinimumItems = lootContainerProfile.MinimumItems;
+                MaximumItems = lootContainerProfile.MaximumItems;
+
+                Items = lootContainerProfile.Items;
+
+                Enabled = lootContainerProfile.Enabled;
+            }
+
+            public override void PopulateLoot(ItemContainer container)
+            {
+                int count = UnityEngine.Random.Range(MinimumItems, MaximumItems + 1);
+
+                container.capacity = count;
+
+                List<ItemAmountWeighted> items = Pool.GetList<ItemAmountWeighted>();
+                items.AddRange(Items);
+
+                int itemCount = 0;
+                while (itemCount < count)
+                {
+                    int totalWeight = items.Sum((ItemAmountWeighted x) => x.Weight);
+
+                    int random = UnityEngine.Random.Range(0, totalWeight);
+
+                    for (int y = 0; y < items.Count; y++)
+                    {
+                        ItemAmountWeighted itemAmountWeighted = items[y];
+                        ItemDefinition itemDefinition = ItemManager.FindItemDefinition(itemAmountWeighted.Shortname);
+
+                        totalWeight -= items[y].Weight;
+                        if (random >= totalWeight)
+                        {
+                            items.Remove(itemAmountWeighted);
+
+                            Item item = null;
+                            if (itemAmountWeighted.WantsBlueprint())
+                            {
+                                ItemDefinition blueprintBaseDef = BlueprintBaseDefinition;
+                                if (blueprintBaseDef == null)
+                                    continue;
+
+                                item = ItemManager.Create(blueprintBaseDef, 1, 0UL);
+                                item.blueprintTarget = itemAmountWeighted.ItemID;
+                            }
+                            else
+                            {
+                                item = ItemManager.CreateByItemID(itemAmountWeighted.ItemID, (int)itemAmountWeighted.GetAmount(LootMultiplier), AllowSkinnedItems ? itemAmountWeighted.RandomSkinID() : 0UL);
+
+                                if (item.hasCondition)
+                                    item.condition = itemAmountWeighted.GetConditionFraction() * item.info.condition.max;
+                            }
+                            if (item != null)
+                            {
+                                item.OnVirginSpawn();
+                                if (!item.MoveToContainer(container, -1, true))
+                                    item.Remove(0f);
+                            }
+
+                            itemCount++;
+                            break;
+                        }
+                    }
+
+                    if (items.Count == 0)
+                        items.AddRange(Items);
+                }
+
+                Pool.FreeList(ref items);
+                base.PopulateLoot(container);
+            }
+        }
+
+        public class AdvancedLootContainerProfile : BaseLootContainerProfile
+        {
+            public LootSpawnSlot[] LootSpawnSlots;
+
+            public int MaximumItems = -1;
+
+            public AdvancedLootContainerProfile() { }
+
+            public AdvancedLootContainerProfile(LootContainer container)
+            {
+                bool hasCondition = container.SpawnType == LootContainer.spawnType.ROADSIDE || container.SpawnType == LootContainer.spawnType.TOWN;
+
+                DestroyOnEmpty = container.destroyOnEmpty;
+                ShouldRefreshContents = (float.IsInfinity(container.minSecondsBetweenRefresh) || float.IsInfinity(container.maxSecondsBetweenRefresh)) ? false : container.shouldRefreshContents;
+
+                int scrapAmount;
+                if (!defaultScrapAmounts.TryGetValue(container.ShortPrefabName, out scrapAmount))
+                    scrapAmount = 1;
+
+                MinScrapAmount = MaxScrapAmount = scrapAmount;
+
+                MinSecondsBetweenRefresh = !ShouldRefreshContents ? 0 : Mathf.RoundToInt(container.minSecondsBetweenRefresh);
+                MaxSecondsBetweenRefresh = !ShouldRefreshContents ? 0 : Mathf.RoundToInt(container.maxSecondsBetweenRefresh);
+
+                MaximumItems = container.inventorySlots;
+
+                LootSpawnSlots = new LootSpawnSlot[(container.LootSpawnSlots?.Length ?? 0) + 1];
+
+                if (container.LootSpawnSlots?.Length > 0)
+                {
+                    LootSpawnSlots = new LootSpawnSlot[container.LootSpawnSlots?.Length ?? 0];
+                    for (int i = 0; i < container.LootSpawnSlots?.Length; i++)
+                    {
+                        LootSpawnSlots[i] = new LootSpawnSlot(container.LootSpawnSlots[i], hasCondition);
+                    }
+                }
+                else
+                {
+                    if (container.lootDefinition != null)
+                    {
+                        LootSpawnSlots = new LootSpawnSlot[]
+                        {
+                            new LootSpawnSlot(container.lootDefinition, container.maxDefinitionsToSpawn, hasCondition)
+                        };
+                    }
+                }
+            }
+
+            public AdvancedLootContainerProfile(AdvancedLootContainerProfile lootContainerProfile)
+            {
+                DestroyOnEmpty = lootContainerProfile.DestroyOnEmpty;
+
+                AllowSkinnedItems = lootContainerProfile.AllowSkinnedItems;
+
+                ShouldRefreshContents = lootContainerProfile.ShouldRefreshContents;
+
+                MinSecondsBetweenRefresh = lootContainerProfile.MinSecondsBetweenRefresh;
+                MaxSecondsBetweenRefresh = lootContainerProfile.MaxSecondsBetweenRefresh;
+
+                MinScrapAmount = lootContainerProfile.MinScrapAmount;
+                MaxScrapAmount = lootContainerProfile.MaxScrapAmount;
+                             
+                MaximumItems = lootContainerProfile.MaximumItems;
+
+                LootSpawnSlots = lootContainerProfile.LootSpawnSlots;
+
+                Enabled = lootContainerProfile.Enabled;
+            }
+
+            public override void PopulateLoot(ItemContainer container)
+            {
+                if (LootSpawnSlots != null && LootSpawnSlots.Length != 0)
+                {
+                    container.capacity = MaximumItems == -1 ? 36 : MaximumItems;
+
+                    for (int i = 0; i < LootSpawnSlots.Length; i++)
+                    {
+                        LootSpawnSlot lootSpawnSlot = LootSpawnSlots[i];
+                        for (int j = 0; j < lootSpawnSlot.NumberToSpawn; j++)
+                        {
+                            if (UnityEngine.Random.Range(0f, 1f) <= lootSpawnSlot.Probability)
+                            {
+                                lootSpawnSlot.LootDefinition.SpawnIntoContainer(container, this);
+                            }
+                        }
+                    }
+                }
+
+                base.PopulateLoot(container);
+            }
+        }
+
+        public class LootSpawnSlot
+        {
+            public LootSpawn LootDefinition;
+
+            public int NumberToSpawn;
+
+            public float Probability;
+
+            public LootSpawnSlot() { }
+
+            public LootSpawnSlot(global::LootSpawn lootSpawn, int numberToSpawn, bool hasCondition)
+            {
+                LootDefinition = new LootSpawn(lootSpawn, hasCondition);
+                NumberToSpawn = numberToSpawn;
+                Probability = 1f;
+            }
+
+            public LootSpawnSlot(LootContainer.LootSpawnSlot lootSpawnSlot, bool hasCondition)
+            {
+                LootDefinition = new LootSpawn(lootSpawnSlot.definition, hasCondition);
+                NumberToSpawn = lootSpawnSlot.numberToSpawn;
+                Probability = lootSpawnSlot.probability;
+            }
+        }
+
+        public class LootSpawn
+        {
+            public ItemAmountRanged[] Items;
+
+            public Entry[] SubSpawn;
+
+            public byte[] Node = new byte[0];
+
+            public LootSpawn() { }
+
+            public LootSpawn(global::LootSpawn lootSpawn, bool hasCondition)
+            {
+                Items = new ItemAmountRanged[lootSpawn.items?.Length ?? 0];
+
+                for (int i = 0; i < lootSpawn.items?.Length; i++)
+                {
+                    global::ItemAmountRanged itemAmountRanged = lootSpawn.items[i];
+
+                    Items[i] = new ItemAmountRanged(itemAmountRanged.itemDef, itemAmountRanged.amount, itemAmountRanged.maxAmount, hasCondition);
+                }
+
+                SubSpawn = new Entry[lootSpawn.subSpawn?.Length ?? 0];
+
+                for (int i = 0; i < lootSpawn.subSpawn?.Length; i++)
+                {
+                    global::LootSpawn.Entry subspawn = lootSpawn.subSpawn[i];
+
+                    SubSpawn[i] = new Entry()
+                    {
+                        Category = new LootSpawn(subspawn.category, hasCondition),
+                        Weight = subspawn.weight
+                    };                   
+                }
+            }
+
+            public void SpawnIntoContainer(ItemContainer container, BaseLootProfile lootProfile)
+            {
+                if (SubSpawn != null && SubSpawn.Length != 0)
+                {
+                    SubCategoryIntoContainer(container, lootProfile);
+                    return;
+                }
+
+                if (Items != null)
+                {
+                    foreach (ItemAmountRanged itemAmountRanged in Items)
+                    {
+                        if (itemAmountRanged != null)
+                        {
+                            Item item = null;
+                            if (itemAmountRanged.WantsBlueprint())
+                            {
+                                ItemDefinition blueprintBaseDef = lootProfile.BlueprintBaseDefinition;
+                                if (blueprintBaseDef == null)                                
+                                    continue;
+                                
+                                item = ItemManager.Create(blueprintBaseDef, 1, 0UL);
+                                item.blueprintTarget = itemAmountRanged.ItemID;
+                            }
+                            else
+                            {
+                                item = ItemManager.CreateByItemID(itemAmountRanged.ItemID, (int)itemAmountRanged.GetAmount(lootProfile.LootMultiplier), lootProfile.AllowSkinnedItems ? itemAmountRanged.RandomSkinID() : 0UL);
+
+                                if (item.hasCondition)
+                                    item.condition = itemAmountRanged.GetConditionFraction() * item.info.condition.max;
+                            }
+                            if (item != null)
+                            {
+                                item.OnVirginSpawn();
+                                if (!item.MoveToContainer(container, -1, true))                                
+                                    item.Remove(0f);                                   
+                            }
+                        }
+                    }
+                }
+            }
+
+            private void SubCategoryIntoContainer(ItemContainer container, BaseLootProfile lootProfile)
+            {
+                int totalWeight = SubSpawn.Sum((LootSpawn.Entry x) => x.Weight);
+
+                int random = UnityEngine.Random.Range(0, totalWeight);
+
+                for (int i = 0; i < SubSpawn.Length; i++)
+                {
+                    if (SubSpawn[i].Category != null)
+                    {
+                        totalWeight -= SubSpawn[i].Weight;
+                        if (random >= totalWeight)
+                        {
+                            SubSpawn[i].Category.SpawnIntoContainer(container, lootProfile);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            public class Entry
+            {
+                public LootSpawn Category;
+
+                public int Weight;
+
+                public byte[] Node = new byte[0];
+            }
+        }
+
+        public class ItemAmountWeighted : ItemAmountRanged
+        {
+            public int Weight = 1;
+        }
+
+        public class ItemAmountRanged : ItemAmount
+        {
+            public float MaxAmount = -1f;
+
+            public ItemAmountRanged() : base() { }
+
+            public ItemAmountRanged(ItemDefinition item = null, float amount = 0f, float maxAmount = -1f, bool hasCondition = false) : base(item, amount, hasCondition)
+            {
+                this.MaxAmount = Mathf.Max(maxAmount, amount);
+            }
+
+            public override float GetAmount(float lootMultiplier)
+            {
+                ItemDefinition itemDefinition = ItemManager.FindItemDefinition(ItemID);                
+                bool isStackable = (itemDefinition.stackable > 1 && !itemDefinition.condition.enabled) || configData.MultiplyUnstackable;
+
+                if (this.MinAmount == this.MaxAmount)
+                {
+                    if (!isStackable)
+                        return Mathf.Clamp(this.MinAmount, 1, int.MaxValue);
+
+                    return Mathf.Clamp((this.MinAmount * lootMultiplier) * configData.GlobalMultiplier, 1, int.MaxValue);
+                }
+
+                if (!isStackable)
+                    return (int)Mathf.Clamp(UnityEngine.Random.Range(this.MinAmount, this.MaxAmount), 1, int.MaxValue);
+
+                return (int)Mathf.Clamp((UnityEngine.Random.Range(this.MinAmount, this.MaxAmount) * lootMultiplier) * configData.GlobalMultiplier, 1, int.MaxValue);
+            }
+        }
+                
+        public class ItemAmount
+        {
+            public string Shortname;
+
+            public float BlueprintChance;
+           
+            public float MinAmount;
+
+            public ConditionItem Condition;
+
+            [JsonIgnore]
+            private int _itemId = -1;
+
+            [JsonIgnore]
+            public int ItemID
+            {
+                get
+                {
+                    if (_itemId < 0)
+                        _itemId = ItemManager.FindItemDefinition(Shortname).itemid;
+                    return _itemId;
+                }
+            }
+            
+            public ItemAmount() { }
+
+            public ItemAmount(ItemDefinition item = null, float amount = 0f, bool hasCondition= false)
+            {
+                Shortname = item.shortname;
+
+                BlueprintChance = item.spawnAsBlueprint ? 1f : 0f;
+
+                MinAmount = amount;
+
+                Condition = new ConditionItem
+                {
+                    MinCondition = hasCondition && item.condition.enabled ? item.condition.foundCondition.fractionMin : 1f,
+                    MaxCondition = hasCondition && item.condition.enabled ? item.condition.foundCondition.fractionMax : 1f
+                };
+            }
+
+            public virtual float GetAmount(float lootMultiplier)
+            {
+                ItemDefinition itemDefinition = ItemManager.FindItemDefinition(ItemID);
+                bool isStackable = (itemDefinition.stackable > 1 && !itemDefinition.condition.enabled) || configData.MultiplyUnstackable;
+
+                if (!isStackable)
+                    return (int)Mathf.Clamp(this.MinAmount, 1, int.MaxValue);
+
+                return (int)Mathf.Clamp((MinAmount * lootMultiplier) * configData.GlobalMultiplier, 1, int.MaxValue);
+            }
+
+            public ulong RandomSkinID()
+            {                
+                HashSet<SkinEntry> hashset;
+                if (weightedSkinIds.TryGetValue(Shortname, out hashset) && hashset.Count > 0)
+                {
+                    int totalWeight = hashset.Sum((SkinEntry x) => x.Weight);
+
+                    int random = UnityEngine.Random.Range(0, totalWeight);
+
+                    foreach (SkinEntry skinEntry in hashset)
+                    {
+                        totalWeight -= skinEntry.Weight;
+
+                        if (random >= totalWeight)                        
+                            return skinEntry.SkinID;                        
+                    }
+
+                }
+
+                if (importedSkinIds != null)
+                {
+                    List<ulong> list;
+                    if (importedSkinIds.TryGetValue(Shortname, out list) && list.Count > 0)
+                    {
+                        return list.GetRandom();
+                    }
+                }
+
+                return 0UL;           
+            }
+
+            public float GetConditionFraction() => UnityEngine.Random.Range(Condition.MinCondition, Condition.MaxCondition);
+
+            public bool WantsBlueprint() => UnityEngine.Random.Range(0.0f, 1.0f) < BlueprintChance;
+
+            public class ConditionItem
+            {
+                public float MinCondition;
+
+                public float MaxCondition;
+            }
+        }
+
+        public class SkinEntry
+        {
+            public int Weight;
+            public ulong SkinID;
+
+            public SkinEntry() { }
+
+            public SkinEntry(ulong skinId, int weight = 1)
+            {
+                this.SkinID = skinId;
+                this.Weight = weight;
+            }
+        }
+        #endregion
+
+        private class StoredData
+        {
+            public Hash<string, SimpleLootContainerProfile> loot_simple = new Hash<string, SimpleLootContainerProfile>();
+
+            public Hash<string, AdvancedLootContainerProfile> loot_advanced = new Hash<string, AdvancedLootContainerProfile>();
+
+            public Hash<string, AdvancedNPCLootProfile> npcs_advanced = new Hash<string, AdvancedNPCLootProfile>();
+
+            public Hash<string, SimpleNPCLootProfile> npcs_simple = new Hash<string, SimpleNPCLootProfile>();
+
+            public bool IsBaseLootTable = true;
+
+            public string ProfileName = string.Empty;
+           
+            [JsonIgnore]
+            public bool IsValid => loot_simple != null && loot_advanced != null && npcs_advanced != null && npcs_simple != null && (loot_advanced.Count > 0 || loot_simple.Count > 0) && (npcs_advanced.Count != 0 || npcs_simple.Count != 0);
+
+            [JsonIgnore]
+            public bool HasAnyProfiles => loot_simple != null && loot_advanced != null && npcs_advanced != null && npcs_simple != null && (loot_advanced.Count > 0 || loot_simple.Count > 0 || npcs_advanced.Count > 0 || npcs_simple.Count > 0);
+
+            public void CreateDefaultLootProfile(LootContainer container)
+            {                
+                string shortPrefabName = container.ShortPrefabName;
+                if (string.IsNullOrEmpty(shortPrefabName))                
+                    shortPrefabName = container.name;
+                
+                if (loot_advanced.ContainsKey(shortPrefabName) || loot_simple.ContainsKey(shortPrefabName))
+                    return;
+
+                loot_advanced.Add(shortPrefabName, new AdvancedLootContainerProfile(container));
+            }
+
+            public void CloneLootProfile(string shortname, BaseLootProfile lootContainerProfile)
+            {
+                if (lootContainerProfile is AdvancedLootContainerProfile)
+                {
+                    loot_advanced[shortname] = new AdvancedLootContainerProfile(lootContainerProfile as AdvancedLootContainerProfile);
+                }
+                else if (lootContainerProfile is SimpleLootContainerProfile)
+                {
+                    loot_simple[shortname] = new SimpleLootContainerProfile(lootContainerProfile as SimpleLootContainerProfile);
+                }
+                else if (lootContainerProfile is AdvancedNPCLootProfile)
+                {
+                    npcs_advanced[shortname] = new AdvancedNPCLootProfile(lootContainerProfile as AdvancedNPCLootProfile);
+                }
+                else if (lootContainerProfile is SimpleNPCLootProfile)
+                {
+                    npcs_simple[shortname] = new SimpleNPCLootProfile(lootContainerProfile as SimpleNPCLootProfile);
+                }
+            }
+
+            public void CreateDefaultLootProfile(string shortPrefabName, LootContainer.LootSpawnSlot[] lootSpawnSlots)
+            {                
+                if (npcs_advanced.ContainsKey(shortPrefabName) || npcs_simple.ContainsKey(shortPrefabName))
+                    return;
+
+                npcs_advanced.Add(shortPrefabName, new AdvancedNPCLootProfile(lootSpawnSlots));
+            }
+
+            public bool TryGetLootProfile(string shortname, out BaseLootContainerProfile profile)
+            {
+                AdvancedLootContainerProfile advancedLootContainerProfile;
+                if (loot_advanced.TryGetValue(shortname, out advancedLootContainerProfile))
+                {
+                    profile = advancedLootContainerProfile;
+                    return true;
+                }
+
+                SimpleLootContainerProfile simpleLootContainerProfile;
+                if (loot_simple.TryGetValue(shortname, out simpleLootContainerProfile))
+                {
+                    profile = simpleLootContainerProfile;
+                    return true;
+                }
+
+                profile = null;
+                return false;
+            }
+
+            public bool TryGetNPCProfile(string shortname, out BaseLootProfile profile)
+            {
+                AdvancedNPCLootProfile advancedNPCLootProfile;
+                if (npcs_advanced.TryGetValue(shortname, out advancedNPCLootProfile))
+                {
+                    profile = advancedNPCLootProfile;
+                    return true;
+                }
+
+                SimpleNPCLootProfile simpleNPCLootProfile;
+                if (npcs_simple.TryGetValue(shortname, out simpleNPCLootProfile))
+                {
+                    profile = simpleNPCLootProfile;
+                    return true;
+                }
+
+                profile = null;
+                return false;
+            }
+
+            #region Random Profiles
+            [JsonIgnore]
+            private List<BaseLootContainerProfile> randomList = new List<BaseLootContainerProfile>();
+
+            public bool GetRandomLootProfile(out BaseLootContainerProfile profile)
+            {
+                if (randomList.Count == 0)
+                {
+                    randomList.AddRange(loot_simple.Values);
+                    randomList.AddRange(loot_advanced.Values);
+                }
+
+                RESTART_RANDOM:
+                if (randomList.Count == 0)
+                {
+                    profile = null;
+                    return false;
+                }
+
+                profile = randomList.GetRandom();                
+                randomList.Remove(profile);
+
+                if (!profile.Enabled)
+                    goto RESTART_RANDOM;
+
+                return true;
+            }
+            #endregion
+
+            public void RemoveProfile(string shortname)
+            {
+                loot_simple.Remove(shortname);
+                loot_advanced.Remove(shortname);
+                npcs_simple.Remove(shortname);
+                npcs_advanced.Remove(shortname);
+            }
+        }
+        #endregion
+
+        private List<string> npcPrefabs = new List<string>
+        {
+            "assets/prefabs/npc/bandit/guard/bandit_guard.prefab",
+            "assets/prefabs/npc/murderer/murderer.prefab",
+            "assets/prefabs/npc/scarecrow/scarecrow.prefab",
+            "assets/prefabs/npc/scientist/groundpatrolpurple.prefab",
+            "assets/prefabs/npc/scientist/htn/scientist_astar_full_any.prefab",
+            "assets/prefabs/npc/scientist/htn/scientist_full_any.prefab",
+            "assets/prefabs/npc/scientist/htn/scientist_full_lr300.prefab",
+            "assets/prefabs/npc/scientist/htn/scientist_full_mp5.prefab",
+            "assets/prefabs/npc/scientist/htn/scientist_full_pistol.prefab",
+            "assets/prefabs/npc/scientist/htn/scientist_full_shotgun.prefab",
+            "assets/prefabs/npc/scientist/htn/scientist_junkpile_pistol.prefab",
+            "assets/prefabs/npc/scientist/htn/scientist_turret_any.prefab",
+            "assets/prefabs/npc/scientist/htn/scientist_turret_lr300.prefab",
+            "assets/prefabs/npc/scientist/scientist.prefab",
+            "assets/prefabs/npc/scientist/scientist_gunner.prefab",
+            "assets/prefabs/npc/scientist/scientistjunkpile.prefab",
+            "assets/prefabs/npc/scientist/scientistpeacekeeper.prefab",
+            "assets/rust.ai/agents/npcplayer/humannpc/heavyscientist/heavyscientist.prefab",
+            "assets/rust.ai/agents/npcplayer/humannpc/humannpc.prefab",
+            "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc.prefab",
+            "assets/rust.ai/agents/npcplayer/npcplayertest.prefab",
+        };
+    }
+}

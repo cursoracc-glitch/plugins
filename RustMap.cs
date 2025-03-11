@@ -17,7 +17,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("RustMap", "Fartus", "1.3.7")]
+	[Info("RustMap", "RustPlugin.ru", "1.3.5")]
     class RustMap : RustPlugin
 	{
 		#region Classes
@@ -924,7 +924,7 @@ namespace Oxide.Plugins
 
 		private Dictionary<ulong, string> playerDic = new Dictionary<ulong, string>();
 
-		private object OnPlayerDeath(BasePlayer player, HitInfo hitInfo)
+		private object OnPlayerDie(BasePlayer player, HitInfo info)
 		{
 			if (!permission.UserHasPermission(player.UserIDString, MAP_DEATH))
 				return null;
@@ -1172,10 +1172,10 @@ namespace Oxide.Plugins
             var userId = connection.userid;
             if (bannedCache.Contains(userId)) return;
 
-            var user = BasePlayer.activePlayerList.FirstOrDefault(p => p.userID == userId);
+            var user = BasePlayer.activePlayerList.Find(p => p.userID == userId);
             if (user == null)
             {
-                user = BasePlayer.sleepingPlayerList.FirstOrDefault(p => p.userID == userId);
+                user = BasePlayer.sleepingPlayerList.Find(p => p.userID == userId);
                 if (user == null) return;
                 AddBannedMarker(user);
                 return;
@@ -1190,7 +1190,7 @@ namespace Oxide.Plugins
             if (bannedMarkers.ContainsKey(player))
             {
                 RemoveBannedMarker(player);
-            } 
+            }
         }
 
         #endregion

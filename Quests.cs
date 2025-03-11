@@ -1,5 +1,6 @@
-using System;
+ using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Oxide.Core;
 using Oxide.Core.Configuration;
 using Oxide.Core.Libraries.Covalence;
@@ -7,22 +8,24 @@ using Oxide.Game.Rust.Cui;
 using Oxide.Core.Plugins;
 using UnityEngine;
 using System.Linq;
-using System.Reflection;
 
 namespace Oxide.Plugins
 {
-    [Info("Quests", "k1lly0u", "2.1.72", ResourceId = 1084)]
+    [Info("Quests", "k1lly0u modet GRAZYCAT Fixed Kaprith Games on YT", "2.2.8", ResourceId = 1084)]
+      
+    [Description("Creates quests for players to go on to earn rewards, complete with a GUI menu")]
     public class Quests : RustPlugin
     {
         #region Fields
         [PluginReference] Plugin HumanNPC;
-        [PluginReference] Plugin ServerRewards;
+        [PluginReference] Plugin RustShop;
         [PluginReference] Plugin Economics;
         [PluginReference] Plugin LustyMap;
         [PluginReference] Plugin EventManager;
-        [PluginReference] Plugin HuntPlugin;
+        [PluginReference] Plugin HuntRPG;
         [PluginReference] Plugin PlayerChallenges;
         [PluginReference] Plugin BetterChat;
+		[PluginReference] Plugin KarmaSystem;
 
         ConfigData configData;
 
@@ -34,8 +37,6 @@ namespace Oxide.Plugins
         private DynamicConfigFile Player_Data;
         private DynamicConfigFile Quest_Vendors;
         private DynamicConfigFile Item_Names;
-
-        private static FieldInfo serverinput;
 
         private Dictionary<ulong, PlayerQuestData> PlayerProgress;
         private Dictionary<QuestType, Dictionary<string, QuestEntry>> Quest;
@@ -56,11 +57,13 @@ namespace Oxide.Plugins
 
         private List<ulong> StatsMenu = new List<ulong>();
         private List<ulong> OpenMenuBind = new List<ulong>();
-        private static readonly FieldInfo NPCdisplayName = typeof(BasePlayer).GetField("_displayName", (BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.NonPublic));
 
         static string UIMain = "UIMain";
         static string UIPanel = "UIPanel";
-        static string UIEntry = "UIEntry";      
+        static string UIEntry = "UIEntry";
+
+        private string textPrimary;
+        private string textSecondary;
 
         #endregion
 
@@ -68,11 +71,14 @@ namespace Oxide.Plugins
         class PlayerQuestData
         {
             public Dictionary<string, PlayerQuestInfo> Quests = new Dictionary<string, PlayerQuestInfo>();
+      
             public List<QuestInfo> RequiredItems = new List<QuestInfo>();
+      
             public ActiveDelivery CurrentDelivery = new ActiveDelivery();
         }
         class PlayerQuestInfo
-        {            
+      
+        {
             public QuestStatus Status;
             public QuestType Type;
             public int AmountCollected = 0;
@@ -89,8 +95,9 @@ namespace Oxide.Plugins
             public int Cooldown;
             public bool ItemDeduction;
             public List<RewardItem> Rewards;
-        }          
+        }
         class NPCInfo
+      
         {
             public float x;
             public float z;
@@ -98,9 +105,11 @@ namespace Oxide.Plugins
             public string Name;
         }
         class DeliveryInfo
+      
         {
             public string Description;
             public NPCInfo Info;
+      
             public RewardItem Reward;
             public float Multiplier;
         }
@@ -111,13 +120,15 @@ namespace Oxide.Plugins
             public float Distance;
         }
         class QuestInfo
+      
         {
             public string ShortName;
             public QuestType Type;
-        }      
+        }
         class RewardItem
         {
             public bool isRP = false;
+			public bool isKR = false;
             public bool isCoins = false;
             public bool isHuntXP = false;
             public string DisplayName;
@@ -132,9 +143,10 @@ namespace Oxide.Plugins
             public QuestType type;
             public QuestEntry entry;
             public DeliveryInfo deliveryInfo;
+      
             public RewardItem item;
-            public string oldEntry;            
-            public int partNum;  
+            public string oldEntry;
+            public int partNum;
         }
         class ItemNames
         {
@@ -142,7 +154,7 @@ namespace Oxide.Plugins
         }
 
         enum QuestType
-        {            
+        {
             Kill,
             Craft,
             Gather,
@@ -154,13 +166,13 @@ namespace Oxide.Plugins
             Pending,
             Completed,
             Open
-        }        
+        }
         #endregion
 
         #region UI Creation
         class QUI
         {
-            public static ConfigData configdata;
+            public static bool disableFade;
             static public CuiElementContainer CreateElementContainer(string panelName, string color, string aMin, string aMax, bool cursor = false)
             {
                 var NewElement = new CuiElementContainer()
@@ -190,7 +202,7 @@ namespace Oxide.Plugins
             }
             static public void CreateLabel(ref CuiElementContainer container, string panel, string color, string text, int size, string aMin, string aMax, TextAnchor align = TextAnchor.MiddleCenter, float fadein = 1.0f)
             {
-                if (configdata.DisableUI_FadeIn)
+                if (disableFade)
                     fadein = 0;
                 container.Add(new CuiLabel
                 {
@@ -202,7 +214,7 @@ namespace Oxide.Plugins
             }
             static public void CreateButton(ref CuiElementContainer container, string panel, string color, string text, int size, string aMin, string aMax, string command, TextAnchor align = TextAnchor.MiddleCenter, float fadein = 1.0f)
             {
-                if (configdata.DisableUI_FadeIn)
+                if (disableFade)
                     fadein = 0;
                 container.Add(new CuiButton
                 {
@@ -226,7 +238,7 @@ namespace Oxide.Plugins
             }
             static public void CreateTextOverlay(ref CuiElementContainer container, string panel, string text, string color, int size, string aMin, string aMax, TextAnchor align = TextAnchor.MiddleCenter, float fadein = 1.0f)
             {
-                if (configdata.DisableUI_FadeIn)
+                if (disableFade)
                     fadein = 0;
                 container.Add(new CuiLabel
                 {
@@ -236,19 +248,16 @@ namespace Oxide.Plugins
                 panel);
 
             }
+            static public string Color(string hexColor, float alpha)
+            {
+                if (hexColor.StartsWith("#"))
+                    hexColor = hexColor.TrimStart('#');
+                int red = int.Parse(hexColor.Substring(0, 2), NumberStyles.AllowHexSpecifier);
+                int green = int.Parse(hexColor.Substring(2, 2), NumberStyles.AllowHexSpecifier);
+                int blue = int.Parse(hexColor.Substring(4, 2), NumberStyles.AllowHexSpecifier);
+                return $"{(double)red / 255} {(double)green / 255} {(double)blue / 255} {alpha}";
+            }
         }
-        private Dictionary<string, string> UIColors = new Dictionary<string, string>
-        {
-            {"dark", "0.1 0.1 0.1 0.98" },
-            {"light", "0.7 0.7 0.7 0.3" },
-            {"grey1", "0.6 0.6 0.6 1.0" },
-            {"buttonbg", "0.2 0.2 0.2 0.7" },
-            {"buttonopen", "0.2 0.8 0.2 0.9" },
-            {"buttoncompleted", "0 0.5 0.1 0.9" },
-            {"buttonred", "0.85 0 0.35 0.9" },
-            {"buttongrey", "0.8 0.8 0.8 0.9" },
-            {"grey8", "0.8 0.8 0.8 1.0" }
-        };
         #endregion
 
         #region Oxide Hooks
@@ -264,50 +273,53 @@ namespace Oxide.Plugins
         {
             LoadVariables();
             LoadData();
-            QUI.configdata = configData;
+
+            QUI.disableFade = configData.DisableUI_FadeIn;
+            textPrimary = $"<color={configData.Colors.TextColor_Primary}>";
+            textSecondary = $"<color={configData.Colors.TextColor_Secondary}>";
+
             ItemDefs = ItemManager.itemList.ToDictionary(i => i.shortname);
             FillObjectiveList();
-            serverinput = typeof(BasePlayer).GetField("serverInput", (BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.NonPublic));
+            AddMapIcons();
             timer.Once(900, () => SaveLoop());
         }
         void Unload()
         {
             foreach (var player in BasePlayer.activePlayerList)
                 DestroyUI(player);
-            SavePlayerData();           
+            SavePlayerData();
         }
         void OnPlayerInit(BasePlayer player)
         {
-            if (configData.Autoset_KeyBind)
+            if (configData.KeybindOptions.Autoset_KeyBind)
             {
-                if (!string.IsNullOrEmpty(configData.KeyBind_Key))
+                if (!string.IsNullOrEmpty(configData.KeybindOptions.KeyBind_Key))
                 {
-                    player.Command("bind " + configData.KeyBind_Key + " QUI_OpenQuestMenu");
+                    player.Command("bind " + configData.KeybindOptions.KeyBind_Key + " QUI_OpenQuestMenu");
                 }
             }
         }
-        #region Objective Hooks        
+        #region Objective Hooks
         //Kill
         void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+      
         {
             try
             {
-                if (entity != null)
+                if (entity == null || info == null) return;
+                BasePlayer player = null;
+
+                if (info.InitiatorPlayer != null)
+                    player = info.InitiatorPlayer;
+                else if (entity.GetComponent<BaseHelicopter>() != null)
+                    player = BasePlayer.FindByID(GetLastAttacker(entity.net.ID));
+
+                if (player != null)
                 {
-                    BasePlayer player = null;
-
-                    if (info?.Initiator is BasePlayer)
-                        player = info?.Initiator?.ToPlayer();
-
-                    else if (entity.GetComponent<BaseHelicopter>() != null)
-                        player = BasePlayer.FindByID(GetLastAttacker(entity.net.ID));
-
-                    if (player != null)
-                    {                        
-                        if (isPlaying(player)) return;
-                        if (hasQuests(player.userID) && isQuestItem(player.userID, entity?.ShortPrefabName, QuestType.Kill))
-                            ProcessProgress(player, QuestType.Kill, entity?.ShortPrefabName);
-                    }
+                    if (entity.ToPlayer() != null && entity.ToPlayer() == player) return;
+                    if (isPlaying(player)) return;
+                    if (hasQuests(player.userID) && isQuestItem(player.userID, entity?.ShortPrefabName, QuestType.Kill))
+                        ProcessProgress(player, QuestType.Kill, entity?.ShortPrefabName);
                 }
             }
             catch (Exception ex)
@@ -315,13 +327,16 @@ namespace Oxide.Plugins
             }
         }
         void OnEntityTakeDamage(BaseCombatEntity victim, HitInfo info)
-        {            
+      
+        {
             if (victim.GetComponent<BaseHelicopter>() != null && info?.Initiator?.ToPlayer() != null)
             {
                 var heli = victim.GetComponent<BaseHelicopter>();
                 var player = info.Initiator.ToPlayer();
+                if (isPlaying(player)) return;
                 NextTick(() =>
                 {
+                    if (heli == null) return;
                     if (!HeliAttackers.ContainsKey(heli.net.ID))
                         HeliAttackers.Add(heli.net.ID, new Dictionary<ulong, int>());
                     if (!HeliAttackers[heli.net.ID].ContainsKey(player.userID))
@@ -338,18 +353,19 @@ namespace Oxide.Plugins
                 if (hasQuests(player.userID) && isQuestItem(player.userID, item.info.shortname, QuestType.Gather))
                     ProcessProgress(player, QuestType.Gather, item.info.shortname, item.amount);
         }
-        void OnPlantGather(PlantEntity plant, Item item, BasePlayer player)
+        void OnGrowableGather(GrowableEntity plant, BasePlayer player, Item item)
         {
             if (player != null)
                 if (hasQuests(player.userID) && isQuestItem(player.userID, item.info.shortname, QuestType.Gather))
                     ProcessProgress(player, QuestType.Gather, item.info.shortname, item.amount);
         }
-        void OnCollectiblePickup(Item item, BasePlayer player)
-        {
+        void OnCollectiblePickup(Item item, BasePlayer player, CollectibleEntity entity)
+		{
            if (player != null)
                 if (hasQuests(player.userID) && isQuestItem(player.userID, item.info.shortname, QuestType.Gather))
                     ProcessProgress(player, QuestType.Gather, item.info.shortname, item.amount);
-        }
+        
+		}
         //Craft
         void OnItemCraftFinished(ItemCraftTask task, Item item)
         {
@@ -373,7 +389,7 @@ namespace Oxide.Plugins
                             Looters.Remove(item.uid);
                         }
                     }
-                }                
+                }
             }
             else if (container.playerOwner != null) Looters.Add(item.uid, container.playerOwner.userID);
         }
@@ -395,46 +411,48 @@ namespace Oxide.Plugins
             CheckPlayerEntry(player);
             var npcID = npc.UserIDString;
             if (vendors.QuestVendors.ContainsKey(npcID) && configData.UseNPCVendors)
-            {                
+            {
                 CreateMenu(player);
                 return;
             }
             if (vendors.DeliveryVendors.ContainsKey(npcID))
             {
-                if (hasQuests(player.userID) && PlayerProgress[player.userID].CurrentDelivery.TargetID == npc.UserIDString)                
+                if (hasQuests(player.userID) && PlayerProgress[player.userID].CurrentDelivery.TargetID == npc.UserIDString)
                     AcceptDelivery(player, npcID, 1);
-                
-                if (hasQuests(player.userID) && string.IsNullOrEmpty(PlayerProgress[player.userID].CurrentDelivery.TargetID))                
-                    AcceptDelivery(player, npcID);                
-                else SendMSG(player, LA("delInprog", player.UserIDString), LA("Quests", player.UserIDString));                
-            }            
+
+                if (hasQuests(player.userID) && string.IsNullOrEmpty(PlayerProgress[player.userID].CurrentDelivery.TargetID))
+                    AcceptDelivery(player, npcID);
+                else SendMSG(player, LA("delInprog", player.UserIDString), LA("Задания", player.UserIDString));
+            }
         }
-        #endregion    
+        #endregion
         object OnPlayerChat(ConsoleSystem.Arg arg)
         {
             if (BetterChat) return null;
 
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return null;
 
             if (ActiveEditors.ContainsKey(player.userID) || ActiveCreations.ContainsKey(player.userID) || AddVendor.ContainsKey(player.userID))
             {
                 QuestChat(player,arg.Args);
+
                 return false;
             }
             return null;
         }
-        object OnBetterChat(IPlayer iplayer, string message)
+        object OnBetterChat(Dictionary<string, object> dict)
         {
-            var player = iplayer.Object as BasePlayer;
-            if (player == null) return message;
+            var player = (dict["Player"] as IPlayer).Object as BasePlayer;
+            if (player == null) return null;
+            string message = dict["Text"].ToString();
             if (ActiveEditors.ContainsKey(player.userID) || ActiveCreations.ContainsKey(player.userID) || AddVendor.ContainsKey(player.userID))
             {
                 QuestChat(player, message.Split(' '));
-                return true;
+                return false;
             }
-            return message;
+            return dict;
         }
         void QuestChat(BasePlayer player, string[] arg)
         {
@@ -491,6 +509,7 @@ namespace Oxide.Plugins
                     else
                     {
                         Creator.deliveryInfo.Reward = item;
+      
                         DeliveryHelp(player, 4);
                     }
                 }
@@ -538,6 +557,7 @@ namespace Oxide.Plugins
                         if (Creator.type == QuestType.Delivery)
                         {
                             Creator.deliveryInfo.Description = args;
+      
                             SendMSG(player, args, LA("Desc", player.UserIDString));
                             DeliveryHelp(player, 6);
                             return;
@@ -561,6 +581,7 @@ namespace Oxide.Plugins
                                 return;
                             }
                             Creator.deliveryInfo.Multiplier = amount;
+      
 
                             SendMSG(player, args, LA("RM", player.UserIDString));
                             Creator.partNum++;
@@ -603,7 +624,7 @@ namespace Oxide.Plugins
                     return;
                 default:
                     break;
-            }            
+            }
         }
         #endregion
 
@@ -615,15 +636,15 @@ namespace Oxide.Plugins
                 var inEvent = EventManager?.Call("isPlaying", player);
                 if (inEvent is bool && (bool)inEvent)
                     return true;
-            }          
+            }
             return false;
         }
         private void CloseMap(BasePlayer player)
         {
             if (LustyMap)
             {
-                LustyMap.Call("DisableMaps", player);                
-            }                
+                LustyMap.Call("DisableMaps", player);
+            }
         }
         private void OpenMap(BasePlayer player)
         {
@@ -632,14 +653,10 @@ namespace Oxide.Plugins
                 LustyMap.Call("EnableMaps", player);
             }
         }
-        private void AddMapMarker(float x, float z, string name, string icon = "special")
+        private void AddMapMarker(float x, float z, string name, string icon = "special", float r = 0)
         {
             if (LustyMap)
-            {
                 LustyMap.Call("AddMarker", x, z, name, icon);
-                LustyMap.Call("addCustom", icon);
-                LustyMap.Call("cacheImages");                
-            }
         }
         private void RemoveMapMarker(string name)
         {
@@ -661,7 +678,7 @@ namespace Oxide.Plugins
 
         #region Objective Lists
         private void FillObjectiveList()
-        {            
+        {
             AllObjectives.Add(QuestType.Loot, new List<string>());
             AllObjectives.Add(QuestType.Craft, new List<string>());
             AllObjectives.Add(QuestType.Kill, new List<string>());
@@ -671,6 +688,8 @@ namespace Oxide.Plugins
             GetAllItems();
             GetAllKillables();
             GetAllResources();
+            foreach (var category in AllObjectives)
+                category.Value.Sort();
 
             if (itemNames.DisplayNames == null || itemNames.DisplayNames.Count < 1)
             {
@@ -696,24 +715,27 @@ namespace Oxide.Plugins
         }
         private void GetAllResources()
         {
-            AllObjectives[QuestType.Gather].Add("wood");
-            AllObjectives[QuestType.Gather].Add("stones");
-            AllObjectives[QuestType.Gather].Add("metal.ore");
-            AllObjectives[QuestType.Gather].Add("hq.metal.ore");
-            AllObjectives[QuestType.Gather].Add("sulfur.ore");
-            AllObjectives[QuestType.Gather].Add("cloth");
-            AllObjectives[QuestType.Gather].Add("bone.fragments");
-            AllObjectives[QuestType.Gather].Add("crude.oil");
-            AllObjectives[QuestType.Gather].Add("fat.animal");
-            AllObjectives[QuestType.Gather].Add("leather");
-            AllObjectives[QuestType.Gather].Add("skull.wolf");
-            AllObjectives[QuestType.Gather].Add("skull.human");
-            AllObjectives[QuestType.Gather].Add("chicken.raw");
-            AllObjectives[QuestType.Gather].Add("mushroom");
-            AllObjectives[QuestType.Gather].Add("meat.boar");
-            AllObjectives[QuestType.Gather].Add("bearmeat");
-            AllObjectives[QuestType.Gather].Add("humanmeat.raw");
-            AllObjectives[QuestType.Gather].Add("wolfmeat.raw");
+            AllObjectives[QuestType.Gather] = new List<string>
+            {
+                "wood",
+                "stones",
+                "metal.ore",
+                "hq.metal.ore",
+                "sulfur.ore",
+                "cloth",
+                "bone.fragments",
+                "crude.oil",
+                "fat.animal",
+                "leather",
+                "skull.wolf",
+                "skull.human",
+                "chicken.raw",
+                "mushroom",
+                "meat.boar",
+                "bearmeat",
+                "humanmeat.raw",
+                "wolfmeat.raw"
+            };
         }
         private void GetAllKillables()
         {
@@ -738,20 +760,33 @@ namespace Oxide.Plugins
             DisplayNames.Add("autoturret_deployed", "Auto-Turret");
             DisplayNames.Add("patrolhelicopter", "Helicopter");
             DisplayNames.Add("player", "Player");
-        }        
-       
+        }
+
         #endregion
 
         #region Functions
+        void AddMapIcons()
+        {
+            int deliveryCount = 1;
+            foreach(var vendor in vendors.DeliveryVendors)
+            {
+                AddMapMarker(vendor.Value.Info.x, vendor.Value.Info.z, vendor.Value.Info.Name, $"{configData.LustyMapIntegration.Icon_Delivery}_{deliveryCount}.png");
+      
+                ++deliveryCount;
+            }
+            foreach(var vendor in vendors.QuestVendors)
+            {
+                AddMapMarker(vendor.Value.x, vendor.Value.z, vendor.Value.Name, $"{configData.LustyMapIntegration.Icon_Vendor}.png");
+            }
+        }
         private void ProcessProgress(BasePlayer player, QuestType questType, string type, int amount = 0)
         {
             if (string.IsNullOrEmpty(type)) return;
             var data = PlayerProgress[player.userID];
             if (data.RequiredItems.Count > 0)
             {
-                foreach (var entry in data.Quests)
+                foreach (var entry in data.Quests.Where(x => x.Value.Status == QuestStatus.Pending))
                 {
-                    if (entry.Value.Status == QuestStatus.Completed) continue;
                     var quest = GetQuest(entry.Key);
                     if (quest != null)
                     {
@@ -775,7 +810,7 @@ namespace Oxide.Plugins
                         }
                     }
                 }
-            }           
+            }
         }
         private void TakeQuestItem(BasePlayer player, string item, int amount)
         {
@@ -784,7 +819,7 @@ namespace Oxide.Plugins
                 var itemDef = ItemDefs[item];
                 NextTick(() => player.inventory.Take(null, itemDef.itemid, amount));
             }
-            else PrintWarning($"Unable to find definition for: {item}.");           
+            else PrintWarning($"Unable to find definition for: {item}.");
         }
         private void CompleteQuest(BasePlayer player, string questName)
         {
@@ -793,13 +828,8 @@ namespace Oxide.Plugins
             var quest = GetQuest(questName);
             if (quest != null)
             {
-                int cdTime;
-                if (quest.Cooldown > 0)
-                    cdTime = quest.Cooldown;
-                else cdTime = configData.Quest_Cooldown;
-
                 data.Status = QuestStatus.Completed;
-                data.ResetTime = GrabCurrentTime() + (cdTime * 60);
+                data.ResetTime = GrabCurrentTime() + (quest.Cooldown * 60);
 
                 for (int i = 0; i < items.Count; i++)
                 {
@@ -811,26 +841,26 @@ namespace Oxide.Plugins
                 }
                 SendMSG(player, "", $"{LA("qComple", player.UserIDString)} {questName}. {LA("claRew", player.UserIDString)}");
                 PlayerChallenges?.Call("CompletedQuest", player);
-            }           
+            }
         }
 
         private ItemDefinition FindItemDefinition(string shortname)
         {
             ItemDefinition itemDefinition;
             return ItemDefs.TryGetValue(shortname, out itemDefinition) ? itemDefinition : null;
-        }       
+        }
         private string GetRewardString(List<RewardItem> entry)
         {
             var rewards = "";
-            int i = 1;          
+            int i = 1;
             foreach (var item in entry)
             {
                 rewards = rewards + $"{(int)item.Amount}x {item.DisplayName}";
                 if (i < entry.Count)
                     rewards = rewards + ", ";
-                i++;              
+                i++;
             }
-            return rewards; 
+            return rewards;
         }
         private bool GiveReward(BasePlayer player, List<RewardItem> rewards)
         {
@@ -838,16 +868,20 @@ namespace Oxide.Plugins
             {
                 if (reward.isCoins && Economics)
                 {
-                    Economics?.Call("Deposit", player.userID, (int)reward.Amount);
+                    Economics.Call("Deposit", player.UserIDString, (double)reward.Amount);
                 }
-                else if (reward.isRP && ServerRewards)
+                else if (reward.isRP && RustShop)
                 {
-                    ServerRewards?.Call("AddPoints", player.userID, (int)reward.Amount);
+                    RustShop.Call("AddBalance", player.userID, (int)reward.Amount);
+                }
+				 else if (reward.isKR && KarmaSystem )
+                {
+                    KarmaSystem.Call("AddKarma", player.IPlayer, (int)reward.Amount);
                 }
                 else if (reward.isHuntXP)
                 {
-                    HuntPlugin?.Call("GiveEXP", player, (int)reward.Amount);
-                }                
+                    HuntRPG?.Call("GiveEXP", player, (int)reward.Amount);
+                }
                 else
                 {
                     if (string.IsNullOrEmpty(reward.ShortName)) return true;
@@ -860,7 +894,7 @@ namespace Oxide.Plugins
                             player.inventory.GiveItem(item, player.inventory.containerMain);
                         }
                     }
-                    else PrintWarning($"Quests: Error building item {reward.ShortName} for {player.displayName}");                    
+                    else PrintWarning($"Quests: Error building item {reward.ShortName} for {player.displayName}");
                 }
             }
             return true;
@@ -887,19 +921,19 @@ namespace Oxide.Plugins
             if (item == null) return null;
             var newItem = new RewardItem
             {
-                Amount = item.amount,                
+                Amount = item.amount,
                 DisplayName = DisplayNames[item.info.shortname],
                 ID = item.info.itemid,
                 ShortName = item.info.shortname,
-                Skin = item.skin            
+                Skin = item.skin
             };
             return newItem;
         }
 
         private bool hasQuests(ulong player)
         {
-            if (PlayerProgress.ContainsKey(player))            
-                return true;                       
+            if (PlayerProgress.ContainsKey(player))
+                return true;
             return false;
         }
         private bool isQuestItem(ulong player, string name, QuestType type)
@@ -910,11 +944,11 @@ namespace Oxide.Plugins
                 if (data[i].ShortName == name && data[i].Type == type)
                     return true;
             }
-            return false;           
+            return false;
         }
         private void CheckPlayerEntry(BasePlayer player)
         {
-            if (!PlayerProgress.ContainsKey(player.userID))            
+            if (!PlayerProgress.ContainsKey(player.userID))
                 PlayerProgress.Add(player.userID, new PlayerQuestData());
         }
 
@@ -924,7 +958,7 @@ namespace Oxide.Plugins
                 if (entry.Value.ContainsKey(name))
                     return entry.Key;
             return null;
-        }        
+        }
         private QuestEntry GetQuest(string name)
         {
             var type = GetQuestType(name);
@@ -951,17 +985,21 @@ namespace Oxide.Plugins
             Quest = Creator.entry;
 
             if (isCreating)
-            {                
+            {
                 if (Creator.type == QuestType.Delivery)
                 {
                     var npc = BasePlayer.FindByID(ulong.Parse(Creator.deliveryInfo.Info.ID));
+      
                     if (npc != null)
                     {
-                        NPCdisplayName.SetValue(npc, Creator.deliveryInfo.Info.Name);
+                        npc.displayName = Creator.deliveryInfo.Info.Name;
+      
                         npc.SendNetworkUpdateImmediate();
                     }
                     vendors.DeliveryVendors.Add(Creator.deliveryInfo.Info.ID, Creator.deliveryInfo);
-                    AddMapMarker(Creator.deliveryInfo.Info.x, Creator.deliveryInfo.Info.z, Creator.deliveryInfo.Info.Name, $"{configData.Icon_Delivery}_{vendors.DeliveryVendors.Count}");
+      
+                    AddMapMarker(Creator.deliveryInfo.Info.x, Creator.deliveryInfo.Info.z, Creator.deliveryInfo.Info.Name, $"{configData.LustyMapIntegration.Icon_Delivery}_{vendors.DeliveryVendors.Count}.png");
+      
                     AddVendor.Remove(player.userID);
                     SaveVendorData();
                     DestroyUI(player);
@@ -991,10 +1029,10 @@ namespace Oxide.Plugins
             questData.Quest[Creator.type].Remove(Creator.entry.QuestName);
             questData.Quest[Creator.type].Add(Quest.QuestName, Quest);
 
-            DestroyUI(player);            
+            DestroyUI(player);
             SaveQuestData();
             CreationHelp(player, 10);
-            SendMSG(player, $"{LA("saveQ", player.UserIDString)} {Quest.QuestName}", LA("QC", player.UserIDString));            
+            SendMSG(player, $"{LA("saveQ", player.UserIDString)} {Quest.QuestName}", LA("QC", player.UserIDString));
         }
         private void ExitQuest(BasePlayer player, bool isCreating)
         {
@@ -1003,7 +1041,7 @@ namespace Oxide.Plugins
             else ActiveEditors.Remove(player.userID);
 
             SendMSG(player, LA("QCCancel", player.UserIDString), LA("QC", player.UserIDString));
-            DestroyUI(player);            
+            DestroyUI(player);
         }
         private void RemoveQuest(string questName)
         {
@@ -1011,11 +1049,11 @@ namespace Oxide.Plugins
             if (Quest == null) return;
             var Type = (QuestType)GetQuestType(questName);
             questData.Quest[Type].Remove(questName);
-            
+
             foreach (var player in PlayerProgress)
             {
-                if (player.Value.Quests.ContainsKey(questName))                
-                    player.Value.Quests.Remove(questName); 
+                if (player.Value.Quests.ContainsKey(questName))
+                    player.Value.Quests.Remove(questName);
             }
             if (vendors.DeliveryVendors.ContainsKey(Quest.Objective))
                 vendors.DeliveryVendors.Remove(Quest.Objective);
@@ -1031,12 +1069,12 @@ namespace Oxide.Plugins
             int hits = 0;
             ulong majorityPlayer = 0U;
             if (HeliAttackers.ContainsKey(id))
-            {                
+            {
                 foreach (var score in HeliAttackers[id])
                 {
                     if (score.Value > hits)
                         majorityPlayer = score.Key;
-                }                
+                }
             }
             return majorityPlayer;
         }
@@ -1060,7 +1098,7 @@ namespace Oxide.Plugins
         private QuestType ConvertStringToType(string type)
         {
             switch (type)
-            {                
+            {
                 case "gather":
                 case "Gather":
                     return QuestType.Gather;
@@ -1088,8 +1126,7 @@ namespace Oxide.Plugins
 
         private BasePlayer FindEntity(BasePlayer player)
         {
-            var input = serverinput.GetValue(player) as InputState;
-            var currentRot = Quaternion.Euler(input.current.aimAngles) * Vector3.forward;
+            var currentRot = Quaternion.Euler(player.serverInput.current.aimAngles) * Vector3.forward;
             var rayResult = Ray(player, currentRot);
             if (rayResult is BasePlayer)
             {
@@ -1125,7 +1162,8 @@ namespace Oxide.Plugins
                 var player = BasePlayer.FindByID(ulong.Parse(npc.Key));
                 if (player != null)
                 {
-                    NPCdisplayName.SetValue(player, npc.Value.Info.Name);
+                    player.displayName = npc.Value.Info.Name;
+      
                 }
             }
             foreach(var npc in vendors.QuestVendors)
@@ -1133,7 +1171,7 @@ namespace Oxide.Plugins
                 var player = BasePlayer.FindByID(ulong.Parse(npc.Key));
                 if (player != null)
                 {
-                    NPCdisplayName.SetValue(player, npc.Value.Name);
+                    player.displayName = npc.Value.Name;
                 }
             }
         }
@@ -1143,31 +1181,32 @@ namespace Oxide.Plugins
             {
                 RemoveMapMarker(vendors.QuestVendors[ID].Name);
                 vendors.QuestVendors.Remove(ID);
-                                
+
                 int i = 1;
                 foreach(var npc in vendors.QuestVendors)
                 {
                     RemoveMapMarker(npc.Value.Name);
-                    npc.Value.Name = $"QuestVendor_{i}";
-                    AddMapMarker(npc.Value.x, npc.Value.z, npc.Value.Name, $"{configData.Icon_Vendor}_{i}");
+                    AddMapMarker(npc.Value.x, npc.Value.z, npc.Value.Name, $"{configData.LustyMapIntegration.Icon_Vendor}.png");
                     i++;
-                }                
+                }
             }
             else
             {
                 RemoveMapMarker(vendors.DeliveryVendors[ID].Info.Name);
+      
                 vendors.DeliveryVendors.Remove(ID);
-                
+
                 int i = 1;
                 foreach (var npc in vendors.DeliveryVendors)
                 {
                     RemoveMapMarker(npc.Value.Info.Name);
-                    npc.Value.Info.Name = $"Delivery_{i}";
-                    AddMapMarker(npc.Value.Info.x, npc.Value.Info.z, npc.Value.Info.Name, $"{configData.Icon_Delivery}_{i}");
+      
+                    AddMapMarker(npc.Value.Info.x, npc.Value.Info.z, npc.Value.Info.Name, $"{configData.LustyMapIntegration.Icon_Delivery}_{i}.png");
+      
                     i++;
                 }
                 foreach (var user in PlayerProgress)
-                {                    
+                {
                     if (user.Value.Quests.ContainsKey(ID))
                         user.Value.Quests.Remove(ID);
                 }
@@ -1178,11 +1217,12 @@ namespace Oxide.Plugins
         }
         private string GetRandomNPC(string ID)
         {
-            var npcIDs = vendors.DeliveryVendors.Keys.ToList();            
-            if (npcIDs.Contains(ID))
-                npcIDs.Remove(ID);            
-            var randNum = UnityEngine.Random.Range(0, npcIDs.Count - 1);
-            return npcIDs[randNum];
+            List<string> npcIDs = vendors.DeliveryVendors.Keys.ToList();
+            List<string> withoutSelected = npcIDs;
+            if (withoutSelected.Contains(ID))
+                withoutSelected.Remove(ID);
+            var randNum = UnityEngine.Random.Range(0, withoutSelected.Count - 1);
+            return withoutSelected[randNum];
         }
         private string LA(string key, string userID = null) => lang.GetMessage(key, this, userID);
 
@@ -1193,40 +1233,40 @@ namespace Oxide.Plugins
         {
             CloseMap(player);
 
-            var MenuElement = QUI.CreateElementContainer(UIMain, UIColors["dark"], "0 0", "0.12 1");
-            QUI.CreatePanel(ref MenuElement, UIMain, UIColors["light"], "0.05 0.01", "0.95 0.99", true);
-            QUI.CreateLabel(ref MenuElement, UIMain, "", $"{configData.MSG_MainColor}Quests</color>", 30, "0.05 0.9", "0.95 1");
+            var MenuElement = QUI.CreateElementContainer(UIMain, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0 0", "0.12 1");
+            QUI.CreatePanel(ref MenuElement, UIMain, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.05 0.01", "0.95 0.99", true);
+            QUI.CreateLabel(ref MenuElement, UIMain, "", $"{textPrimary}Задания</color>", 30, "0.05 0.9", "0.95 1");
             int i = 0;
-            CreateMenuButton(ref MenuElement, UIMain, LA("Kill", player.UserIDString), "QUI_ChangeElement kill", i); i++;
-            CreateMenuButton(ref MenuElement, UIMain, LA("Gather", player.UserIDString), "QUI_ChangeElement gather", i); i++;
-            CreateMenuButton(ref MenuElement, UIMain, LA("Loot", player.UserIDString), "QUI_ChangeElement loot", i); i++;
-            CreateMenuButton(ref MenuElement, UIMain, LA("Craft", player.UserIDString), "QUI_ChangeElement craft", i); i++;
+            CreateMenuButton(ref MenuElement, UIMain, LA("Убийства", player.UserIDString), "QUI_ChangeElement kill", i); i++;
+            CreateMenuButton(ref MenuElement, UIMain, LA("Добыча", player.UserIDString), "QUI_ChangeElement gather", i); i++;
+            CreateMenuButton(ref MenuElement, UIMain, LA("Поиск", player.UserIDString), "QUI_ChangeElement loot", i); i++;
+            CreateMenuButton(ref MenuElement, UIMain, LA("Создание", player.UserIDString), "QUI_ChangeElement craft", i); i++;
             i++;
             if (HumanNPC)
                 CreateMenuButton(ref MenuElement, UIMain, LA("Delivery", player.UserIDString), "QUI_ChangeElement delivery", i); i++;
             CreateMenuButton(ref MenuElement, UIMain, LA("Your Quests", player.UserIDString), "QUI_ChangeElement personal", i); i++;
 
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
-                QUI.CreateButton(ref MenuElement, UIMain, UIColors["buttonopen"], LA("Create Quest", player.UserIDString), 18, "0.1 0.225", "0.9 0.28", "QUI_ChangeElement creation");
-                QUI.CreateButton(ref MenuElement, UIMain, UIColors["buttongrey"], LA("Edit Quest", player.UserIDString), 18, "0.1 0.16", "0.9 0.215", "QUI_ChangeElement editor");
-                QUI.CreateButton(ref MenuElement, UIMain, UIColors["buttonred"], LA("Delete Quest", player.UserIDString), 18, "0.1 0.095", "0.9 0.15", "QUI_DeleteQuest");
+                QUI.CreateButton(ref MenuElement, UIMain, QUI.Color(configData.Colors.Button_Accept.Color, configData.Colors.Button_Accept.Alpha), LA("Create Quest", player.UserIDString), 18, "0.1 0.225", "0.9 0.28", "QUI_ChangeElement creation");
+                QUI.CreateButton(ref MenuElement, UIMain, QUI.Color(configData.Colors.Button_Pending.Color, configData.Colors.Button_Pending.Alpha), LA("Edit Quest", player.UserIDString), 18, "0.1 0.16", "0.9 0.215", "QUI_ChangeElement editor");
+                QUI.CreateButton(ref MenuElement, UIMain, QUI.Color(configData.Colors.Button_Cancel.Color, configData.Colors.Button_Cancel.Alpha), LA("Delete Quest", player.UserIDString), 18, "0.1 0.095", "0.9 0.15", "QUI_DeleteQuest");
             }
 
-            QUI.CreateButton(ref MenuElement, UIMain, UIColors["buttonbg"], LA("Close", player.UserIDString), 18, "0.1 0.03", "0.9 0.085", "QUI_DestroyAll");
+            QUI.CreateButton(ref MenuElement, UIMain, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Close", player.UserIDString), 18, "0.1 0.03", "0.9 0.085", "QUI_DestroyAll");
             CuiHelper.AddUi(player, MenuElement);
         }
         private void CreateEmptyMenu(BasePlayer player)
         {
             CloseMap(player);
 
-            var MenuElement = QUI.CreateElementContainer(UIMain, UIColors["dark"], "0 0", "0.12 1");
-            QUI.CreatePanel(ref MenuElement, UIMain, UIColors["light"], "0.05 0.01", "0.95 0.99", true);
-            QUI.CreateLabel(ref MenuElement, UIMain, "", $"{configData.MSG_MainColor}Quests</color>", 30, "0.05 0.9", "0.95 1");
-            CreateMenuButton(ref MenuElement, UIMain, LA("Your Quests", player.UserIDString), "QUI_ChangeElement personal", 4); 
+            var MenuElement = QUI.CreateElementContainer(UIMain, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0 0", "0.12 1");
+            QUI.CreatePanel(ref MenuElement, UIMain, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.05 0.01", "0.95 0.99", true);
+            QUI.CreateLabel(ref MenuElement, UIMain, "", $"{textPrimary}Quests</color>", 30, "0.05 0.9", "0.95 1");
+            CreateMenuButton(ref MenuElement, UIMain, LA("Your Quests", player.UserIDString), "QUI_ChangeElement personal", 4);
 
-            QUI.CreateButton(ref MenuElement, UIMain, UIColors["buttonbg"], LA("Close", player.UserIDString), 18, "0.1 0.03", "0.9 0.085", "QUI_DestroyAll");
-            CuiHelper.AddUi(player, MenuElement);            
+            QUI.CreateButton(ref MenuElement, UIMain, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Close", player.UserIDString), 18, "0.1 0.03", "0.9 0.085", "QUI_DestroyAll");
+            CuiHelper.AddUi(player, MenuElement);
         }
         private void CreateMenuButton(ref CuiElementContainer container, string panelName, string buttonname, string command, int number)
         {
@@ -1237,56 +1277,56 @@ namespace Oxide.Plugins
             Vector2 posMin = origin - offset;
             Vector2 posMax = posMin + dimensions;
 
-            QUI.CreateButton(ref container, panelName, UIColors["buttonbg"], buttonname, 18, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", command);
+            QUI.CreateButton(ref container, panelName, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), buttonname, 18, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", command);
         }
 
         private void ListElement(BasePlayer player, QuestType type, int page = 0)
         {
             DestroyEntries(player);
-            var Main = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.12 0", "1 1");
-            QUI.CreatePanel(ref Main, UIPanel, UIColors["light"], "0.01 0.01", "0.99 0.99", true);
+            var Main = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.12 0", "1 1");
+            QUI.CreatePanel(ref Main, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.01", "0.99 0.99", true);
             QUI.CreateLabel(ref Main, UIPanel, "", GetTypeDescription(type), 16, "0.1 0.93", "0.9 0.99");
             QUI.CreateLabel(ref Main, UIPanel, "1 1 1 0.015", type.ToString().ToUpper(), 200, "0.01 0.01", "0.99 0.99");
             var quests = Quest[type];
-            if (quests.Count > 4)
+            if (quests.Count > 16)
             {
-                var maxpages = (quests.Count - 1) /4 + 1;
+                var maxpages = (quests.Count - 1) /16 + 1;
                 if (page < maxpages - 1)
-                    QUI.CreateButton(ref Main, UIPanel, UIColors["buttonbg"], LA("Next", player.UserIDString), 18, "0.84 0.03", "0.97 0.085", $"QUI_ChangeElement listpage {type} {page + 1}");
+                    QUI.CreateButton(ref Main, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Next", player.UserIDString), 16, "0.86 0.94", "0.97 0.98", $"QUI_ChangeElement listpage {type} {page + 1}");
                 if (page > 0)
-                    QUI.CreateButton(ref Main, UIPanel, UIColors["buttonbg"], LA("Back", player.UserIDString), 18, "0.03 0.03", "0.16 0.085", $"QUI_ChangeElement listpage {type} {page - 1}");
+                    QUI.CreateButton(ref Main, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Back", player.UserIDString), 16, "0.03 0.94", "0.14 0.98", $"QUI_ChangeElement listpage {type} {page - 1}");
             }
-            int maxentries = (4 * (page + 1));
+            int maxentries = (16 * (page + 1));
             if (maxentries > quests.Count)
                 maxentries = quests.Count;
-            int rewardcount = 4 * page;
+            int rewardcount = 16 * page;
             List <string> questNames = new List<string>();
             foreach (var entry in Quest[type])
                 questNames.Add(entry.Key);
 
             if (quests.Count == 0)
-                QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("noQ", player.UserIDString)} {type.ToString().ToLower()} {LA("quests", player.UserIDString)} </color>", 24, "0 0.82", "1 0.9");
+                QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("noQ", player.UserIDString)} {type.ToString().ToLower()} {LA("quests", player.UserIDString)} </color>", 24, "0 0.82", "1 0.9");
 
             CuiHelper.AddUi(player, Main);
 
             int i = 0;
             for (int n = rewardcount; n < maxentries; n++)
-            {                
+            {
                 CreateQuestEntry(player, quests[questNames[n]], i);
                 i++;
             }
-        } 
+        }
         private void CreateQuestEntry(BasePlayer player, QuestEntry entry, int num)
-        {            
+        {
             Vector2 posMin = CalcQuestPos(num);
-            Vector2 dimensions = new Vector2(0.4f, 0.4f);
+            Vector2 dimensions = new Vector2(0.21f, 0.22f);
             Vector2 posMax = posMin + dimensions;
-            
+
             var panelName = UIEntry + num;
             AddUIString(player, panelName);
 
             var questEntry = QUI.CreateElementContainer(panelName, "0 0 0 0", $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}");
-            QUI.CreatePanel(ref questEntry, panelName, UIColors["buttonbg"], $"0 0", $"1 1");
+            QUI.CreatePanel(ref questEntry, panelName, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), $"0 0", $"1 1");
 
             string buttonCommand = "";
             string buttonText = "";
@@ -1299,64 +1339,70 @@ namespace Oxide.Plugins
                 switch (prog[entry.QuestName].Status)
                 {
                     case QuestStatus.Pending:
-                        
-                        buttonColor = UIColors["buttongrey"];
+
+                        buttonColor = QUI.Color(configData.Colors.Button_Pending.Color, configData.Colors.Button_Pending.Alpha);
                         buttonText = LA("Pending", player.UserIDString);
                         break;
                     case QuestStatus.Completed:
-                        buttonColor = UIColors["buttoncompleted"];
+                        buttonColor = QUI.Color(configData.Colors.Button_Completed.Color, configData.Colors.Button_Completed.Alpha);
                         buttonText = LA("Completed", player.UserIDString);
                         break;
                 }
             }
             else
             {
-                buttonColor = UIColors["buttonopen"];
+                buttonColor = QUI.Color(configData.Colors.Button_Accept.Color, configData.Colors.Button_Accept.Alpha);
                 buttonText = LA("Accept Quest", player.UserIDString);
                 buttonCommand = $"QUI_AcceptQuest {entry.QuestName}";
             }
-            QUI.CreateButton(ref questEntry, panelName, buttonColor, buttonText, 18, $"0.75 0.83", $"0.97 0.97", buttonCommand);
+            QUI.CreateButton(ref questEntry, panelName, buttonColor, buttonText, 14, $"0.72 0.83", $"0.98 0.97", buttonCommand);
 
             string rewards = GetRewardString(entry.Rewards);
-            string questInfo = $"{configData.MSG_MainColor}{LA("Status:", player.UserIDString)}</color> {status}";
-            questInfo = questInfo + $"\n\n{configData.MSG_MainColor}{LA("Description:", player.UserIDString)} </color>{configData.MSG_Color}{entry.Description}</color>";
-            questInfo = questInfo + $"\n\n{configData.MSG_MainColor}{LA("Objective:", player.UserIDString)} </color>{configData.MSG_Color}{entry.ObjectiveName}</color>";
-            questInfo = questInfo + $"\n\n{configData.MSG_MainColor}{LA("Amount Required:", player.UserIDString)} </color>{configData.MSG_Color}{entry.AmountRequired}</color>";
-            questInfo = questInfo + $"\n\n{configData.MSG_MainColor}{LA("Reward:", player.UserIDString)} </color>{configData.MSG_Color}{rewards}</color>";
+            string questInfo = $"{textPrimary}{LA("Status:", player.UserIDString)}</color> {status}";
+      
+            questInfo = questInfo + $"\n{textPrimary}{LA("Description:", player.UserIDString)} </color>{textSecondary}{entry.Description}</color>";
+      
+            questInfo = questInfo + $"\n{textPrimary}{LA("Objective:", player.UserIDString)} </color>{textSecondary}{entry.ObjectiveName}</color>";
+      
+            questInfo = questInfo + $"\n{textPrimary}{LA("Amount Required:", player.UserIDString)} </color>{textSecondary}{entry.AmountRequired}</color>";
+      
+            questInfo = questInfo + $"\n{textPrimary}{LA("Reward:", player.UserIDString)} </color>{textSecondary}{rewards}</color>";
+      
 
-            QUI.CreateLabel(ref questEntry, panelName, "", $"{entry.QuestName}", 25, $"0.1 0.8", "0.7 0.95", TextAnchor.MiddleLeft);
-            QUI.CreateLabel(ref questEntry, panelName, buttonColor, questInfo, 15, $"0.1 0.1", "0.9 0.78", TextAnchor.MiddleLeft);
-            
+            QUI.CreateLabel(ref questEntry, panelName, "", $"{entry.QuestName}", 16, $"0.02 0.8", "0.72 0.95", TextAnchor.MiddleLeft);
+            QUI.CreateLabel(ref questEntry, panelName, buttonColor, questInfo, 14, $"0.02 0.01", "0.98 0.78", TextAnchor.UpperLeft);
+      
+
             CuiHelper.AddUi(player, questEntry);
         }
 
         private void PlayerStats(BasePlayer player, int page = 0)
         {
             DestroyEntries(player);
-            var Main = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.12 0", "1 1");
-            QUI.CreatePanel(ref Main, UIPanel, UIColors["light"], "0.01 0.01", "0.99 0.99", true);
+            var Main = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.12 0", "1 1");
+            QUI.CreatePanel(ref Main, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.01", "0.99 0.99", true);
             QUI.CreateLabel(ref Main, UIPanel, "", LA("yqDesc", player.UserIDString), 16, "0.1 0.93", "0.9 0.99");
             QUI.CreateLabel(ref Main, UIPanel, "1 1 1 0.015", LA("STATS", player.UserIDString), 200, "0.01 0.01", "0.99 0.99");
 
             var stats = PlayerProgress[player.userID];
-            if (stats.Quests.Count > 4)
+            if (stats.Quests.Count > 16)
             {
-                var maxpages = (stats.Quests.Count - 1) / 4 + 1;
+                var maxpages = (stats.Quests.Count - 1) / 16 + 1;
                 if (page < maxpages - 1)
-                    QUI.CreateButton(ref Main, UIPanel, UIColors["buttonbg"], LA("Next", player.UserIDString), 18, "0.84 0.03", "0.97 0.085", $"QUI_ChangeElement statspage {page + 1}");
+                    QUI.CreateButton(ref Main, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Next", player.UserIDString), 16, "0.86 0.94", "0.97 0.98", $"QUI_ChangeElement statspage {page + 1}");
                 if (page > 0)
-                    QUI.CreateButton(ref Main, UIPanel, UIColors["buttonbg"], LA("Back", player.UserIDString), 18, "0.03 0.03", "0.16 0.085", $"QUI_ChangeElement statspage {page - 1}");
+                    QUI.CreateButton(ref Main, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Back", player.UserIDString), 16, "0.03 0.94", "0.14 0.098", $"QUI_ChangeElement statspage {page - 1}");
             }
-            int maxentries = (4 * (page + 1));
+            int maxentries = (16 * (page + 1));
             if (maxentries > stats.Quests.Count)
                 maxentries = stats.Quests.Count;
-            int rewardcount = 4 * page;
+            int rewardcount = 16 * page;
             List<string> questNames = new List<string>();
             foreach (var entry in stats.Quests)
                 questNames.Add(entry.Key);
 
             if (stats.Quests.Count == 0)
-                QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("noQDSaved", player.UserIDString)}</color>", 24, "0 0.82", "1 0.9");
+                QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("noQDSaved", player.UserIDString)}</color>", 24, "0 0.82", "1 0.9");
 
             CuiHelper.AddUi(player, Main);
 
@@ -1372,15 +1418,15 @@ namespace Oxide.Plugins
         private void CreateStatEntry(BasePlayer player, QuestEntry entry, int num)
         {
             Vector2 posMin = CalcQuestPos(num);
-            Vector2 dimensions = new Vector2(0.4f, 0.4f);
+            Vector2 dimensions = new Vector2(0.21f, 0.22f);
             Vector2 posMax = posMin + dimensions;
 
             var panelName = UIEntry + num;
             AddUIString(player, panelName);
 
             var questEntry = QUI.CreateElementContainer(panelName, "0 0 0 0", $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}");
-            QUI.CreatePanel(ref questEntry, panelName, UIColors["buttonbg"], $"0 0", $"1 1");
-           
+            QUI.CreatePanel(ref questEntry, panelName, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), $"0 0", $"1 1");
+
             string statusColor = "";
             QuestStatus status = QuestStatus.Open;
             var prog = PlayerProgress[player.userID].Quests;
@@ -1390,22 +1436,23 @@ namespace Oxide.Plugins
                 switch (prog[entry.QuestName].Status)
                 {
                     case QuestStatus.Pending:
-                        statusColor = UIColors["buttongrey"];
+                        statusColor = QUI.Color(configData.Colors.Button_Pending.Color, configData.Colors.Button_Pending.Alpha);
                         break;
                     case QuestStatus.Completed:
-                        statusColor = UIColors["buttoncompleted"];
+                        statusColor = QUI.Color(configData.Colors.Button_Completed.Color, configData.Colors.Button_Completed.Alpha);
                         break;
                 }
             }
-            
+
             if (status != QuestStatus.Completed)
-                QUI.CreateButton(ref questEntry, panelName, UIColors["buttonred"], LA("Cancel Quest",player.UserIDString), 18, $"0.75 0.83", $"0.97 0.97", $"QUI_CancelQuest {entry.QuestName}");
+                QUI.CreateButton(ref questEntry, panelName, QUI.Color(configData.Colors.Button_Cancel.Color, configData.Colors.Button_Cancel.Alpha), LA("Cancel Quest",player.UserIDString), 16, $"0.75 0.83", $"0.97 0.97", $"QUI_CancelQuest {entry.QuestName}");
             if (status == QuestStatus.Completed && !prog[entry.QuestName].RewardClaimed)
-                QUI.CreateButton(ref questEntry, panelName, statusColor, LA("Claim Reward", player.UserIDString), 18, $"0.75 0.83", $"0.97 0.97", $"QUI_ClaimReward {entry.QuestName}");
+                QUI.CreateButton(ref questEntry, panelName, statusColor, LA("Claim Reward", player.UserIDString), 16, $"0.75 0.83", $"0.97 0.97", $"QUI_ClaimReward {entry.QuestName}");
+            string questStatus = status.ToString();
             if (status == QuestStatus.Completed && prog[entry.QuestName].RewardClaimed)
             {
                 if (prog[entry.QuestName].ResetTime < GrabCurrentTime())
-                    QUI.CreateButton(ref questEntry, panelName, statusColor, LA("Remove", player.UserIDString), 18, $"0.75 0.83", $"0.97 0.97", $"QUI_RemoveCompleted {entry.QuestName}");
+                    QUI.CreateButton(ref questEntry, panelName, statusColor, LA("Remove", player.UserIDString), 16, $"0.75 0.83", $"0.97 0.97", $"QUI_RemoveCompleted {entry.QuestName}");
                 else
                 {
                     TimeSpan dateDifference = TimeSpan.FromSeconds(prog[entry.QuestName].ResetTime - GrabCurrentTime());
@@ -1414,48 +1461,36 @@ namespace Oxide.Plugins
                     hours += (days * 24);
                     var mins = dateDifference.Minutes;
                     string remaining = string.Format("{0:00}h :{1:00}m", hours, mins);
-                    QUI.CreateLabel(ref questEntry, panelName, "", $"{LA("Cooldown:", player.UserIDString)} {remaining}", 14, $"0.7 0.83", $"0.99 0.97");
+                    questStatus = $"{LA("Cooldown:", player.UserIDString)} {remaining}";
                 }
 
             }
-            string stats = $"{configData.MSG_MainColor}{LA("Status:", player.UserIDString)}</color> {status}";
-            stats = stats + $"\n{configData.MSG_MainColor}{LA("Quest Type:", player.UserIDString)} </color> {configData.MSG_Color}{prog[entry.QuestName].Type}</color>";  
+            var rewards = GetRewardString(entry.Rewards);
+            var percent = Math.Round(Convert.ToDouble((float)prog[entry.QuestName].AmountCollected / (float)entry.AmountRequired), 0);
+            string stats = $"{textPrimary}{LA("Status:", player.UserIDString)}</color> {questStatus}";
+            stats += $"\n{textPrimary}{LA("Quest Type:", player.UserIDString)} </color> {textSecondary}{prog[entry.QuestName].Type}</color>";
+            stats += $"\n{textPrimary}{LA("Description:", player.UserIDString)} </color>{textSecondary}{entry.Description}</color>";
+            stats += $"\n{textPrimary}{LA("Objective:", player.UserIDString)} </color>{textSecondary}{entry.AmountRequired}x {entry.ObjectiveName}</color>";
+            stats += $"\n{textPrimary}{LA("Collected:", player.UserIDString)} </color>{textSecondary}{prog[entry.QuestName].AmountCollected}</color> {textPrimary}({percent * 100}%)</color>";
+            stats += $"\n{textPrimary}{LA("Reward:", player.UserIDString)} </color>{textSecondary}{rewards}</color>";
 
-            string questInfo = $"{configData.MSG_MainColor}{LA("Description:", player.UserIDString)} </color>{configData.MSG_Color}{entry.Description}</color>";
-            questInfo = questInfo + $"\n{configData.MSG_MainColor}{LA("Objective:", player.UserIDString)} </color>{configData.MSG_Color}{entry.ObjectiveName}</color>";
-            questInfo = questInfo + $"\n{configData.MSG_MainColor}{LA("Amount Required:", player.UserIDString)} </color>{configData.MSG_Color}{entry.AmountRequired}</color>";
+            QUI.CreateLabel(ref questEntry, panelName, "", $"{entry.QuestName}", 18, $"0.02 0.8", "0.8 0.95", TextAnchor.UpperLeft);
+            QUI.CreateLabel(ref questEntry, panelName, "", stats, 14, $"0.02 0.01", "0.98 0.78", TextAnchor.UpperLeft);
 
-            string obtained = $"{configData.MSG_MainColor}{LA("Collected:", player.UserIDString)} </color>{configData.MSG_Color}{prog[entry.QuestName].AmountCollected}</color>";
-
-            var rewards = GetRewardString(entry.Rewards);            
-
-            string reward = $"{configData.MSG_MainColor}{LA("Reward:", player.UserIDString)} </color>{configData.MSG_Color}{rewards}</color>";
-            reward = reward + $"\n{configData.MSG_MainColor}{LA("Reward Claimed:", player.UserIDString)} </color>{configData.MSG_Color}{prog[entry.QuestName].RewardClaimed}</color>";
-
-            var percent = System.Convert.ToDouble((float)prog[entry.QuestName].AmountCollected / (float)entry.AmountRequired);
-            var yMax = 0.105f + (0.59f * percent);
-
-            QUI.CreateLabel(ref questEntry, panelName, "", $"{entry.QuestName}", 25, $"0.1 0.8", "0.7 0.95", TextAnchor.MiddleLeft);
-            QUI.CreateLabel(ref questEntry, panelName, statusColor, stats, 14, $"0.1 0.65", "0.7 0.78", TextAnchor.MiddleLeft);
-            QUI.CreateLabel(ref questEntry, panelName, statusColor, questInfo, 14, $"0.1 0.3", "0.7 0.6", TextAnchor.MiddleLeft);
-            QUI.CreateLabel(ref questEntry, panelName, statusColor, obtained, 14, $"0.1 0.32", "0.7 0.3", TextAnchor.MiddleLeft);
-            QUI.CreatePanel(ref questEntry, panelName, UIColors["buttonbg"], $"0.1 0.26", "0.7 0.32");
-            QUI.CreatePanel(ref questEntry, panelName, UIColors["buttonopen"], $"0.105 0.27", $"{yMax} 0.31");
-            QUI.CreateLabel(ref questEntry, panelName, statusColor, reward, 14, $"0.1 0.05", "0.7 0.25", TextAnchor.MiddleLeft);
             CuiHelper.AddUi(player, questEntry);
         }
         private void PlayerDelivery(BasePlayer player)
         {
             DestroyEntries(player);
-            var Main = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.12 0", "1 1");
-            QUI.CreatePanel(ref Main, UIPanel, UIColors["light"], "0.01 0.01", "0.99 0.99", true);
+            var Main = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.12 0", "1 1");
+            QUI.CreatePanel(ref Main, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.01", "0.99 0.99", true);
             QUI.CreateLabel(ref Main, UIPanel, "", GetTypeDescription(QuestType.Delivery), 16, "0.1 0.93", "0.9 0.99");
             QUI.CreateLabel(ref Main, UIPanel, "1 1 1 0.015", LA("DELIVERY", player.UserIDString), 200, "0.01 0.01", "0.99 0.99");
 
             var npcid = PlayerProgress[player.userID].CurrentDelivery.VendorID;
             var targetid = PlayerProgress[player.userID].CurrentDelivery.TargetID;
             if (string.IsNullOrEmpty(npcid))
-                QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("noADM", player.UserIDString)}</color>", 24, "0 0.82", "1 0.9");
+                QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("noADM", player.UserIDString)}</color>", 24, "0 0.82", "1 0.9");
             else
             {
                 var quest = vendors.DeliveryVendors[npcid];
@@ -1463,16 +1498,19 @@ namespace Oxide.Plugins
                 if (quest != null && target != null)
                 {
                     var distance = Vector2.Distance(new Vector2(quest.Info.x, quest.Info.z), new Vector2(target.Info.x, target.Info.z));
+      
                     var rewardAmount = distance * quest.Multiplier;
                     if (rewardAmount < 1) rewardAmount = 1;
-                    var briefing = $"{configData.MSG_MainColor}{quest.Info.Name}\n\n</color>";
-                    briefing = briefing + $"{configData.MSG_Color}{quest.Description}</color>\n\n";
-                    briefing = briefing + $"{configData.MSG_MainColor}{LA("Destination:", player.UserIDString)} </color>{configData.MSG_Color}{target.Info.Name}\nX {target.Info.x}, Z {target.Info.z}</color>\n";
-                    briefing = briefing + $"{configData.MSG_MainColor}{LA("Distance:", player.UserIDString)} </color>{configData.MSG_Color}{distance}M</color>\n";
-                    briefing = briefing + $"{configData.MSG_MainColor}{LA("Reward:", player.UserIDString)} </color>{configData.MSG_Color}{(int)rewardAmount}x {quest.Reward.DisplayName}</color>";
+                    var briefing = $"{textPrimary}{quest.Info.Name}\n\n</color>";
+      
+                    briefing = briefing + $"{textSecondary}{quest.Description}</color>\n\n";
+                    briefing = briefing + $"{textPrimary}{LA("Destination:", player.UserIDString)} </color>{textSecondary}{target.Info.Name}\nX {target.Info.x}, Z {target.Info.z}</color>\n";
+      
+                    briefing = briefing + $"{textPrimary}{LA("Distance:", player.UserIDString)} </color>{textSecondary}{distance}M</color>\n";
+                    briefing = briefing + $"{textPrimary}{LA("Reward:", player.UserIDString)} </color>{textSecondary}{(int)rewardAmount}x {quest.Reward.DisplayName}</color>";
                     QUI.CreateLabel(ref Main, UIPanel, "", briefing, 20, "0.15 0.2", "0.85 1", TextAnchor.MiddleLeft);
 
-                    QUI.CreateButton(ref Main, UIPanel, UIColors["buttonbg"], LA("Cancel", player.UserIDString), 18, "0.2 0.05", "0.35 0.1", $"QUI_CancelDelivery");
+                    QUI.CreateButton(ref Main, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Cancel", player.UserIDString), 18, "0.2 0.05", "0.35 0.1", $"QUI_CancelDelivery");
                 }
             }
             CuiHelper.AddUi(player, Main);
@@ -1481,21 +1519,21 @@ namespace Oxide.Plugins
         private void CreationMenu(BasePlayer player)
         {
             DestroyEntries(player);
-            var Main = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.12 0", "1 1");
-            QUI.CreatePanel(ref Main, UIPanel, UIColors["light"], "0.01 0.01", "0.99 0.99", true);
+            var Main = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.12 0", "1 1");
+            QUI.CreatePanel(ref Main, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.01", "0.99 0.99", true);
 
             int i = 0;
-            QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("selCreat", player.UserIDString)}</color>", 20, "0.25 0.8", "0.75 0.9");
+            QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("selCreat", player.UserIDString)}</color>", 20, "0.25 0.8", "0.75 0.9");
             QUI.CreateLabel(ref Main, UIPanel, "1 1 1 0.025", LA("CREATOR", player.UserIDString), 200, "0.01 0.01", "0.99 0.99");
-            CreateNewQuestButton(ref Main, UIPanel, LA("Kill", player.UserIDString), "QUI_NewQuest kill", i); i++;
-            CreateNewQuestButton(ref Main, UIPanel, LA("Gather", player.UserIDString), "QUI_NewQuest gather", i); i++;
-            CreateNewQuestButton(ref Main, UIPanel, LA("Loot", player.UserIDString), "QUI_NewQuest loot", i); i++;
-            CreateNewQuestButton(ref Main, UIPanel, LA("Craft", player.UserIDString), "QUI_NewQuest craft", i); i++;
+            CreateNewQuestButton(ref Main, UIPanel, LA("Убийства", player.UserIDString), "QUI_NewQuest kill", i); i++;
+            CreateNewQuestButton(ref Main, UIPanel, LA("Добыча", player.UserIDString), "QUI_NewQuest gather", i); i++;
+            CreateNewQuestButton(ref Main, UIPanel, LA("Поиск", player.UserIDString), "QUI_NewQuest loot", i); i++;
+            CreateNewQuestButton(ref Main, UIPanel, LA("Создать", player.UserIDString), "QUI_NewQuest craft", i); i++;
             if (HumanNPC)
                 CreateNewQuestButton(ref Main, UIPanel, LA("Delivery", player.UserIDString), "QUI_NewQuest delivery", i); i++;
 
             CuiHelper.AddUi(player, Main);
-        }        
+        }
         private void CreationHelp(BasePlayer player, int page = 0)
         {
             DestroyEntries(player);
@@ -1506,79 +1544,80 @@ namespace Oxide.Plugins
                 quest = ActiveEditors[player.userID];
             if (quest == null) return;
 
-            var HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9");
-            QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
+            var HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9");
+            QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
 
             switch (page)
             {
                 case 0:
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelMen", player.UserIDString)}.\n</color> {configData.MSG_Color}{LA("creHelFol", player.UserIDString)}.\n\n{LA("creHelExi", player.UserIDString)} </color>{configData.MSG_MainColor}'exit'\n\n\n\n{LA("creHelName", player.UserIDString)}</color>", 20, "0 0", "1 1");
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelMen", player.UserIDString)}.\n</color> {textSecondary}{LA("creHelFol", player.UserIDString)}.\n\n{LA("creHelExi", player.UserIDString)} </color>{textPrimary}'exit'\n\n\n\n{LA("creHelName", player.UserIDString)}</color>", 20, "0 0", "1 1");
                 break;
                 case 1:
-                    var MenuMain = QUI.CreateElementContainer(UIMain, UIColors["dark"], "0 0", "1 1", true);
-                    QUI.CreatePanel(ref MenuMain, UIMain, UIColors["light"], "0.01 0.01", "0.99 0.99");
-                    QUI.CreateLabel(ref MenuMain, UIMain, "", $"{configData.MSG_MainColor}{LA("creHelObj", player.UserIDString)}</color>", 20, "0.25 0.85", "0.75 0.95");
+                    var MenuMain = QUI.CreateElementContainer(UIMain, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0 0", "1 1", true);
+                    QUI.CreatePanel(ref MenuMain, UIMain, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.01", "0.99 0.99");
+                    QUI.CreateLabel(ref MenuMain, UIMain, "", $"{textPrimary}{LA("creHelObj", player.UserIDString)}</color>", 20, "0.25 0.85", "0.75 0.95");
                     CuiHelper.AddUi(player, MenuMain);
                     CreateObjectiveMenu(player);
                     return;
                 case 2:
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelRA", player.UserIDString)}</color>", 20, "0.25 0.4", "0.75 0.6");
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelRA", player.UserIDString)}</color>", 20, "0.25 0.4", "0.75 0.6");
                     break;
                 case 3:
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelQD", player.UserIDString)}</color>", 20, "0.25 0.4", "0.75 0.6");
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelQD", player.UserIDString)}</color>", 20, "0.25 0.4", "0.75 0.6");
                     break;
                 case 4:
                     {
-                        HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9");
-                        QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98", true);
-                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelRT", player.UserIDString)}</color>", 20, "0.25 0.8", "0.75 1");
+                        HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9");
+                        QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98", true);
+                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelRT", player.UserIDString)}</color>", 20, "0.25 0.8", "0.75 1");
                         int i = 0;
                         if (Economics) CreateRewardTypeButton(ref HelpMain, UIPanel, $"{LA("Coins", player.UserIDString)} (Economics)", "QUI_RewardType coins", i); i++;
-                        if (ServerRewards) CreateRewardTypeButton(ref HelpMain, UIPanel, $"{LA("RP", player.UserIDString)} (ServerRewards)", "QUI_RewardType rp", i); i++;
+                        if (RustShop) CreateRewardTypeButton(ref HelpMain, UIPanel, $"{LA("Рубли", player.UserIDString)} ", "QUI_RewardType rp", i); i++;
+						 if (KarmaSystem) CreateRewardTypeButton(ref HelpMain, UIPanel, $"{LA("Очки", player.UserIDString)} Кармы", "QUI_RewardType kr", i); i++;
                         CreateRewardTypeButton(ref HelpMain, UIPanel, LA("Item", player.UserIDString), "QUI_RewardType item", i); i++;
-                        if (HuntPlugin) { CreateRewardTypeButton(ref HelpMain, UIPanel, $"{LA("HuntXP", player.UserIDString)} (HuntRPG)", "QUI_RewardType huntxp", i); i++; }
+                        if (HuntRPG) { CreateRewardTypeButton(ref HelpMain, UIPanel, $"{LA("HuntXP", player.UserIDString)} (HuntRPG)", "QUI_RewardType huntxp", i); i++; }
                     }
                     break;
                 case 5:
-                    if (quest.item.isCoins || quest.item.isRP || quest.item.isHuntXP)
-                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelRewA", player.UserIDString)}</color>", 20, "0.25 0.4", "0.75 0.6");
+                    if (quest.item.isCoins || quest.item.isRP || quest.item.isKR || quest.item.isHuntXP)
+                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelRewA", player.UserIDString)}</color>", 20, "0.25 0.4", "0.75 0.6");
                     else
                     {
-                        HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.3 0.8", "0.7 0.97");
-                        QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelIH", player.UserIDString)} 'quest item'</color>", 20, "0.1 0", "0.9 1");
+                        HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.3 0.8", "0.7 0.97");
+                        QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelIH", player.UserIDString)} 'quest item'</color>", 20, "0.1 0", "0.9 1");
                     }
                     break;
                 case 7:
-                    HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9", true);
-                    QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelAR", player.UserIDString)}</color>", 20, "0.1 0", "0.9 1");
-                    QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Yes", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_AddReward");
-                    QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("No", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_RewardFinish");
+                    HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9", true);
+                    QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelAR", player.UserIDString)}</color>", 20, "0.1 0", "0.9 1");
+                    QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Yes", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_AddReward");
+                    QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("No", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_RewardFinish");
                     break;
                 case 8:
                     if (quest.type != QuestType.Kill)
                     {
-                        HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9", true);
-                        QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelID", player.UserIDString)}</color>", 20, "0.1 0", "0.9 1");
-                        QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Yes", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_ItemDeduction 1");
-                        QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("No", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_ItemDeduction 0");
+                        HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9", true);
+                        QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelID", player.UserIDString)}</color>", 20, "0.1 0", "0.9 1");
+                        QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Yes", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_ItemDeduction 1");
+                        QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("No", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_ItemDeduction 0");
                     }
                     else { CreationHelp(player, 9); return; }
                     break;
                 case 9:
-                    HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.3 0.8", "0.7 0.97");
-                    QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelCD", player.UserIDString)}</color>", 20, "0.1 0", "0.9 1");
+                    HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.3 0.8", "0.7 0.97");
+                    QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelCD", player.UserIDString)}</color>", 20, "0.1 0", "0.9 1");
                     break;
                 case 10:
                     {
-                        HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9");
-                        QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98", true);
-                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelNewRew", player.UserIDString)}</color>", 20, "0.25 0.8", "0.75 1");
-                        QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("addNewRew", player.UserIDString), 18, "0.7 0.04", "0.95 0.12", $"QUI_AddReward");
-                        QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Back", player.UserIDString), 18, "0.05 0.04", "0.3 0.12", $"QUI_EndEditing");
+                        HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9");
+                        QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98", true);
+                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelNewRew", player.UserIDString)}</color>", 20, "0.25 0.8", "0.75 1");
+                        QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("addNewRew", player.UserIDString), 18, "0.7 0.04", "0.95 0.12", $"QUI_AddReward");
+                        QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Back", player.UserIDString), 18, "0.05 0.04", "0.3 0.12", $"QUI_EndEditing");
 
                         int i = 0;
                         foreach (var entry in ActiveEditors[player.userID].entry.Rewards)
@@ -1590,26 +1629,26 @@ namespace Oxide.Plugins
                     }
                     break;
                 default:
-                    HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9", true);
-                    QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelSQ", player.UserIDString)}</color>", 20, "0.1 0.8", "0.9 0.95");
-                    string questDetails = $"{configData.MSG_MainColor}{LA("Quest Type:", player.UserIDString)}</color> {configData.MSG_Color}{quest.type}</color>";
-                    questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Name:", player.UserIDString)}</color> {configData.MSG_Color}{quest.entry.QuestName}</color>";
-                    questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Description:", player.UserIDString)}</color> {configData.MSG_Color}{quest.entry.Description}</color>";
-                    questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Objective:", player.UserIDString)}</color> {configData.MSG_Color}{quest.entry.ObjectiveName}</color>";
-                    questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Required Amount:", player.UserIDString)}</color> {configData.MSG_Color}{quest.entry.AmountRequired}</color>";
-                    if (quest.type != QuestType.Kill) questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Item Deduction:", player.UserIDString)}</color> {configData.MSG_Color}{quest.entry.ItemDeduction}</color>";
-                    questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("CDMin", player.UserIDString)}</color> {configData.MSG_Color}{quest.entry.Cooldown}</color>";
+                    HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9", true);
+                    QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelSQ", player.UserIDString)}</color>", 20, "0.1 0.8", "0.9 0.95");
+                    string questDetails = $"{textPrimary}{LA("Quest Type:", player.UserIDString)}</color> {textSecondary}{quest.type}</color>";
+                    questDetails = questDetails + $"\n{textPrimary}{LA("Name:", player.UserIDString)}</color> {textSecondary}{quest.entry.QuestName}</color>";
+                    questDetails = questDetails + $"\n{textPrimary}{LA("Description:", player.UserIDString)}</color> {textSecondary}{quest.entry.Description}</color>";
+                    questDetails = questDetails + $"\n{textPrimary}{LA("Objective:", player.UserIDString)}</color> {textSecondary}{quest.entry.ObjectiveName}</color>";
+                    questDetails = questDetails + $"\n{textPrimary}{LA("Required Amount:", player.UserIDString)}</color> {textSecondary}{quest.entry.AmountRequired}</color>";
+                    if (quest.type != QuestType.Kill) questDetails = questDetails + $"\n{textPrimary}{LA("Item Deduction:", player.UserIDString)}</color> {textSecondary}{quest.entry.ItemDeduction}</color>";
+                    questDetails = questDetails + $"\n{textPrimary}{LA("CDMin", player.UserIDString)}</color> {textSecondary}{quest.entry.Cooldown}</color>";
 
-                    var rewards = GetRewardString(quest.entry.Rewards);                    
-                    
-                    questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Reward:", player.UserIDString)}</color> {configData.MSG_Color}{rewards}</color>";
+                    var rewards = GetRewardString(quest.entry.Rewards);
+
+                    questDetails = questDetails + $"\n{textPrimary}{LA("Reward:", player.UserIDString)}</color> {textSecondary}{rewards}</color>";
 
                     QUI.CreateLabel(ref HelpMain, UIPanel, "", questDetails, 20, "0.1 0.2", "0.9 0.75", TextAnchor.MiddleLeft);
-                    QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Save Quest", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_SaveQuest");
-                    QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Cancel", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_ExitQuest");
+                    QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Save Quest", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_SaveQuest");
+                    QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Cancel", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_ExitQuest");
                     break;
-            }            
+            }
             CuiHelper.AddUi(player, HelpMain);
         }
         private void CreateObjectiveMenu(BasePlayer player, int page = 0)
@@ -1625,9 +1664,9 @@ namespace Oxide.Plugins
             {
                 var maxpages = (objCount - 1) / 96 + 1;
                 if (page < maxpages - 1)
-                    QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Next", player.UserIDString), 18, "0.84 0.05", "0.97 0.1", $"QUI_ChangeElement objpage {page + 1}");
+                    QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Next", player.UserIDString), 18, "0.84 0.05", "0.97 0.1", $"QUI_ChangeElement objpage {page + 1}");
                 if (page > 0)
-                    QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Back", player.UserIDString), 18, "0.03 0.05", "0.16 0.1", $"QUI_ChangeElement objpage {page - 1}");
+                    QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Back", player.UserIDString), 18, "0.03 0.05", "0.16 0.1", $"QUI_ChangeElement objpage {page - 1}");
             }
             int maxentries = (96 * (page + 1));
             if (maxentries > objCount)
@@ -1639,7 +1678,7 @@ namespace Oxide.Plugins
             {
                 CreateObjectiveEntry(ref HelpMain, UIPanel, AllObjectives[type][n], i);
                 i++;
-            }           
+            }
             CuiHelper.AddUi(player, HelpMain);
         }
         private void DeliveryHelp(BasePlayer player, int page = 0)
@@ -1648,84 +1687,90 @@ namespace Oxide.Plugins
             switch (page)
             {
                 case 0:
-                    var HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.12 0.0", "1 1", true);
-                    QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.01", "0.99 0.99");
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("delHelMen", player.UserIDString)}\n\n</color> {configData.MSG_Color}{LA("delHelChoo", player.UserIDString)}.\n\n{LA("creHelExi", player.UserIDString)} </color>{configData.MSG_MainColor}'exit'</color>", 20, "0 0", "1 1");
-                    QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Quest Vendor", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_AddVendor 1");
-                    QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Delivery Vendor", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_AddVendor 2");
+                    var HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.12 0.0", "1 1", true);
+                    QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.01", "0.99 0.99");
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("delHelMen", player.UserIDString)}\n\n</color> {textSecondary}{LA("delHelChoo", player.UserIDString)}.\n\n{LA("creHelExi", player.UserIDString)} </color>{textPrimary}'exit'</color>", 20, "0 0", "1 1");
+                    QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Quest Vendor", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_AddVendor 1");
+                    QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Delivery Vendor", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_AddVendor 2");
                     CuiHelper.AddUi(player, HelpMain);
                     return;
                 case 1:
-                    var element = QUI.CreateElementContainer(UIMain, UIColors["dark"], "0.25 0.85", "0.75 0.95");
-                    QUI.CreatePanel(ref element, UIMain, UIColors["buttonbg"], "0.005 0.04", "0.995 0.96");
-                    QUI.CreateLabel(ref element, UIMain, "", $"{configData.MSG_MainColor}{LA("delHelNewNPC", player.UserIDString)} '/questnpc'</color>", 22, "0 0", "1 1");                    
-                    CuiHelper.AddUi(player, element);                    
+                    var element = QUI.CreateElementContainer(UIMain, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.25 0.85", "0.75 0.95");
+                    QUI.CreatePanel(ref element, UIMain, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), "0.005 0.04", "0.995 0.96");
+                    QUI.CreateLabel(ref element, UIMain, "", $"{textPrimary}{LA("delHelNewNPC", player.UserIDString)} '/questnpc'</color>", 22, "0 0", "1 1");
+                    CuiHelper.AddUi(player, element);
                     return;
                 case 2:
                     DestroyUI(player);
-                    HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9");
-                    QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98", true);
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_Color}{LA("delHelMult", player.UserIDString)}</color>\n{configData.MSG_MainColor}{LA("creHelRT", player.UserIDString)}</color>", 18, "0.05 0.82", "0.95 0.98");
+                    HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9");
+                    QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98", true);
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textSecondary}{LA("delHelMult", player.UserIDString)}</color>\n{textPrimary}{LA("creHelRT", player.UserIDString)}</color>", 18, "0.05 0.82", "0.95 0.98");
                     int i = 0;
                     if (Economics) CreateRewardTypeButton(ref HelpMain, UIPanel, "Coins (Economics)", "QUI_RewardType coins", i); i++;
-                    if (ServerRewards) CreateRewardTypeButton(ref HelpMain, UIPanel, "RP (ServerRewards)", "QUI_RewardType rp", i); i++;                    
-                    CreateRewardTypeButton(ref HelpMain, UIPanel, LA("Item", player.UserIDString), "QUI_RewardType item", i); i++;                    
-                    if (HuntPlugin) { CreateRewardTypeButton(ref HelpMain, UIPanel, "XP (HuntRPG)", "QUI_RewardType huntxp", i); i++; }
+                    if (RustShop) CreateRewardTypeButton(ref HelpMain, UIPanel, "Рубли", "QUI_RewardType rp", i); i++;
+					if (KarmaSystem) CreateRewardTypeButton(ref HelpMain, UIPanel, "Карма", "QUI_RewardType kr", i); i++;
+                    CreateRewardTypeButton(ref HelpMain, UIPanel, LA("Item", player.UserIDString), "QUI_RewardType item", i); i++;
+                    if (HuntRPG) { CreateRewardTypeButton(ref HelpMain, UIPanel, "XP (HuntRPG)", "QUI_RewardType huntxp", i); i++; }
                     CuiHelper.AddUi(player, HelpMain);
                     return;
                 case 3:
                     {
-                        HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9");
-                        QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
+                        HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9");
+                        QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
                         var quest = ActiveCreations[player.userID];
-                        if (quest.deliveryInfo.Reward.isCoins || quest.deliveryInfo.Reward.isRP || quest.deliveryInfo.Reward.isHuntXP)
+                        if (quest.deliveryInfo.Reward.isCoins || quest.deliveryInfo.Reward.isRP || quest.deliveryInfo.Reward.isKR || quest.deliveryInfo.Reward.isHuntXP)
+      
                             DeliveryHelp(player, 4);
                         else
                         {
-                            HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.3 0.8", "0.7 0.97");
-                            QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                            QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("creHelIH", player.UserIDString)} 'quest item'</color>", 20, "0.1 0", "0.9 1");
+                            HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.3 0.8", "0.7 0.97");
+                            QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                            QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("creHelIH", player.UserIDString)} 'quest item'</color>", 20, "0.1 0", "0.9 1");
                             CuiHelper.AddUi(player, HelpMain);
                         }
                     }
                     return;
                 case 4:
                     ActiveCreations[player.userID].partNum = 5;
-                    HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9");
-                    QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("delHelRM", player.UserIDString)}</color> {configData.MSG_Color}\n\n{LA("delHelRM1", player.UserIDString)}</color>{configData.MSG_MainColor} 2000m</color>{configData.MSG_Color} {LA("delHelRM2", player.UserIDString)} </color>{configData.MSG_MainColor}0.25</color>{configData.MSG_Color}, {LA("delHelRM3", player.UserIDString)} </color>{configData.MSG_MainColor}500</color>", 20, "0.05 0.1", "0.95 0.9");
+                    HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9");
+                    QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("delHelRM", player.UserIDString)}</color> {textSecondary}\n\n{LA("delHelRM1", player.UserIDString)}</color>{textPrimary} 2000m</color>{textSecondary} {LA("delHelRM2", player.UserIDString)} </color>{textPrimary}0.25</color>{textSecondary}, {LA("delHelRM3", player.UserIDString)} </color>{textPrimary}500</color>", 20, "0.05 0.1", "0.95 0.9");
                     CuiHelper.AddUi(player, HelpMain);
                     return;
                 case 5:
                     ActiveCreations[player.userID].partNum = 3;
-                    HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9");
-                    QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("delHelDD", player.UserIDString)}</color>", 20, "0.05 0.1", "0.95 0.9");
+                    HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9");
+                    QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                    QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("delHelDD", player.UserIDString)}</color>", 20, "0.05 0.1", "0.95 0.9");
                     CuiHelper.AddUi(player, HelpMain);
                     return;
                 case 6:
                     {
-                        HelpMain = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9", true);
-                        QUI.CreatePanel(ref HelpMain, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{configData.MSG_MainColor}{LA("delHelNewV", player.UserIDString)}</color>", 20, "0.1 0.8", "0.9 0.95");
+                        HelpMain = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9", true);
+                        QUI.CreatePanel(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                        QUI.CreateLabel(ref HelpMain, UIPanel, "", $"{textPrimary}{LA("delHelNewV", player.UserIDString)}</color>", 20, "0.1 0.8", "0.9 0.95");
 
                         var quest = ActiveCreations[player.userID];
-                        string questDetails = $"{configData.MSG_MainColor}{LA("Quest Type:", player.UserIDString)}</color> {configData.MSG_Color}{quest.type}</color>";
-                        questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Name:", player.UserIDString)}</color> {configData.MSG_Color}{quest.deliveryInfo.Info.Name}</color>";
-                        questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Description:", player.UserIDString)}</color> {configData.MSG_Color}{quest.deliveryInfo.Description}</color>";
-                        questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Reward:", player.UserIDString)}</color> {configData.MSG_Color}{quest.deliveryInfo.Reward.DisplayName}</color>";
-                        questDetails = questDetails + $"\n{configData.MSG_MainColor}{LA("Multiplier:", player.UserIDString)}</color> {configData.MSG_Color}{quest.deliveryInfo.Multiplier}</color>";
+                        string questDetails = $"{textPrimary}{LA("Quest Type:", player.UserIDString)}</color> {textSecondary}{quest.type}</color>";
+                        questDetails = questDetails + $"\n{textPrimary}{LA("Name:", player.UserIDString)}</color> {textSecondary}{quest.deliveryInfo.Info.Name}</color>";
+      
+                        questDetails = questDetails + $"\n{textPrimary}{LA("Description:", player.UserIDString)}</color> {textSecondary}{quest.deliveryInfo.Description}</color>";
+      
+                        questDetails = questDetails + $"\n{textPrimary}{LA("Reward:", player.UserIDString)}</color> {textSecondary}{quest.deliveryInfo.Reward.DisplayName}</color>";
+      
+                        questDetails = questDetails + $"\n{textPrimary}{LA("Multiplier:", player.UserIDString)}</color> {textSecondary}{quest.deliveryInfo.Multiplier}</color>";
+      
 
                         QUI.CreateLabel(ref HelpMain, UIPanel, "", questDetails, 20, "0.1 0.2", "0.9 0.75", TextAnchor.MiddleLeft);
-                        QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Save Quest", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_SaveQuest");
-                        QUI.CreateButton(ref HelpMain, UIPanel, UIColors["buttonbg"], LA("Cancel", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_ExitQuest");
+                        QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Save Quest", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_SaveQuest");
+                        QUI.CreateButton(ref HelpMain, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Cancel", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_ExitQuest");
                         CuiHelper.AddUi(player, HelpMain);
                     }
                     return;
             default:
                     return;
-            }            
-        }        
+            }
+        }
         private void AcceptDelivery(BasePlayer player, string npcID, int page = 0)
         {
             var quest = vendors.DeliveryVendors[npcID];
@@ -1738,31 +1783,35 @@ namespace Oxide.Plugins
                         if (quest != null && target != null)
                         {
                             var distance = Vector2.Distance(new Vector2(quest.Info.x, quest.Info.z), new Vector2(target.Info.x, target.Info.z));
+      
                             var rewardAmount = distance * quest.Multiplier;
                             if (rewardAmount < 1) rewardAmount = 1;
-                            var briefing = $"{configData.MSG_MainColor}{quest.Info.Name}\n\n</color>";
-                            briefing = briefing + $"{configData.MSG_Color}{quest.Description}</color>\n\n";
-                            briefing = briefing + $"{configData.MSG_MainColor}{LA("Destination:", player.UserIDString)} </color>{configData.MSG_Color}{target.Info.Name}\nX {target.Info.x}, Z {target.Info.z}</color>\n";
-                            briefing = briefing + $"{configData.MSG_MainColor}{LA("Distance:", player.UserIDString)} </color>{configData.MSG_Color}{distance}M</color>\n";
-                            briefing = briefing + $"{configData.MSG_MainColor}{LA("Reward:", player.UserIDString)} </color>{configData.MSG_Color}{(int)rewardAmount}x {quest.Reward.DisplayName}</color>";
+                            var briefing = $"{textPrimary}{quest.Info.Name}\n\n</color>";
+      
+                            briefing = briefing + $"{textSecondary}{quest.Description}</color>\n\n";
+                            briefing = briefing + $"{textPrimary}{LA("Destination:", player.UserIDString)} </color>{textSecondary}{target.Info.Name}\nX {target.Info.x}, Z {target.Info.z}</color>\n";
+      
+                            briefing = briefing + $"{textPrimary}{LA("Distance:", player.UserIDString)} </color>{textSecondary}{distance}M</color>\n";
+                            briefing = briefing + $"{textPrimary}{LA("Reward:", player.UserIDString)} </color>{textSecondary}{(int)rewardAmount}x {quest.Reward.DisplayName}</color>";
 
-                            var VendorUI = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9", true);
-                            QUI.CreatePanel(ref VendorUI, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
+                            var VendorUI = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9", true);
+                            QUI.CreatePanel(ref VendorUI, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
                             QUI.CreateLabel(ref VendorUI, UIPanel, "", briefing, 20, "0.15 0.2", "0.85 1", TextAnchor.MiddleLeft);
 
-                            QUI.CreateButton(ref VendorUI, UIPanel, UIColors["buttonbg"], LA("Accept", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_AcceptDelivery {npcID} {target.Info.ID} {distance}");
-                            QUI.CreateButton(ref VendorUI, UIPanel, UIColors["buttonbg"], LA("Decline", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_DestroyAll");
+                            QUI.CreateButton(ref VendorUI, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Accept", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_AcceptDelivery {npcID} {target.Info.ID} {distance}");
+      
+                            QUI.CreateButton(ref VendorUI, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Decline", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_DestroyAll");
                             CuiHelper.AddUi(player, VendorUI);
                         }
                     }
                         return;
                     case 1:
                     {
-                        var VendorUI = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.4 0.3", "0.95 0.9", true);
-                        QUI.CreatePanel(ref VendorUI, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-                        QUI.CreateLabel(ref VendorUI, UIPanel, "", $"{configData.MSG_MainColor} {LA("delComplMSG", player.UserIDString)}</color>", 22, "0 0", "1 1");
-                        QUI.CreateButton(ref VendorUI, UIPanel, UIColors["buttonbg"], LA("Claim", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_FinishDelivery");
-                        QUI.CreateButton(ref VendorUI, UIPanel, UIColors["buttonbg"], LA("Cancel", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_DestroyAll");
+                        var VendorUI = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.4 0.3", "0.95 0.9", true);
+                        QUI.CreatePanel(ref VendorUI, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+                        QUI.CreateLabel(ref VendorUI, UIPanel, "", $"{textPrimary} {LA("delComplMSG", player.UserIDString)}</color>", 22, "0 0", "1 1");
+                        QUI.CreateButton(ref VendorUI, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Claim", player.UserIDString), 18, "0.6 0.05", "0.8 0.15", $"QUI_FinishDelivery {npcID}");
+                        QUI.CreateButton(ref VendorUI, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Cancel", player.UserIDString), 18, "0.2 0.05", "0.4 0.15", $"QUI_DestroyAll");
                         CuiHelper.AddUi(player, VendorUI);
                     }
                     return;
@@ -1775,15 +1824,15 @@ namespace Oxide.Plugins
         private void DeletionEditMenu(BasePlayer player, string page, string command)
         {
             DestroyEntries(player);
-            var Main = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.12 0", "1 1");
-            QUI.CreatePanel(ref Main, UIPanel, UIColors["light"], "0.01 0.01", "0.99 0.99", true);
+            var Main = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.12 0", "1 1");
+            QUI.CreatePanel(ref Main, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.01", "0.99 0.99", true);
             QUI.CreateLabel(ref Main, UIPanel, "1 1 1 0.025", page, 200, "0.01 0.01", "0.99 0.99");
 
-            QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("Kill",player.UserIDString)}</color>", 20, "0 0.87", "0.25 0.92");
-            QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("Gather", player.UserIDString)}</color>", 20, "0.25 0.87", "0.5 0.92");
-            QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("Loot", player.UserIDString)}</color>", 20, "0.5 0.87", "0.75 0.92");
-            QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("Craft", player.UserIDString)}</color>", 20, "0.75 0.87", "1 0.92");
-            if (command == "QUI_ConfirmDelete") QUI.CreateButton(ref Main, UIPanel, UIColors["buttonbg"], $"{configData.MSG_MainColor}{LA("Delete NPC", player.UserIDString)}</color>", 18, "0.8 0.94", "0.98 0.98", "QUI_DeleteNPCMenu");
+            QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("Kill",player.UserIDString)}</color>", 20, "0 0.87", "0.25 0.92");
+            QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("Gather", player.UserIDString)}</color>", 20, "0.25 0.87", "0.5 0.92");
+            QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("Loot", player.UserIDString)}</color>", 20, "0.5 0.87", "0.75 0.92");
+            QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("Craft", player.UserIDString)}</color>", 20, "0.75 0.87", "1 0.92");
+            if (command == "QUI_ConfirmDelete") QUI.CreateButton(ref Main, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), $"{textPrimary}{LA("Delete NPC", player.UserIDString)}</color>", 18, "0.8 0.94", "0.98 0.98", "QUI_DeleteNPCMenu");
 
             int killNum = 0;
             int gatherNum = 0;
@@ -1808,19 +1857,19 @@ namespace Oxide.Plugins
             {
                 CreateDelEditButton(ref Main, 0.785f, UIPanel, entry.Key, craftNum, command);
                 craftNum++;
-            }           
+            }
             CuiHelper.AddUi(player, Main);
         }
         private void DeleteNPCMenu(BasePlayer player)
         {
             DestroyEntries(player);
-            var Main = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.12 0", "1 1");
-            QUI.CreatePanel(ref Main, UIPanel, UIColors["light"], "0.01 0.01", "0.99 0.99", true);
+            var Main = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.12 0", "1 1");
+            QUI.CreatePanel(ref Main, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.01", "0.99 0.99", true);
             QUI.CreateLabel(ref Main, UIPanel, "1 1 1 0.025", LA("REMOVER", player.UserIDString), 200, "0.01 0.01", "0.99 0.99");
 
-            QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("Delivery Vendors", player.UserIDString)}</color>", 20, "0 0.87", "0.5 0.92");
-            QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("Quest Vendors", player.UserIDString)}</color>", 20, "0.5 0.87", "1 0.92");           
-                       
+            QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("Delivery Vendors", player.UserIDString)}</color>", 20, "0 0.87", "0.5 0.92");
+            QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("Quest Vendors", player.UserIDString)}</color>", 20, "0.5 0.87", "1 0.92");
+
             int VendorNum = 0;
             int DeliveryNum = 0;
             foreach (var entry in vendors.QuestVendors)
@@ -1831,53 +1880,54 @@ namespace Oxide.Plugins
             foreach (var entry in vendors.DeliveryVendors)
             {
                 CreateDelVendorButton(ref Main, 0.035f, UIPanel, entry.Value.Info.Name, DeliveryNum, $"QUI_RemoveVendor {entry.Key}");
+      
                 DeliveryNum++;
             }
             CuiHelper.AddUi(player, Main);
         }
         private void ConfirmDeletion(BasePlayer player, string questName)
         {
-            var ConfirmDelete = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.2 0.4", "0.8 0.8", true);
-            QUI.CreatePanel(ref ConfirmDelete, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-            QUI.CreateLabel(ref ConfirmDelete, UIPanel, "", $"{configData.MSG_MainColor}{LA("confDel", player.UserIDString)} {questName}</color>", 20, "0.1 0.6", "0.9 0.9");
-            QUI.CreateButton(ref ConfirmDelete, UIPanel, UIColors["buttonbg"], LA("Yes", player.UserIDString), 18, "0.6 0.2", "0.8 0.3", $"QUI_DeleteQuest {questName}");
-            QUI.CreateButton(ref ConfirmDelete, UIPanel, UIColors["buttonbg"], LA("No", player.UserIDString), 18, "0.2 0.2", "0.4 0.3", $"QUI_DeleteQuest reject");
+            var ConfirmDelete = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.2 0.4", "0.8 0.8", true);
+            QUI.CreatePanel(ref ConfirmDelete, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+            QUI.CreateLabel(ref ConfirmDelete, UIPanel, "", $"{textPrimary}{LA("confDel", player.UserIDString)} {questName}</color>", 20, "0.1 0.6", "0.9 0.9");
+            QUI.CreateButton(ref ConfirmDelete, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Yes", player.UserIDString), 18, "0.6 0.2", "0.8 0.3", $"QUI_DeleteQuest {questName}");
+            QUI.CreateButton(ref ConfirmDelete, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("No", player.UserIDString), 18, "0.2 0.2", "0.4 0.3", $"QUI_DeleteQuest reject");
 
             CuiHelper.AddUi(player, ConfirmDelete);
         }
         private void ConfirmCancellation(BasePlayer player, string questName)
         {
-            var ConfirmDelete = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.2 0.4", "0.8 0.8", true);
-            QUI.CreatePanel(ref ConfirmDelete, UIPanel, UIColors["light"], "0.01 0.02", "0.99 0.98");
-            QUI.CreateLabel(ref ConfirmDelete, UIPanel, "", $"{configData.MSG_MainColor}{LA("confCan", player.UserIDString)} {questName}</color>\n{configData.MSG_Color}{LA("confCan2", player.UserIDString)}</color>", 20, "0.1 0.6", "0.9 0.9");
-            QUI.CreateButton(ref ConfirmDelete, UIPanel, UIColors["buttonbg"], LA("Yes", player.UserIDString), 18, "0.6 0.2", "0.8 0.3", $"QUI_ConfirmCancel {questName}");
-            QUI.CreateButton(ref ConfirmDelete, UIPanel, UIColors["buttonbg"], LA("No", player.UserIDString), 18, "0.2 0.2", "0.4 0.3", $"QUI_ConfirmCancel reject");
+            var ConfirmDelete = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.2 0.4", "0.8 0.8", true);
+            QUI.CreatePanel(ref ConfirmDelete, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.02", "0.99 0.98");
+            QUI.CreateLabel(ref ConfirmDelete, UIPanel, "", $"{textPrimary}{LA("confCan", player.UserIDString)} {questName}</color>\n{textSecondary}{LA("confCan2", player.UserIDString)}</color>", 20, "0.1 0.6", "0.9 0.9");
+            QUI.CreateButton(ref ConfirmDelete, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("Yes", player.UserIDString), 18, "0.6 0.2", "0.8 0.3", $"QUI_ConfirmCancel {questName}");
+            QUI.CreateButton(ref ConfirmDelete, UIPanel, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), LA("No", player.UserIDString), 18, "0.2 0.2", "0.4 0.3", $"QUI_ConfirmCancel reject");
 
             CuiHelper.AddUi(player, ConfirmDelete);
         }
-             
+
         private void QuestEditorMenu(BasePlayer player)
         {
-            DestroyEntries(player); 
-            var Main = QUI.CreateElementContainer(UIPanel, UIColors["dark"], "0.12 0", "1 1");
-            QUI.CreatePanel(ref Main, UIPanel, UIColors["light"], "0.01 0.01", "0.99 0.99", true);
+            DestroyEntries(player);
+            var Main = QUI.CreateElementContainer(UIPanel, QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.12 0", "1 1");
+            QUI.CreatePanel(ref Main, UIPanel, QUI.Color(configData.Colors.Background_Light.Color, configData.Colors.Background_Light.Alpha), "0.01 0.01", "0.99 0.99", true);
             QUI.CreateLabel(ref Main, UIPanel, "1 1 1 0.025", LA("EDITOR", player.UserIDString), 200, "0.01 0.01", "0.99 0.99");
 
             int i = 0;
-            QUI.CreateLabel(ref Main, UIPanel, "", $"{configData.MSG_MainColor}{LA("chaEdi", player.UserIDString)}</color>", 20, "0.25 0.8", "0.75 0.9");
+            QUI.CreateLabel(ref Main, UIPanel, "", $"{textPrimary}{LA("chaEdi", player.UserIDString)}</color>", 20, "0.25 0.8", "0.75 0.9");
             CreateNewQuestButton(ref Main, UIPanel, LA("Name", player.UserIDString), "QUI_EditQuestVar name", i); i++;
             CreateNewQuestButton(ref Main, UIPanel, LA("Description", player.UserIDString), "QUI_EditQuestVar description", i); i++;
             CreateNewQuestButton(ref Main, UIPanel, LA("Objective", player.UserIDString), "QUI_EditQuestVar objective", i); i++;
             CreateNewQuestButton(ref Main, UIPanel, LA("Amount", player.UserIDString), "QUI_EditQuestVar amount", i); i++;
-            CreateNewQuestButton(ref Main, UIPanel, LA("Reward", player.UserIDString), "QUI_EditQuestVar reward", i); i++;           
+            CreateNewQuestButton(ref Main, UIPanel, LA("Reward", player.UserIDString), "QUI_EditQuestVar reward", i); i++;
 
             CuiHelper.AddUi(player, Main);
         }
-       
+
         private void CreateObjectiveEntry(ref CuiElementContainer container, string panelName, string name, int number)
         {
-            var pos = CalcEntryPos(number);            
-            QUI.CreateButton(ref container, panelName, UIColors["buttonbg"], name, 10, $"{pos[0]} {pos[1]}", $"{pos[2]} {pos[3]}", $"QUI_SelectObj {name}");            
+            var pos = CalcEntryPos(number);
+            QUI.CreateButton(ref container, panelName, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), name, 10, $"{pos[0]} {pos[1]}", $"{pos[2]} {pos[3]}", $"QUI_SelectObj {name}");
         }
         private void CreateNewQuestButton(ref CuiElementContainer container, string panelName, string buttonname, string command, int number)
         {
@@ -1888,7 +1938,7 @@ namespace Oxide.Plugins
             Vector2 posMin = origin - offset;
             Vector2 posMax = posMin + dimensions;
 
-            QUI.CreateButton(ref container, panelName, UIColors["buttonbg"], buttonname, 18, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", command);
+            QUI.CreateButton(ref container, panelName, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), buttonname, 18, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", command);
         }
         private void CreateRewardTypeButton(ref CuiElementContainer container, string panelName, string buttonname, string command, int number)
         {
@@ -1899,8 +1949,8 @@ namespace Oxide.Plugins
             Vector2 posMin = origin - offset;
             Vector2 posMax = posMin + dimensions;
 
-            QUI.CreateButton(ref container, panelName, UIColors["buttonbg"], buttonname, 18, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", command);
-        }        
+            QUI.CreateButton(ref container, panelName, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), buttonname, 18, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", command);
+        }
         private void CreateDelEditButton(ref CuiElementContainer container, float xPos, string panelName, string buttonname, int number, string command, float width = 0.18f)
         {
             Vector2 dimensions = new Vector2(width, 0.05f);
@@ -1910,7 +1960,7 @@ namespace Oxide.Plugins
             Vector2 posMin = origin + offset;
             Vector2 posMax = posMin + dimensions;
 
-            QUI.CreateButton(ref container, panelName, UIColors["buttonbg"], buttonname, 14, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", $"{command} {buttonname}");
+            QUI.CreateButton(ref container, panelName, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), buttonname, 14, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", $"{command} {buttonname}");
         }
         private void CreateDelVendorButton(ref CuiElementContainer container, float xPos, string panelName, string buttonname, int number, string command)
         {
@@ -1922,30 +1972,46 @@ namespace Oxide.Plugins
             Vector2 posMin = origin + offset;
             Vector2 posMax = posMin + dimensions;
 
-            QUI.CreateButton(ref container, panelName, UIColors["buttonbg"], buttonname, 14, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", command);
+            QUI.CreateButton(ref container, panelName, QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), buttonname, 14, $"{posMin.x} {posMin.y}", $"{posMax.x} {posMax.y}", command);
         }
 
         private void PopupMessage(BasePlayer player, string msg)
         {
             CuiHelper.DestroyUi(player, "PopupMsg");
-            var element = QUI.CreateElementContainer("PopupMsg", UIColors["dark"], "0.25 0.85", "0.75 0.95");
-            QUI.CreatePanel(ref element, "PopupMsg", UIColors["buttonbg"], "0.005 0.04", "0.995 0.96");
-            QUI.CreateLabel(ref element, "PopupMsg", "", $"{configData.MSG_MainColor}{msg}</color>", 22, "0 0", "1 1");
+            var element = QUI.CreateElementContainer("PopupMsg", QUI.Color(configData.Colors.Background_Dark.Color, configData.Colors.Background_Dark.Alpha), "0.25 0.85", "0.75 0.95");
+            QUI.CreatePanel(ref element, "PopupMsg", QUI.Color(configData.Colors.Button_Standard.Color, configData.Colors.Button_Standard.Alpha), "0.005 0.04", "0.995 0.96");
+            QUI.CreateLabel(ref element, "PopupMsg", "", $"{textPrimary}{msg}</color>", 22, "0 0", "1 1");
             CuiHelper.AddUi(player, element);
             timer.Once(3, () => CuiHelper.DestroyUi(player, "PopupMsg"));
         }
-               
-        private Vector2 CalcQuestPos(int num)
+
+        private Vector2 CalcQuestPos(int number)
         {
-            Vector2 position = new Vector2(0.15f, 0.52f);
-            if (num == 1)
-                position = new Vector2(0.575f, 0.52f);
-            if (num == 2)
-                position = new Vector2(0.15f, 0.1f);
-            if (num == 3)
-                position = new Vector2(0.575f, 0.1f);
-            return position;
-        }        
+            Vector2 position = new Vector2(0.1325f, 0.71f);
+            Vector2 dimensions = new Vector2(0.21f, 0.22f);
+            float offsetY = 0f;
+            float offsetX = 0;
+            if (number >= 0 && number < 4)
+            {
+                offsetX = (0.005f + dimensions.x) * number;
+            }
+            if (number > 3 && number < 8)
+            {
+                offsetX = (0.005f + dimensions.x) * (number - 4);
+                offsetY = (-0.008f - dimensions.y) * 1;
+            }
+            if (number > 7 && number < 12)
+            {
+                offsetX = (0.005f + dimensions.x) * (number - 8);
+                offsetY = (-0.008f - dimensions.y) * 2;
+            }
+            if (number > 11 && number < 16)
+            {
+                offsetX = (0.005f + dimensions.x) * (number - 12);
+                offsetY = (-0.008f - dimensions.y) * 3;
+            }
+            return new Vector2(position.x + offsetX, position.y + offsetY);
+        }
         private float[] CalcEntryPos(int number)
         {
             Vector2 position = new Vector2(0.014f, 0.8f);
@@ -2026,15 +2092,15 @@ namespace Oxide.Plugins
         private void DestroyUI(BasePlayer player)
         {
             CuiHelper.DestroyUi(player, UIMain);
-            DestroyEntries(player);             
+            DestroyEntries(player);
         }
         private void DestroyEntries(BasePlayer player)
         {
             CuiHelper.DestroyUi(player, UIPanel);
             if (OpenUI.ContainsKey(player.userID))
             {
-                foreach (var entry in OpenUI[player.userID])                
-                    CuiHelper.DestroyUi(player, entry);                
+                foreach (var entry in OpenUI[player.userID])
+                    CuiHelper.DestroyUi(player, entry);
                 OpenUI.Remove(player.userID);
             }
         }
@@ -2044,7 +2110,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_AcceptQuest")]
         private void cmdAcceptQuest(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
             var questName = string.Join(" ", arg.Args);
@@ -2057,7 +2123,9 @@ namespace Oxide.Plugins
                 {
                     var quest = Quest[(QuestType)type][questName];
                     data.Add(questName, new PlayerQuestInfo { Status = QuestStatus.Pending, Type = (QuestType)type });
+      
                     PlayerProgress[player.userID].RequiredItems.Add(new QuestInfo { ShortName = quest.Objective, Type = (QuestType)type });
+      
                     DestroyEntries(player);
                     ListElement(player, (QuestType)type);
                     PopupMessage(player, $"{LA("qAccep", player.UserIDString)} {questName}");
@@ -2068,7 +2136,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_AcceptDelivery")]
         private void cmdAcceptDelivery(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
             var vendorID = arg.Args[0];
@@ -2081,7 +2149,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_CancelDelivery")]
         private void cmdCancelDelivery(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
             if (!string.IsNullOrEmpty(PlayerProgress[player.userID].CurrentDelivery.TargetID))
@@ -2094,10 +2162,11 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_FinishDelivery")]
         private void cmdFinishDelivery(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (PlayerProgress[player.userID].CurrentDelivery != null)
+
+            if (PlayerProgress[player.userID].CurrentDelivery != null && PlayerProgress[player.userID].CurrentDelivery.TargetID == arg.GetString(0))
             {
                 var npcID = PlayerProgress[player.userID].CurrentDelivery.VendorID;
                 var distance = PlayerProgress[player.userID].CurrentDelivery.Distance;
@@ -2106,20 +2175,20 @@ namespace Oxide.Plugins
                 if (rewardAmount < 1) rewardAmount = 1;
 
                 var reward = quest.Reward;
-                reward.Amount = rewardAmount;
+                    reward.Amount = rewardAmount;
                 if (GiveReward(player, new List<RewardItem> { reward }))
                 {
-                    PlayerProgress[player.userID].CurrentDelivery = new ActiveDelivery();
                     var rewards = GetRewardString(new List<RewardItem> { reward });
                     PopupMessage(player, $"{LA("rewRec", player.UserIDString)} {rewards}");
+                    PlayerProgress[player.userID].CurrentDelivery = new ActiveDelivery();
                 }
                 DestroyUI(player);
-            }            
+            }
         }
         [ConsoleCommand("QUI_ChangeElement")]
         private void cmdChangeElement(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
             CheckPlayerEntry(player);
@@ -2145,11 +2214,11 @@ namespace Oxide.Plugins
                     PlayerStats(player);
                     return;
                 case "editor":
-                    if (player.IsAdmin())
+                    if (player.IsAdmin)
                         DeletionEditMenu(player, LA("EDITOR", player.UserIDString), "QUI_EditQuest");
                     return;
                 case "creation":
-                    if (player.IsAdmin())
+                    if (player.IsAdmin)
                     {
                         if (ActiveCreations.ContainsKey(player.userID))
                             ActiveCreations.Remove(player.userID);
@@ -2157,7 +2226,7 @@ namespace Oxide.Plugins
                     }
                     return;
                 case "objpage":
-                    if (player.IsAdmin())
+                    if (player.IsAdmin)
                     {
                         var pageNumber = arg.GetString(1);
                         CreateObjectiveMenu(player, int.Parse(pageNumber));
@@ -2170,7 +2239,7 @@ namespace Oxide.Plugins
                         ListElement(player, type, int.Parse(pageNumber));
                     }
                     return;
-                case "statspage":                    
+                case "statspage":
                     {
                         var pageNumber = arg.GetString(1);
                         PlayerStats(player, int.Parse(pageNumber));
@@ -2181,7 +2250,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_DestroyAll")]
         private void cmdDestroyAll(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
             if (StatsMenu.Contains(player.userID))
@@ -2194,14 +2263,14 @@ namespace Oxide.Plugins
                 OpenMenuBind.Remove(player.userID);
             DestroyUI(player);
             OpenMap(player);
-        }       
+        }
         [ConsoleCommand("QUI_NewQuest")]
         private void cmdNewQuest(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 var questType = arg.GetString(0);
                 var Type = ConvertStringToType(questType);
@@ -2212,17 +2281,17 @@ namespace Oxide.Plugins
                 }
 
                 ActiveCreations.Add(player.userID, new QuestCreator { type = Type, entry = new QuestEntry { Rewards = new List<RewardItem>() }, item = new RewardItem() });
-                DestroyUI(player);                
+                DestroyUI(player);
                 CreationHelp(player);
             }
         }
         [ConsoleCommand("QUI_AddVendor")]
         private void cmdAddVendor(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 var vendorType = arg.GetString(0);
                 bool isVendor = false;
@@ -2233,14 +2302,14 @@ namespace Oxide.Plugins
                 DestroyUI(player);
                 DeliveryHelp(player, 1);
             }
-        }       
+        }
         [ConsoleCommand("QUI_SelectObj")]
         private void cmdSelectObj(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 var questItem = string.Join(" ", arg.Args);
                 QuestCreator Creator;
@@ -2256,26 +2325,27 @@ namespace Oxide.Plugins
 
                 Creator.partNum++;
                 DestroyUI(player);
-                
+
                 CreationHelp(player, 2);
             }
         }
         [ConsoleCommand("QUI_RewardType")]
         private void cmdRewardType(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 var rewardType = arg.GetString(0);
                 QuestCreator Creator;
 
                 if (ActiveCreations.ContainsKey(player.userID))
                     Creator = ActiveCreations[player.userID];
-                else Creator = ActiveEditors[player.userID];                
+                else Creator = ActiveEditors[player.userID];
 
                 bool isRP = false;
+				bool isKR = false;
                 bool isCoins = false;
                 bool isHuntXP = false;
                 string name = "";
@@ -2284,7 +2354,11 @@ namespace Oxide.Plugins
                 {
                     case "rp":
                         isRP = true;
-                        name = LA("RP", player.UserIDString);                        
+                        name = LA("RP", player.UserIDString);
+                        break;
+					case "kr":
+                        isKR = true;
+                        name = LA("KR", player.UserIDString);
                         break;
                     case "coins":
                         isCoins = true;
@@ -2293,70 +2367,81 @@ namespace Oxide.Plugins
                     case "huntxp":
                         isHuntXP = true;
                         name = LA("HuntXP", player.UserIDString);
-                        break;                    
-                    default:                        
+                        break;
+                    default:
                         break;
                 }
                 Creator.partNum = 5;
                 if (Creator.type != QuestType.Delivery)
                 {
                     Creator.item.isRP = isRP;
+					Creator.item.isKR = isKR;
                     Creator.item.isCoins = isCoins;
                     Creator.item.isHuntXP = isHuntXP;
                     Creator.item.DisplayName = name;
-                    CreationHelp(player, 5);                    
+                    CreationHelp(player, 5);
                 }
                 else
                 {
                     Creator.deliveryInfo.Reward.isRP = isRP;
+      
+					Creator.deliveryInfo.Reward.isKR = isKR;
+      
                     Creator.deliveryInfo.Reward.isCoins = isCoins;
+      
                     Creator.deliveryInfo.Reward.isHuntXP = isHuntXP;
+      
                     Creator.deliveryInfo.Reward.DisplayName = name;
+      
                     DeliveryHelp(player, 3);
-                }                
+                }
             }
         }
         [ConsoleCommand("QUI_ClaimReward")]
         private void cmdClaimReward(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
+
             var questName = string.Join(" ", arg.Args);
             var quest = GetQuest(questName);
             if (quest == null) return;
-            if (GiveReward(player, quest.Rewards))
-            {
-                var questStatus = PlayerProgress[player.userID].Quests[questName];
-                questStatus.Status = QuestStatus.Completed;
-                questStatus.RewardClaimed = true;
-                PlayerStats(player);
 
-                var rewards = GetRewardString(quest.Rewards);                
-                PopupMessage(player, $"{LA("rewRec", player.UserIDString)} {rewards}");
-            }
-            else
+            if (IsQuestCompleted(player.userID, questName))
             {
-                PopupMessage(player, LA("rewError", player.UserIDString));
+                if (GiveReward(player, quest.Rewards))
+                {
+                    var rewards = GetRewardString(quest.Rewards);
+                    PopupMessage(player, $"{LA("rewRec", player.UserIDString)} {rewards}");
+                    PlayerProgress[player.userID].Quests[questName].RewardClaimed = true;
+                }
+                else
+                {
+                    PopupMessage(player, LA("rewError", player.UserIDString));
+                }
             }
+            PlayerStats(player);
         }
+        bool IsQuestCompleted(ulong playerId, string questName = "") => !string.IsNullOrEmpty(questName) && PlayerProgress[playerId].Quests[questName].Status == QuestStatus.Completed;
+
         [ConsoleCommand("QUI_CancelQuest")]
         private void cmdCancelQuest(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
             var questName = string.Join(" ", arg.Args);
-            DestroyUI(player);          
+            DestroyUI(player);
             ConfirmCancellation(player, questName);
         }
         [ConsoleCommand("QUI_ItemDeduction")]
         private void cmdItemDeduction(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 QuestCreator Creator;
                 if (ActiveCreations.ContainsKey(player.userID))
@@ -2366,7 +2451,7 @@ namespace Oxide.Plugins
                 {
                     case "0":
                         Creator.entry.ItemDeduction = false;
-                        break;                    
+                        break;
                     default:
                         Creator.entry.ItemDeduction = true;
                         break;
@@ -2377,7 +2462,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_ConfirmCancel")]
         private void cmdConfirmCancel(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
             var questName = string.Join(" ", arg.Args);
@@ -2421,7 +2506,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_RemoveCompleted")]
         private void cmdRemoveCompleted(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
             var questName = string.Join(" ", arg.Args);
@@ -2436,17 +2521,17 @@ namespace Oxide.Plugins
                     items.Remove(items[i]);
                     break;
                 }
-            }            
-            PlayerProgress[player.userID].Quests.Remove(questName);           
+            }
+            PlayerProgress[player.userID].Quests.Remove(questName);
             PlayerStats(player);
         }
         [ConsoleCommand("QUI_DeleteQuest")]
         private void cmdDeleteQuest(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 if (arg.Args == null || arg.Args.Length == 0)
                 {
@@ -2466,14 +2551,14 @@ namespace Oxide.Plugins
                 CreateMenu(player);
                 DeletionEditMenu(player, LA("REMOVER", player.UserIDString), "QUI_ConfirmDelete");
             }
-        }        
+        }
         [ConsoleCommand("QUI_DeleteNPCMenu")]
         private void cmdDeleteNPCMenu(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 DeleteNPCMenu(player);
             }
@@ -2481,10 +2566,10 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_RemoveVendor")]
         private void cmdRemoveVendor(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 var ID = arg.Args[0];
                 foreach(var npc in vendors.QuestVendors)
@@ -2504,27 +2589,27 @@ namespace Oxide.Plugins
                     }
                 }
             }
-        }        
+        }
         [ConsoleCommand("QUI_ConfirmDelete")]
         private void cmdConfirmDelete(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 var questName = string.Join(" ", arg.Args);
                 DestroyUI(player);
-                ConfirmDeletion(player, questName);                        
+                ConfirmDeletion(player, questName);
             }
-        }        
+        }
         [ConsoleCommand("QUI_EditQuest")]
         private void cmdEditQuest(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 if (ActiveEditors.ContainsKey(player.userID))
                     ActiveEditors.Remove(player.userID);
@@ -2536,17 +2621,17 @@ namespace Oxide.Plugins
                 ActiveEditors[player.userID].entry = Quest;
                 ActiveEditors[player.userID].oldEntry = Quest.QuestName;
                 ActiveEditors[player.userID].type = (QuestType)GetQuestType(questName);
-                ActiveEditors[player.userID].item = new RewardItem();              
+                ActiveEditors[player.userID].item = new RewardItem();
                 QuestEditorMenu(player);
             }
         }
         [ConsoleCommand("QUI_EditQuestVar")]
         private void cmdEditQuestVar(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 if (ActiveEditors.ContainsKey(player.userID))
                 {
@@ -2560,7 +2645,7 @@ namespace Oxide.Plugins
                             break;
                         case "description":
                             Creator.partNum = 3;
-                            CreationHelp(player, 3);                            
+                            CreationHelp(player, 3);
                             break;
                         case "objective":
                             Creator.partNum = 1;
@@ -2583,10 +2668,10 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_RemoveReward")]
         private void cmdEditReward(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 QuestCreator Creator = ActiveEditors[player.userID];
                 var amount = arg.Args[0];
@@ -2605,10 +2690,10 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_EndEditing")]
         private void cmdEndEditing(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 CreateMenu(player);
                 DeletionEditMenu(player, LA("EDITOR", player.UserIDString), "QUI_EditQuest");
@@ -2617,10 +2702,10 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_SaveQuest")]
         private void cmdSaveQuest(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 bool creating = false;
                 if (ActiveCreations.ContainsKey(player.userID))
@@ -2631,10 +2716,10 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_ExitQuest")]
         private void cmdExitQuest(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 bool creating = false;
                 if (ActiveCreations.ContainsKey(player.userID))
@@ -2645,10 +2730,10 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_AddReward")]
         private void cmdAddReward(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 QuestCreator Creator;
                 if (ActiveCreations.ContainsKey(player.userID))
@@ -2661,10 +2746,10 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_RewardFinish")]
         private void cmdFinishReward(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (player.IsAdmin())
+            if (player.IsAdmin)
             {
                 CreationHelp(player, 8);
             }
@@ -2672,7 +2757,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("QUI_OpenQuestMenu")]
         private void cmdOpenQuestMenu(ConsoleSystem.Arg arg)
         {
-            var player = arg.connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
             if (!OpenMenuBind.Contains(player.userID))
@@ -2689,7 +2774,7 @@ namespace Oxide.Plugins
         void cmdOpenMenu(BasePlayer player, string command, string[] args)
         {
             if (AddVendor.ContainsKey(player.userID)) return;
-            if ((configData.UseNPCVendors && player.IsAdmin()) || !configData.UseNPCVendors)
+            if ((configData.UseNPCVendors && player.IsAdmin) || !configData.UseNPCVendors)
             {
                 CheckPlayerEntry(player);
                 CreateMenu(player);
@@ -2700,18 +2785,18 @@ namespace Oxide.Plugins
                 CheckPlayerEntry(player);
                 if (!StatsMenu.Contains(player.userID))
                     StatsMenu.Add(player.userID);
-                
+
                 CreateEmptyMenu(player);
                 PlayerStats(player);
                 PopupMessage(player, LA("noVendor", player.UserIDString));
-            }            
+            }
         }
 
         [ChatCommand("questnpc")]
         void cmdQuestNPC(BasePlayer player, string command, string[] args)
         {
-            if (!player.IsAdmin()) return;
-            var NPC = FindEntity(player);            
+            if (!player.IsAdmin) return;
+            var NPC = FindEntity(player);
             if (NPC != null)
             {
                 var isRegistered = isNPCRegistered(NPC.UserIDString);
@@ -2720,9 +2805,14 @@ namespace Oxide.Plugins
                     SendMSG(player, isRegistered, LA("Quest NPCs:", player.UserIDString));
                     return;
                 }
+                string name = "";
+                if (args.Length >= 1)
+                    name = string.Join(" ", args);
+
                 if (AddVendor.ContainsKey(player.userID))
                 {
                     var pos = new NPCInfo { x = NPC.transform.position.x, z = NPC.transform.position.z, ID = NPC.UserIDString };
+      
                     if (AddVendor[player.userID])
                     {
                         pos.Name = $"QuestVendor_{vendors.QuestVendors.Count + 1}";
@@ -2730,10 +2820,10 @@ namespace Oxide.Plugins
                         SendMSG(player, LA("newVSucc", player.UserIDString), LA("Quest NPCs:", player.UserIDString));
                         if (NPC != null)
                         {
-                            NPCdisplayName.SetValue(NPC, pos.Name);
+                            NPC.displayName = pos.Name;
                             NPC.UpdateNetworkGroup();
                         }
-                        AddMapMarker(pos.x, pos.z, pos.Name, configData.Icon_Vendor);
+                        AddMapMarker(pos.x, pos.z, pos.Name, configData.LustyMapIntegration.Icon_Vendor + ".png");
                         AddVendor.Remove(player.userID);
                         SaveVendorData();
                         DestroyUI(player);
@@ -2742,17 +2832,20 @@ namespace Oxide.Plugins
                     }
                     else
                     {
-                        var name = $"Delivery_{ vendors.DeliveryVendors.Count + 1}";
+                        if (string.IsNullOrEmpty(name))
+                            name= $"Delivery_{ vendors.DeliveryVendors.Count + 1}";
 
                         if (ActiveCreations.ContainsKey(player.userID))
                             ActiveCreations.Remove(player.userID);
                         pos.Name = name;
 
                         ActiveCreations.Add(player.userID, new QuestCreator
-                        {                            
+                        {
                             deliveryInfo = new DeliveryInfo
+      
                             {
                                 Info = pos,
+      
                                 Reward = new RewardItem()
                             },
                             partNum = 4,
@@ -2764,7 +2857,7 @@ namespace Oxide.Plugins
             }
             else SendMSG(player, LA("noNPC", player.UserIDString));
         }
-        
+
         #endregion
 
         #region Data Management
@@ -2802,7 +2895,7 @@ namespace Oxide.Plugins
             catch
             {
                 Puts("Couldn't load quest data, creating new datafile");
-                questData = new QuestData();                
+                questData = new QuestData();
             }
             try
             {
@@ -2826,7 +2919,7 @@ namespace Oxide.Plugins
             }
             try
             {
-                itemNames = Item_Names.ReadObject<ItemNames>();                
+                itemNames = Item_Names.ReadObject<ItemNames>();
             }
             catch
             {
@@ -2855,23 +2948,48 @@ namespace Oxide.Plugins
         class NPCData
         {
             public Dictionary<string, NPCInfo> QuestVendors = new Dictionary<string, NPCInfo>();
+      
             public Dictionary<string, DeliveryInfo> DeliveryVendors = new Dictionary<string, DeliveryInfo>();
+      
         }
         #endregion
 
         #region Config
-
-        class ConfigData
-        {          
-            public bool DisableUI_FadeIn { get; set; } 
-            public string MSG_MainColor { get; set; }
-            public string MSG_Color { get; set; }
-            public string Icon_Vendor { get; set; }
-            public string Icon_Delivery { get; set; }
-            public int Quest_Cooldown { get; set; }
-            public bool UseNPCVendors { get; set; }
+        class UIColor
+        {
+            public string Color { get; set; }
+            public float Alpha { get; set; }
+        }
+        class Colors
+        {
+            public string TextColor_Primary { get; set; }
+            public string TextColor_Secondary { get; set; }
+            public UIColor Background_Dark { get; set; }
+            public UIColor Background_Light { get; set; }
+            public UIColor Button_Standard { get; set; }
+            public UIColor Button_Accept { get; set; }
+            public UIColor Button_Completed { get; set; }
+            public UIColor Button_Cancel { get; set; }
+            public UIColor Button_Pending { get; set; }
+        }
+        class Keybinds
+        {
             public bool Autoset_KeyBind { get; set; }
             public string KeyBind_Key { get; set; }
+        }
+        class LMIcons
+        {
+            public string Icon_Vendor { get; set; }
+            public string Icon_Delivery { get; set; }
+        }
+        class ConfigData
+        {
+            public Colors Colors { get; set; }
+            public Keybinds KeybindOptions { get; set; }
+            public LMIcons LustyMapIntegration { get; set; }
+            public bool DisableUI_FadeIn { get; set; }
+            public bool UseNPCVendors { get; set; }
+
         }
         private void LoadVariables()
         {
@@ -2887,15 +3005,31 @@ namespace Oxide.Plugins
             Puts("Creating a new config file");
             ConfigData config = new ConfigData
             {
-                Autoset_KeyBind = false,
                 DisableUI_FadeIn = false,
-                KeyBind_Key = "k",
-                MSG_MainColor = "<color=orange>",
-                MSG_Color = "<color=#939393>",
-                Icon_Delivery = "deliveryicon",
-                Icon_Vendor = "vendoricon",
-                Quest_Cooldown = 1440,
-                UseNPCVendors = false
+
+                UseNPCVendors = false,
+                Colors = new Colors
+                {
+                    Background_Dark = new UIColor { Color = "#2a2a2a", Alpha = 0.98f },
+                    Background_Light = new UIColor { Color = "#696969", Alpha = 0.3f },
+                    Button_Accept = new UIColor { Color = "#00cd00", Alpha = 0.9f },
+                    Button_Cancel = new UIColor { Color = "#8c1919", Alpha = 0.9f },
+                    Button_Completed = new UIColor { Color = "#829db4", Alpha = 0.9f },
+                    Button_Pending = new UIColor { Color = "#a8a8a8", Alpha = 0.9f },
+                    Button_Standard = new UIColor { Color = "#2a2a2a", Alpha = 0.9f },
+                    TextColor_Primary = "#ce422b",
+                    TextColor_Secondary = "#939393"
+                },
+                LustyMapIntegration = new LMIcons
+                {
+                    Icon_Delivery = "deliveryicon",
+                    Icon_Vendor = "vendoricon"
+                },
+                KeybindOptions = new Keybinds
+                {
+                    Autoset_KeyBind = false,
+                    KeyBind_Key = "k"
+                }
             };
             SaveConfig(config);
         }
@@ -2908,148 +3042,148 @@ namespace Oxide.Plugins
         #region Messaging
         void SendMSG(BasePlayer player, string message, string keyword = "")
         {
-            message = $"{configData.MSG_Color}{message}</color>";
+            message = $"{textSecondary}{message}</color>";
             if (!string.IsNullOrEmpty(keyword))
-                message = $"{configData.MSG_MainColor}{keyword}</color> {message}";
+                message = $"{textPrimary}{keyword}</color> {message}";
             SendReply(player, message);
         }
         Dictionary<string, string> Localization = new Dictionary<string, string>
         {
-            { "Quests", "Quests:" },
-            { "delInprog", "You already have a delivery mission in progress." },
-            { "QC", "Quest Creator:" },
-            { "noAItem", "Unable to find a active item. Place the item in your hands then type " },
-            { "nameExists", "A quest with this name already exists" },
-            { "objAmount", "You need to enter a objective amount" },
-            { "OA", "Objective Amount:" },
-            { "Desc", "Description:" },
-            { "noRM", "You need to enter a reward multiplier" },
-            { "RM", "Reward Multiplier:" },
-            { "noRA", "You need to enter a reward amount" },
-            { "RA", "Reward Amount:" },
-            { "noCD", "You need to enter a cooldown amount" },
-            { "CD1", "Cooldown Timer (minutes):" },
-            { "qComple", "You have completed the quest" },
-            { "claRew", "You can claim your reward from the quest menu." },
-            { "qCancel", "You have cancelled this quest." },
-            { "rewRet", "has been returned to you" },
-            { "minDV", "Delivery missions require atleast 2 vendors. Add some more vendors to activate delivery missions" },
-            { "DVSucc", "You have successfully added a new delivery vendor" },
-            { "saveQ", "You have successfully saved the quest:" },
-            { "QCCancel", "You have cancelled quest creation" },
-            { "KillOBJ", "Kill quests require you to kill 'X' amount of the target objective" },
-            { "CraftOBJ", "Crafting quests require you to craft 'X' amount of the objective item" },
-            { "GatherOBJ", "Gather quests require you to gather 'X' amount of the objective from resources" },
-            { "LootOBJ", "Loot quests require you to collect 'X' amount of the objective item from containers" },
+            { "Quests", "Задания:" },
+            { "delInprog", "У вас уже есть миссия" },
+            { "QC", "Конструткор:" },
+            { "noAItem", "Не удалось найти активный элемент. Поместите предмет в свои руки, затем введите " },
+            { "nameExists", "Задание с таким именем уже существует" },
+            { "objAmount", "Вам нужно ввести объективную сумму" },
+            { "OA", "Целевая сумма:" },
+            { "Desc", "Описание:" },
+            { "noRM", "Вам нужно ввести множитель вознаграждения" },
+            { "RM", "Множитель вознаграждения:" },
+            { "noRA", "Вам нужно ввести сумму вознаграждения" },
+            { "RA", "Сумма вознаграждения:" },
+            { "noCD", "Вы должны ввести сумму перезарядки" },
+            { "CD1", "Таймер перезарядки (мин.):" },
+            { "qComple", "Вы выполнили задание" },
+            { "claRew", "Вы можете получить свою награду" },
+            { "qCancel", "Вы отменили это задание." },
+            { "rewRet", "был возвращен вам" },
+            { "minDV", "Для миссий доставки требуется как минимум 2 поставщика. Добавьте еще нескольких поставщиков для активации миссий доставки" },
+            { "DVSucc", "Вы успешно добавили нового поставщика поставки" },
+            { "saveQ", "Вы успешно сохранили задание:" },
+            { "QCCancel", "Вы отменили создание квеста" },
+            { "KillOBJ", "Здание на убийства" },
+            { "CraftOBJ", "Задание на создание" },
+            { "GatherOBJ", "Задание на добычу" },
+            { "LootOBJ", "Задание на поиск" },
             { "DelvOBJ", "Delivery quests require you to deliver a package from one vendor to another" },
             { "aQVReg", "This NPC is already a registered Quest vendor" },
             { "aDVReg", "This NPC is already a registed Delivery vendor" },
-            { "Kill", "Kill" },
-            { "Gather", "Gather" },
-            { "Craft", "Craft" },
-            { "Loot", "Loot" },
-            { "Delivery", "Delivery" },
-            { "Your Quests", "Your Quests" },
-            { "Create Quest", "Create Quest" },
-            { "Edit Quest", "Edit Quest" },
-            { "Delete Quest", "Delete Quest" },
-            { "Close", "Close" },
-            { "Next", "Next" },
-            { "Back", "Back" },
-            { "noQ", "The are currently no" },
-            { "quests", "quests" },
-            { "Pending", "Pending" },
-            { "Completed", "Completed" },
-            { "Accept Quest", "Accept Quest" },
-            { "Status:", "Status:" },
-            { "Description:", "Description:" },
-            { "Amount Required:", "Amount Required:" },
-            { "Reward:", "Reward:" },
-            { "yqDesc", "Check your current progress for each quest" },
-            { "STATS", "STATS" },
-            { "noQDSaved", "You don't have any quest data saved" },
-            { "Cancel Quest", "Cancel Quest" },
-            { "Claim Reward", "Claim Reward" },
-            { "Remove", "Remove" },
-            { "Cooldown", "Cooldown" },
-            { "Collected:", "Collected:" },
-            { "Reward Claimed:", "Reward Claimed:" },
-            { "DELIVERY", "DELIVERY" },
-            { "noADM", "You do not have a active delivery mission" },
-            { "Destination:", "Destination:" },
-            { "Distance:", "Distance:" },
-            { "Cancel", "Cancel" },
-            { "selCreat", "Select a quest type to begin creation" },
-            { "CREATOR", "CREATOR" },
-            { "creHelMen", "This is the quest creation help menu" },
-            { "creHelFol", "Follow the instructions given by typing in chat" },
-            { "creHelExi", "You can exit quest creation at any time by typing" },
-            { "creHelName", "To proceed enter the name of your new quest!" },
-            { "creHelObj", "Choose a quest objective from the list" },
-            { "creHelRA", "Enter a required amount" },
-            { "creHelQD", "Enter a quest description" },
-            { "creHelRT", "Choose a reward type" },
-            { "creHelNewRew", "Select a reward to remove, or add a new one" },
-            { "Coins", "Coins" },
-            { "RP", "RP" },
-            { "HuntXP", "XP" },            
-            { "Item", "Item" },
-            { "creHelRewA", "Enter a reward amount" },
-            { "creHelIH", "Place the item you want to issue as a reward in your hands and type" },
-            { "creHelAR", "Would you like to add additional rewards?" },
-            { "Yes", "Yes" },
-            { "No", "No" },
-            { "creHelID", "Would you like to enable item deduction (take items from player when collected)?" },
-            { "creHelCD", "Enter a cooldown time (in minutes)" },
-            { "creHelSQ", "You have successfully created a new quest. To confirm click 'Save Quest'" },
-            { "Save Quest", "Save Quest" },
-            { "Name:", "Name:" },
-            { "Objective:", "Objective:" },
-            { "CDMin", "Cooldown (minutes):" },
-            { "Quest Type:", "Quest Type:" },
-            { "Required Amount:", "Required Amount:" },
-            { "Item Deduction:", "Item Deduction:" },
-            { "delHelMen", "Here you can add delivery missions and Quest vendors." },
-            { "delHelChoo", "Choose either a Deiver vendor (delivery mission) or a Quest vendor (npc based quest menu)" },
-            { "Quest Vendor", "Quest Vendor" },
-            { "Delivery Vendor", "Delivery Vendor" },
-            { "delHelNewNPC", "Stand infront of the NPC you wish to add and type" },
-            { "delHelMult", "Delivery mission rewards are based on distance X a multiplier. Keep this in mind when selecting a reward." },
-            { "delHelRM", "Enter a reward multiplier (per unit)." },
-            { "delHelRM1", "For example, if a delivery is" },
-            { "delHelRM2", "away, and the multiplier is" },
-            { "delHelRM3", "the total reward amount would be" },
-            { "delHelDD", "Enter a delivery description." },
-            { "delHelNewV", "You have successfully added a new delivery vendor. To confirm click 'Save Quest'" },
-            { "Accept", "Accept" },
-            { "Decline", "Decline" },
-            { "Claim", "Claim" },
-            { "delComplMSG", "Thanks for making the delivery" },
-            { "Delete NPC", "Delete NPC" },
-            { "REMOVER", "REMOVER" },
-            { "Delivery Vendors", "Delivery Vendors" },
-            { "Quest Vendors", "Quest Vendors" },
-            { "confDel", "Are you sure you want to delete:" },
-            { "confCan", "Are you sure you want to cancel:" },
-            { "confCan2", "Any progress you have made will be lost!" },
-            { "EDITOR", "EDITOR" },
-            { "chaEdi", "Select a value to change" },
-            { "Name", "Name" },
-            { "Description", "Description" },
-            { "Objective", "Objective" },
-            { "Amount", "Amount" },
-            { "Reward", "Reward" },
-            { "qAccep", "You have accepted the quest" },
-            { "dAccep", "You have accepted the delivery mission" },
-            { "canConf", "You have cancelled the delivery mission" },
-            { "rewRec", "You have recieved" },
-            { "rewError", "Unable to issue your reward. Please contact an administrator" },
-            { "Quest NPCs:", "Quest NPCs:" },
-            { "newVSucc", "You have successfully added a new Quest vendor" },
-            { "noNPC", "Unable to find a valid NPC" },
-            { "addNewRew", "Add Reward" },
-            { "NoTP", "You cannot teleport while you are on a delivery mission" },
-            { "noVendor", "To accept new Quests you must find a Quest Vendor" }
+            { "Kill", "Убийства" },
+            { "Gather", "Добыча" },
+            { "Craft", "Создание" },
+            { "Loot", "Поиск" },
+            { "Delivery", "Поставщики" },
+            { "Your Quests", "Ваши задания" },
+            { "Create Quest", "Создать задание" },
+            { "Edit Quest", "Изменить задание" },
+            { "Delete Quest", "Удалить задание" },
+            { "Close", "Закрыть" },
+            { "Next", "Далее" },
+            { "Back", "Назад" },
+            { "noQ", "В настоящее время нет" },
+            { "quests", "Задания" },
+            { "Pending", "в ожидании" },
+            { "Completed", "Завершенно" },
+            { "Accept Quest", "Принять" },
+            { "Status:", "Статус:" },
+            { "Description:", "Описание:" },
+            { "Amount Required:", "Нужно:" },
+            { "Reward:", "Награда:" },
+            { "yqDesc", "Проверьте текущий прогресс для каждого задания" },
+            { "STATS", "Статистика" },
+            { "noQDSaved", "У вас нет сохраненных данных о заданиях" },
+            { "Cancel Quest", "Отмена" },
+            { "Claim Reward", "Забарть" },
+            { "Remove", "Удалить" },
+            { "Cooldown", "КД" },
+            { "Collected:", "Собрано:" },
+            { "Reward Claimed:", "Выдано:" },
+            { "DELIVERY", "Постовщик" },
+            { "noADM", "У вас нет активной миссии доставки" },
+            { "Destination:", "Место назначения:" },
+            { "Distance:", "Расстояние:" },
+            { "Cancel", "Отмена" },
+            { "selCreat", "Выберите тип квеста, чтобы начать создание" },
+            { "CREATOR", "Создать" },
+            { "creHelMen", "Это меню справки по созданию квеста" },
+            { "creHelFol", "Следуйте инструкциям, введенным в чате" },
+            { "creHelExi", "Вы можете выйти из квеста в любое время, набрав" },
+            { "creHelName", "Чтобы продолжить, введите имя нового квеста!" },
+            { "creHelObj", "Выберите цель поиска из списка" },
+            { "creHelRA", "Введите требуемую сумму" },
+            { "creHelQD", "Введите описание квеста" },
+            { "creHelRT", "Выберите тип вознаграждения" },
+            { "creHelNewRew", "Выберите награду для удаления или добавьте новую" },
+            { "Coins", "Копейки" },
+            { "RP", "Рубли" },
+            { "HuntXP", "XP" },
+            { "Item", "Вещь" },
+            { "creHelRewA", "Введите сумму вознаграждения" },
+            { "creHelIH", "Поместите предмет, который вы хотите выдать в качестве награды в ваших руках, и введите" },
+            { "creHelAR", "Вы хотите добавить дополнительные вознаграждения?" },
+            { "Yes", "Да" },
+            { "No", "Нет" },
+            { "creHelID", "Вы хотите включить дедукцию предмета (возьмите предметы у игрока при их сборке)?" },
+            { "creHelCD", "Введите время перезарядки (в минутах)" },
+            { "creHelSQ", "Вы успешно создали новый квест. Для подтверждения нажмите «Сохранить задание»." },
+            { "Save Quest", "Сохранить задание" },
+            { "Name:", "Имя:" },
+            { "Objective:", "Задание:" },
+            { "CDMin", "КД (минут):" },
+            { "Quest Type:", "Тип:" },
+            { "Required Amount:", "Требуется:" },
+            { "Item Deduction:", "Вычитание предмета:" },
+            { "delHelMen", "Здесь вы можете добавить миссии доставки и поставщиков" },
+            { "delHelChoo", "Выберите поставщика драйверов (миссию доставки) или поставщика Quest (меню квеста на основе npc)" },
+            { "Quest Vendor", "Продавец квеста" },
+            { "Delivery Vendor", "Поставщик поставки" },
+            { "delHelNewNPC", "Встаньте перед лицом NPC, которого хотите добавить и введите" },
+            { "delHelMult", "Награда за доставку миссии основана на расстоянии X множителя. Помните об этом при выборе вознаграждения." },
+            { "delHelRM", "Введите множитель вознаграждения (за единицу)." },
+            { "delHelRM1", "Например, если доставка" },
+            { "delHelRM2", "и множитель равен" },
+            { "delHelRM3", "общая сумма вознаграждения будет равна" },
+            { "delHelDD", "Введите описание доставки." },
+            { "delHelNewV", "Вы успешно добавили нового поставщика поставки. Для подтверждения нажмите «Сохранить задание»." },
+            { "Accept", "Принять" },
+            { "Decline", "Отклонить" },
+            { "Claim", "Отказаться" },
+            { "delComplMSG", "Благодарим за доставку" },
+            { "Delete NPC", "Удалить NPC" },
+            { "REMOVER", "УДАЛЕНИЯ" },
+            { "Delivery Vendors", "Поставщики поставок" },
+            { "Quest Vendors", "Поставщики квестов" },
+            { "confDel", "Вы уверены, что хотите удалить:" },
+            { "confCan", "вы действительно хотите отменить:" },
+            { "confCan2", "Любой прогресс, который вы совершили, будет потерян!" },
+            { "EDITOR", "Редактор" },
+            { "chaEdi", "Выберите значение для изменения" },
+            { "Name", "Имя" },
+            { "Description", "Описание" },
+            { "Objective", "Задание" },
+            { "Amount", "Требуется" },
+            { "Reward", "Награда" },
+            { "qAccep", "Вы приняли квест" },
+            { "dAccep", "Вы приняли миссию доставки" },
+            { "canConf", "Вы отменили миссию доставки" },
+            { "rewRec", "Вы получили" },
+            { "rewError", "Вы получили разрешение на получение вашей награды. Пожалуйста, свяжитесь с администратором " },
+            { "Quest NPCs:", "Квесты NPC:" },
+            { "newVSucc", "Вы успешно добавили нового продавца Quest" },
+            { "noNPC", "Не удалось найти действительный NPC" },
+            { "addNewRew", "Добавить награду" },
+            { "NoTP", "Вы не можете телепортироваться во время выполнения миссии доставки" },
+            { "noVendor", "Чтобы принять новые квесты, вы должны найти продавца квеста" },
         };
         #endregion
     }

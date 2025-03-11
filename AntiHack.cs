@@ -9,8 +9,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 
-// https://server-rust.ru/resources/antihack.894
-
 namespace Oxide.Plugins
 {
     [Info("AntiHack", "OxideBro", "1.0.42")]

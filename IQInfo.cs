@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("IQInfo", "SkuliDropek", "0.0.1")]
+    [Info("IQInfo", "Mercury", "0.0.1")]
     [Description("Приятное меню для вашего сервера")]
     class IQInfo : RustPlugin
     {
@@ -635,7 +635,7 @@ namespace Oxide.Plugins
 						Parent = "ContentPanel",
 						Components = {
 					new CuiTextComponent { Text = TextLine, Font = "robotocondensed-regular.ttf", FontSize = 14, Align = TextAnchor.MiddleLeft, Color = Image.RGBAColor },
-					new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = $"-397.42601362 {183.13 + (-20 * Line)}", OffsetMax = $"397.434 {211.01 + (-20 * Line)}" }
+					new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = $"-397.42602658 {183.13 + (-20 * Line)}", OffsetMax = $"397.434 {211.01 + (-20 * Line)}" }
 				}
 					});
 					Line++;
@@ -736,7 +736,7 @@ namespace Oxide.Plugins
 			{
 				CursorEnabled = false,
 				Image = { Color = "0 0 0 0" },
-				RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-515.822 -267.01501362", OffsetMax = "-328.129 179.31301362" }
+				RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-515.822 -267.01502658", OffsetMax = "-328.129 179.31302658" }
 			}, IQInfo_Background, "CategoryBlock");
 
 			Int32 Y = 0;

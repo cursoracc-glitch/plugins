@@ -4,56 +4,47 @@ using Oxide.Game.Rust.Cui;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using UnityEngine;
-using Rust;
-using Oxide.Core.Libraries;
-
 namespace Oxide.Plugins
 {
-    [Info("Building Upgrade", "Ryamkk", "1.1.6")]
-
+    [Info("Building Upgrade", "OxideBro", "1.1.22")]
     class BuildingUpgrade : RustPlugin
     {
-        [PluginReference]
-        Plugin NoEscape;
-
+        [PluginReference] private Plugin NoEscape;
+        [PluginReference] Plugin Remove;
         private void PayForUpgrade(ConstructionGrade g, BasePlayer player)
         {
             List<Item> items = new List<Item>();
-
             foreach (ItemAmount itemAmount in g.costToBuild)
             {
                 player.inventory.Take(items, itemAmount.itemid, (int)itemAmount.amount);
-                player.Command(string.Concat(new object[] { "note.inv ", itemAmount.itemid, " ", itemAmount.amount * -1f }), new object[0]);
+                player.Command(string.Concat(new object[] {
+                    "note.inv ", itemAmount.itemid, " ", itemAmount.amount * -1f
+                }
+                ), new object[0]);
             }
             foreach (Item item in items)
             {
                 item.Remove(0f);
             }
         }
-        
-
         private ConstructionGrade GetGrade(BuildingBlock block, BuildingGrade.Enum iGrade)
         {
-            if ((int)block.grade < (int)block.blockDefinition.grades.Length)
-                return block.blockDefinition.grades[(int)iGrade];
-
-
+            if ((int)block.grade < (int)block.blockDefinition.grades.Length) return block.blockDefinition.grades[(int)iGrade];
             return block.blockDefinition.defaultGrade;
         }
-        
         private bool CanAffordUpgrade(BuildingBlock block, BuildingGrade.Enum iGrade, BasePlayer player)
         {
             bool flag;
-            object[] objArray = new object[] { player, block, iGrade };
+            object[] objArray = new object[] {
+                player, block, iGrade
+            }
+            ;
             object obj = Interface.CallHook("CanAffordUpgrade", objArray);
-
             if (obj is bool)
             {
                 return (bool)obj;
             }
-
             List<ItemAmount>.Enumerator enumerator = GetGrade(block, iGrade).costToBuild.GetEnumerator();
             try
             {
@@ -73,135 +64,117 @@ namespace Oxide.Plugins
             {
                 ((IDisposable)enumerator).Dispose();
             }
-            return flag;
         }
-
-        private void RegisterCommands()
-        {
-            foreach (var command in ChatCommands)
-            {
-                cmd.AddChatCommand(command, this, cmdAutoGrade);
+        Dictionary<BuildingGrade.Enum, string> gradesString = new Dictionary<BuildingGrade.Enum, string>() {
+                {
+                BuildingGrade.Enum.Wood, "<color=#EC402C>Дерева</color>"
             }
-
-            foreach (var command in ConsoleCommands)
-            {
-                cmd.AddConsoleCommand(command, this, nameof(consoleAutoGrade));
+            , {
+                BuildingGrade.Enum.Stone, "<color=#EC402C>Камня</color>"
+            }
+            , {
+                BuildingGrade.Enum.Metal, "<color=#EC402C>Метала</color>"
+            }
+            , {
+                BuildingGrade.Enum.TopTier, "<color=#EC402C>Армора</color>"
             }
         }
-
-        Dictionary<BuildingGrade.Enum, string> gradesString = new Dictionary<BuildingGrade.Enum, string>()
-        {
-            {BuildingGrade.Enum.Wood, "<color=#EC402C>Дерева</color>"},
-            {BuildingGrade.Enum.Stone, "<color=#EC402C>Камня</color>"},
-            {BuildingGrade.Enum.Metal, "<color=#EC402C>Метала</color>"},
-            {BuildingGrade.Enum.TopTier, "<color=#EC402C>Армора</color>"}
-        };
-
+        ;
         Dictionary<BasePlayer, BuildingGrade.Enum> grades = new Dictionary<BasePlayer, BuildingGrade.Enum>();
         Dictionary<BasePlayer, int> timers = new Dictionary<BasePlayer, int>();
-
         public Timer mytimer;
-		private bool ConfigChanged;
         private int resetTime = 40;
         private string permissionAutoGrade = "buildingupgrade.build";
         private string permissionAutoGradeFree = "buildingupgrade.free";
         private string permissionAutoGradeHammer = "buildingupgrade.hammer";
         private bool permissionAutoGradeAdmin = true;
         private bool getBuild = true;
-        private bool permissionOn = false;
+        private bool permissionOn = true;
         private bool useNoEscape = true;
-
         private bool InfoNotice = true;
-        private int NoticeSize = 18;
-        private int NoticeTime = 5;
-		private string NoticeFont = "robotocondensed-regular.ttf";
-
+        private int InfoNoticeSize = 18;
+        private string InfoNoticeText = "Используйте <color=#EC402C>/upgrade</color> (Или нажмите <color=#EC402C>USE - Клавиша E</color>) для быстрого улучшения при постройке.";
+        private int InfoNoticeTextTime = 5;
         private bool CanUpgradeDamaged = false;
         private string PanelAnchorMin = "0.0 0.908";
         private string PanelAnchorMax = "1 0.958";
         private string PanelColor = "0 0 0 0.50";
-
         private int TextFontSize = 16;
         private string TextСolor = "0 0 0 1";
         private string TextAnchorMin = "0.0 0.870";
         private string TextAnchorMax = "1 1";
-		private string FontName = "robotocondensed-regular.ttf";
-		
-		List<string> ChatCommands;
-        List<string> ConsoleCommands;
-		
-		protected override void LoadDefaultConfig() => PrintWarning("Создания стандартной конфигурации...");
-	    private void UpgradeConfig()
+        private string MessageAutoGradePremHammer = "У вас нету доступа к улучшению киянкой!";
+        private string MessageAutoGradePrem = "У вас нету доступа к данной команде!";
+        private string MessageAutoGradeNo = "<color=ffcc00><size=16>Для улучшения нехватает ресурсов!!!</size></color>";
+        private string MessageAutoGradeOn = "<size=14><color=#EC402C>Upgrade включен!</color> \nДля быстрого переключения используйте: <color=#EC402C>/upgrade 0-4</color></size>";
+        private string MessageAutoGradeOff = "<color=ffcc00><size=14>Вы отключили <color=#EC402C>Upgrade!</color></size></color>";
+        private string ChatCMD = "upgrade";
+        private string ConsoleCMD = "building.upgrade";
+        private bool EnabledRemove = false;
+        private void LoadDefaultConfig()
         {
-            resetTime = GetConfig(40, "Основные настройки", "Через сколько секунд автоматически выключать улучшение строений");
-			permissionAutoGrade = GetConfig("buildingupgrade.build", "Основные настройки", "Привилегия что бы позволить улучшать объекты при строительстве");
-			permissionOn = GetConfig(false, "Основные настройки", "Включить доступ только по привилегиям?");
-			useNoEscape = GetConfig(true, "Основные настройки", "Включить поддержку NoEscape (Запретить Upgrade в Raid Block)?");
-			permissionAutoGradeAdmin = GetConfig(true, "Основные настройки", "Включить бесплатный Upgrade для администраторов?");
-			permissionAutoGradeFree = GetConfig("buildingupgrade.free", "Основные настройки", "Привилегия для улучшения при строительстве и ударе киянкой без траты ресурсов");
-			permissionAutoGradeHammer = GetConfig("buildingupgrade.hammer", "Основные настройки", "Привилегия что бы позволить улучшать объекты ударом киянки");
-			getBuild = GetConfig(true, "Основные настройки", "Запретить Upgrade в Building Block?");
-			CanUpgradeDamaged = GetConfig(true, "Основные настройки", "Разрешить улучшать повреждённые постройки?");
-			
-			InfoNotice = GetConfig(true, "Настройки GUI Оповещения", "Включить GUI оповещение при использование плана постройки");
-			NoticeSize = GetConfig(18, "Настройки GUI Оповещения", "Размер текста GUI оповещения");
-			NoticeTime = GetConfig(5, "Настройки GUI Оповещения", "Время показа оповещения");
-			NoticeFont = GetConfig("robotocondensed-regular.ttf", "Настройки GUI Оповещения", "Названия шрифта");
-			
-			PanelAnchorMin = GetConfig("0.0 0.908", "Настройки GUI Panel", "Минимальный отступ");
-			PanelAnchorMax = GetConfig("1 0.958", "Настройки GUI Panel", "Максимальный отступ");
-			PanelColor = GetConfig("0 0 0 0.50", "Настройки GUI Panel", "Цвет фона");
-			 
-			TextFontSize = GetConfig(16, "Настройки GUI Text", "Размер текста в gui панели");
-			TextСolor = GetConfig("0 0 0 1", "Настройки GUI Text", "Цвет текста в gui панели");
-			TextAnchorMin = GetConfig("0.0 0.870", "Настройки GUI Text", "Минимальный отступ в gui панели");
-			TextAnchorMax = GetConfig("1 1", "Настройки GUI Text", "Максимальный отступ в gui панели");
-			FontName = GetConfig("robotocondensed-regular.ttf", "Настройки GUI Text", "Названия шрифта");
-			
-			ChatCommands = GetConfig(new List<string>
-            {
-                "upgrade",
-                "up",
-				"grade",
-				"autograde",
-				"agrade",
-				"bgrade"
-            }, "Команды", "Чат команды включения авто-улучшения при постройки");
-			
-            ConsoleCommands = GetConfig(new List<string>
-            {
-                "bgrade.upgrade",
-				"building.upgrade",
-				"up.grade",
-				"auto.upgrade",
-				"bgrade.up"
-            }, "Команды", "Консольные команды включения авто-улучшения при постройки");
-
-            if (ConfigChanged)
-            {
-                PrintWarning("Конфигурационный файл изменён. Новые значения занесены в файл!");
-                SaveConfig();
-            }
+            GetConfig("Основные настройки", "Через сколько секунд автоматически выключать улучшение строений", ref resetTime);
+            GetConfig("Основные настройки", "Привилегия что бы позволить улучшать объекты при строительстве", ref permissionAutoGrade);
+            GetConfig("Основные настройки", "Включить доступ только по привилегиям?", ref permissionOn);
+            GetConfig("Основные настройки", "Включить поддержку NoEscape (Запретить Upgrade в Raid Block)?", ref useNoEscape);
+            GetConfig("Основные настройки", "Включить бесплатный Upgrade для администраторов?", ref permissionAutoGradeAdmin);
+            GetConfig("Основные настройки", "Привилегия для улучшения при строительстве и ударе киянкой без траты ресурсов", ref permissionAutoGradeFree);
+            GetConfig("Основные настройки", "Привилегия что бы позволить улучшать объекты ударом киянки", ref permissionAutoGradeHammer);
+            GetConfig("Основные настройки", "Запретить Upgrade в Building Block?", ref getBuild);
+            GetConfig("Основные настройки", "Включить выключение удаления построек при включении авто-улучшения (Поддержка плагина Remove с сайта RustPlugin.ru)", ref EnabledRemove);
+            GetConfig("Основные настройки", "Разрешить улучшать повреждённые постройки?", ref CanUpgradeDamaged);
+            GetConfig("Команды", "Чатовая команда включения авто-улучшения при постройки", ref ChatCMD);
+            GetConfig("Команды", "Консольная команда включения авто-улучшения при постройки", ref ConsoleCMD);
+            GetConfig("Настройки GUI Panel", "Минимальный отступ:", ref PanelAnchorMin);
+            GetConfig("Настройки GUI Оповещения", "Включить GUI оповещение при использование плана постройки", ref InfoNotice);
+            GetConfig("Настройки GUI Оповещения", "Размер текста GUI оповещения", ref InfoNoticeSize);
+            GetConfig("Настройки GUI Оповещения", "Сообщение GUI", ref InfoNoticeText);
+            GetConfig("Настройки GUI Оповещения", "Время показа оповещения", ref InfoNoticeTextTime);
+            GetConfig("Настройки GUI Panel", "Максимальный отступ:", ref PanelAnchorMax);
+            GetConfig("Настройки GUI Panel", "Цвет фона:", ref PanelColor);
+            GetConfig("Настройки GUI Text", "Размер текста в gui панели:", ref TextFontSize);
+            GetConfig("Настройки GUI Text", "Цвет текста в gui панели:", ref TextСolor);
+            GetConfig("Настройки GUI Text", "Минимальный отступ в gui панели:", ref TextAnchorMin);
+            GetConfig("Настройки GUI Text", "Максимальный отступ в gui панели:", ref TextAnchorMax);
+            GetConfig("Сообщения", "No Permissions Hammer:", ref MessageAutoGradePremHammer);
+            GetConfig("Сообщения", "No Permissions:", ref MessageAutoGradePrem);
+            GetConfig("Сообщения", "No Resources:", ref MessageAutoGradeNo);
+            GetConfig("Сообщения", "Сообщение при включение Upgrade:", ref MessageAutoGradeOn);
+            GetConfig("Сообщения", "Сообщение при выключение Upgrade:", ref MessageAutoGradeOff);
+            SaveConfig();
         }
-		
+        private void GetConfig<T>(string MainMenu, string Key, ref T var)
+        {
+            if (Config[MainMenu, Key] != null)
+            {
+                var = (T)Convert.ChangeType(Config[MainMenu, Key], typeof(T));
+            }
+            Config[MainMenu, Key] = var;
+        }
         void cmdAutoGrade(BasePlayer player, string command, string[] args)
         {
             if (player == null) return;
             if (permissionOn && !permission.UserHasPermission(player.UserIDString, permissionAutoGrade))
             {
-				SendReply(player, Messages["UpgradePrem"]);
+                SendReply(player, MessageAutoGradePrem);
                 return;
             }
             int grade;
             timers[player] = resetTime;
-
+            if (EnabledRemove)
+            {
+                var removeEnabled = (bool)Remove.Call("OnRemoveActivate", player.userID);
+                if (removeEnabled)
+                {
+                    Remove.Call("RemoveDeativate", player.userID);
+                }
+            }
             if (args == null || args.Length <= 0 || args[0] != "1" && args[0] != "2" && args[0] != "3" && args[0] != "4" && args[0] != "0")
             {
                 if (!grades.ContainsKey(player))
                 {
                     grade = (int)(grades[player] = BuildingGrade.Enum.Wood);
-                    SendReply(player, Messages["UpgradeON"]);
-
+                    SendReply(player, MessageAutoGradeOn);
                 }
                 else
                 {
@@ -214,65 +187,68 @@ namespace Oxide.Plugins
                     grades.Remove(player);
                     timers.Remove(player);
                     DestroyUI(player);
-                    SendReply(player, Messages["UpgradeOFF"]);
+                    SendReply(player, MessageAutoGradeOff);
                     return;
                 }
                 timers[player] = resetTime;
-                DrawUI(player, (BuildingGrade.Enum)grade, resetTime, "Upgrade");
+                DrawUI(player, (BuildingGrade.Enum)grade, resetTime);
                 return;
             }
-			
             switch (args[0])
             {
                 case "1":
                     grade = (int)(grades[player] = BuildingGrade.Enum.Wood);
                     timers[player] = resetTime;
-                    DrawUI(player, BuildingGrade.Enum.Wood, resetTime, "Upgrade");
+                    DrawUI(player, BuildingGrade.Enum.Wood, resetTime);
                     return;
                 case "2":
                     grade = (int)(grades[player] = BuildingGrade.Enum.Stone);
                     timers[player] = resetTime;
-                    DrawUI(player, BuildingGrade.Enum.Stone, resetTime, "Upgrade");
+                    DrawUI(player, BuildingGrade.Enum.Stone, resetTime);
                     return;
                 case "3":
                     grade = (int)(grades[player] = BuildingGrade.Enum.Metal);
                     timers[player] = resetTime;
-                    DrawUI(player, BuildingGrade.Enum.Metal, resetTime, "Upgrade");
+                    DrawUI(player, BuildingGrade.Enum.Metal, resetTime);
                     return;
                 case "4":
                     grade = (int)(grades[player] = BuildingGrade.Enum.TopTier);
                     timers[player] = resetTime;
-                    DrawUI(player, BuildingGrade.Enum.TopTier, resetTime, "Upgrade");
+                    DrawUI(player, BuildingGrade.Enum.TopTier, resetTime);
                     return;
                 case "0":
                     grades.Remove(player);
                     timers.Remove(player);
                     DestroyUI(player);
-                    SendReply(player, Messages["UpgradeOFF"]);
+                    SendReply(player, MessageAutoGradeOff);
                     return;
             }
-
         }
-
         void consoleAutoGrade(ConsoleSystem.Arg arg, string[] args)
         {
             var player = arg.Player();
             if (permissionOn && !permission.UserHasPermission(player.UserIDString, permissionAutoGrade))
             {
-                SendReply(player, Messages["UpgradePrem"]);
+                SendReply(player, MessageAutoGradePrem);
                 return;
             }
             int grade;
+            if (EnabledRemove)
+            {
+                var removeEnabled = (bool)Remove.Call("OnRemoveActivate", player.userID);
+                if (removeEnabled)
+                {
+                    Remove.Call("RemoveDeativate", player.userID);
+                }
+            }
             timers[player] = resetTime;
-
             if (player == null) return;
             if (args == null || args.Length <= 0)
             {
                 if (!grades.ContainsKey(player))
                 {
                     grade = (int)(grades[player] = BuildingGrade.Enum.Wood);
-                    SendReply(player, Messages["UpgradeON"]);
-
+                    SendReply(player, MessageAutoGradeOn);
                 }
                 else
                 {
@@ -280,60 +256,56 @@ namespace Oxide.Plugins
                     grade++;
                     grades[player] = (BuildingGrade.Enum)Mathf.Clamp(grade, 1, 5);
                 }
-
                 if (grade > 4)
                 {
                     grades.Remove(player);
                     timers.Remove(player);
                     DestroyUI(player);
-                    SendReply(player, Messages["UpgradeOFF"]);
+                    SendReply(player, MessageAutoGradeOff);
                     return;
                 }
                 timers[player] = resetTime;
-                DrawUI(player, (BuildingGrade.Enum)grade, resetTime, "Upgrade");
+                DrawUI(player, (BuildingGrade.Enum)grade, resetTime);
             }
         }
-
         private void Init()
         {
-			UpgradeConfig();
-			RegisterCommands();
             permission.RegisterPermission(permissionAutoGrade, this);
             permission.RegisterPermission(permissionAutoGradeFree, this);
             permission.RegisterPermission(permissionAutoGradeHammer, this);
         }
         void OnServerInitialized()
         {
+            LoadConfig();
+            LoadDefaultConfig();
             timer.Every(1f, GradeTimerHandler);
-			lang.RegisterMessages(Messages, this, "en");
-            Messages = lang.GetMessages("en", this);
+            cmd.AddChatCommand(ChatCMD, this, cmdAutoGrade);
+            cmd.AddConsoleCommand(ConsoleCMD, this, "consoleAutoGrade");
         }
-
-        private void OnPlayerActiveItemChanged(BasePlayer player, Item newItem)
+        private void OnActiveItemChanged(BasePlayer player, Item newItem)
         {
+
+            
             Item activeItem = player.GetActiveItem();
-            if (activeItem == null || activeItem.info.shortname != "building.planner")
-                return;
+            if (activeItem == null || activeItem.info.shortname != "building.planner") return;
             if (activeItem.info.shortname == "building.planner")
             {
                 if (!grades.ContainsKey(player))
                 {
                     CuiHelper.DestroyUi(player, "InfoNotice");
-                    ShowRepairInfo(player);
+                    ShowUIInfo(player);
                 }
             }
         }
-
         private void OnPlayerInput(BasePlayer player, InputState input)
         {
             Item activeItem = player.GetActiveItem();
             if (input.WasJustPressed(BUTTON.USE))
             {
-                if (activeItem == null || activeItem.info.shortname != "building.planner")
-                    return;
+                if (activeItem == null || activeItem.info.shortname != "building.planner") return;
                 if (permissionOn && !permission.UserHasPermission(player.UserIDString, permissionAutoGrade))
                 {
-                    SendReply(player, Messages["UpgradePrem"]);
+                    SendReply(player, MessageAutoGradePrem);
                     return;
                 }
                 int grade;
@@ -341,7 +313,7 @@ namespace Oxide.Plugins
                 if (!grades.ContainsKey(player))
                 {
                     grade = (int)(grades[player] = BuildingGrade.Enum.Wood);
-                    SendReply(player, Messages["UpgradeON"]);
+                    SendReply(player, MessageAutoGradeOn);
                 }
                 else
                 {
@@ -349,33 +321,27 @@ namespace Oxide.Plugins
                     grade++;
                     grades[player] = (BuildingGrade.Enum)Mathf.Clamp(grade, 1, 5);
                 }
-
                 if (grade > 4)
                 {
                     grades.Remove(player);
                     timers.Remove(player);
                     DestroyUI(player);
-                    SendReply(player, Messages["UpgradeOFF"]);
+                    SendReply(player, MessageAutoGradeOff);
                     return;
                 }
                 timers[player] = resetTime;
-                DrawUI(player, (BuildingGrade.Enum)grade, resetTime, "Upgrade");
+                DrawUI(player, (BuildingGrade.Enum)grade, resetTime);
                 return;
             }
         }
-
         void Unload()
         {
-            foreach (var player in BasePlayer.activePlayerList)
+            foreach (var plobj in BasePlayer.activePlayerList)
             {
-                if (grades.ContainsKey(player))
-                {
-                    DestroyUI(player);
-                }
+                DestroyUI(plobj);
             }
         }
-
-        void ShowRepairInfo(BasePlayer player)
+        void ShowUIInfo(BasePlayer player)
         {
             if (!InfoNotice) return;
             var container = new CuiElementContainer();
@@ -384,120 +350,103 @@ namespace Oxide.Plugins
                 Name = "InfoNotice",
                 Parent = "Hud",
                 FadeOut = 1f,
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        FadeIn = 1f,
-                        Text = Messages["UpgradeNotice"],
-                        FontSize = NoticeSize,
-                        Align = TextAnchor.MiddleCenter,
-                        Font = NoticeFont
-                    },
-                    new CuiOutlineComponent
-                    {
-                        Color = "0.0 0.0 0.0 1.0"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.1 0.2",
-                        AnchorMax = "0.9 0.25"
+                Components = {
+                    new CuiTextComponent {
+                        FadeIn=1f, Text=$"{InfoNoticeText}", FontSize=InfoNoticeSize, Align=TextAnchor.MiddleCenter, Font="robotocondensed-regular.ttf"
+                    }
+                    , new CuiOutlineComponent {
+                        Color="0.0 0.0 0.0 1.0"
+                    }
+                    , new CuiRectTransformComponent {
+                        AnchorMin="0.1 0.2", AnchorMax="0.9 0.25"
                     }
                 }
-            });
-
+            }
+            );
             CuiHelper.AddUi(player, container);
-
-            mytimer = timer.Once(NoticeTime, () => { CuiHelper.DestroyUi(player, "InfoNotice"); });
+            mytimer = timer.Once(InfoNoticeTextTime, () => {
+                CuiHelper.DestroyUi(player, "InfoNotice");
+            }
+            );
         }
-
         void OnHammerHit(BasePlayer player, HitInfo info)
         {
             var buildingBlock = info.HitEntity as BuildingBlock;
             if (buildingBlock == null || player == null) return;
-
             if (permissionOn && !permission.UserHasPermission(player.UserIDString, permissionAutoGradeHammer))
             {
-				SendReply(player, Messages["UpgradePremHammer"]);
+                SendReply(player, MessageAutoGradePremHammer);
                 return;
             }
             Grade(buildingBlock, player);
         }
-
-        void OnEntityBuilt(Planner planner, GameObject gameObject)
+        /*void OnEntityBuilt(Planner planner, GameObject gameObject)         {             if (planner == null || gameObject == null) return;             var player = planner.GetOwnerPlayer();             BuildingBlock entity = gameObject.ToBaseEntity() as BuildingBlock;             if (entity == null || entity.IsDestroyed) return;             if (player == null) return;             Grade(entity, player);         }*/
+        void OnEntitySpawned(BaseNetworkable entity)
         {
-            if (planner == null || gameObject == null) return;
-            var player = planner.GetOwnerPlayer();
-            BuildingGrade.Enum grade;
-            BuildingBlock entity = gameObject.ToBaseEntity() as BuildingBlock;
-            if (entity == null || entity.IsDestroyed) return;
-            if (player == null) return;
-            var buildingBlock = gameObject.GetComponent<BuildingBlock>();
-            var buildingGrade = (int)buildingBlock.grade;
-            Grade(entity, player);
+            if (entity == null || entity?.net?.ID == null) return;
+            var ent = entity as BaseEntity;
+            if (ent == null || ent.IsDestroyed) return;
+            var player = BasePlayer.FindByID(ent.OwnerID);
+            if (player != null)
+            {
+                BuildingBlock block = ent as BuildingBlock;
+                if (block != null) Grade(block, player);
+            }
         }
-
         void Grade(BuildingBlock block, BasePlayer player)
         {
             BuildingGrade.Enum grade;
-			
-			if (useNoEscape)
+            if (useNoEscape)
             {
                 object can = NoEscape?.Call("IsRaidBlocked", player);
-                if (can != null)
-                    if ((bool)can == true)
+                if (can != null) if ((bool)can == true)
                     {
-						SendReply(player, Messages["UpgradeRaid"]);
+                        SendReply(player, "Вы не можете использовать Upgrade во время рейд-блока");
                         return;
                     }
             }
-			
             if (!grades.TryGetValue(player, out grade) || grade == BuildingGrade.Enum.Count) return;
             if (block == null) return;
             if (!((int)grade >= 1 && (int)grade <= 4)) return;
-			
             var targetLocation = player.transform.position + (player.eyes.BodyForward() * 4f);
-            var reply = 309;
-			if (reply == 0) { }
-			
+            var reply = 1959;
+            if (reply == 0) { }
             if (getBuild && player.IsBuildingBlocked(targetLocation, new Quaternion(0, 0, 0, 0), new Bounds(Vector3.zero, Vector3.zero)))
             {
-				SendReply(player, Messages["UpgradeBuildingBlocked"]);
+                player.ChatMessage("<color=ffcc00><size=16><color=#EC402C>Upgrade</color> запрещен в билдинг блоке!!!</size></color>");
                 return;
             }
-			
             if (block.blockDefinition.checkVolumeOnUpgrade)
             {
                 if (DeployVolume.Check(block.transform.position, block.transform.rotation, PrefabAttribute.server.FindAll<DeployVolume>(block.prefabID), ~(1 << block.gameObject.layer)))
                 {
-					SendReply(player, Messages["UpgradeBlock"]);
+                    player.ChatMessage("Вы не можете улучшить постройку находясь в ней");
                     return;
                 }
             }
-			
+            var ret = Interface.Call("CanUpgrade", player) as string;
+            if (ret != null)
+            {
+                SendReply(player, ret);
+                return;
+            }
             if (permissionAutoGradeAdmin)
             {
                 if (player.IsAdmin)
                 {
-                    var ret = Interface.Call("CanUpgrade", player) as string;
-                    if (ret != null)
-                    {
-                        SendReply(player, ret);
-                        return;
-                    }
                     if (block.grade > grade)
                     {
-                        SendReply(player, Messages["UpgradeDownLevel"]);
+                        SendReply(player, "Нельзя понижать уровень строения!");
                         return;
                     }
                     if (block.grade == grade)
                     {
-                        SendReply(player, Messages["UpgradeLevel"]);
+                        SendReply(player, "Уровень строения соответствует выбранному.");
                         return;
                     }
                     if (block.Health() != block.MaxHealth() && !CanUpgradeDamaged)
                     {
-                        SendReply(player, Messages["UpgradeDamaged"]);
+                        SendReply(player, "Нельзя улучшать повреждённые постройки!");
                         return;
                     }
                     block.SetGrade(grade);
@@ -505,67 +454,50 @@ namespace Oxide.Plugins
                     block.UpdateSkin(false);
                     Effect.server.Run(string.Concat("assets/bundled/prefabs/fx/build/promote_", grade.ToString().ToLower(), ".prefab"), block, 0, Vector3.zero, Vector3.zero, null, false);
                     timers[player] = resetTime;
-                    DrawUI(player, grade, resetTime, "Upgrade");
+                    DrawUI(player, grade, resetTime);
                     return;
                 }
             }
-			
-            if (permissionOn)
+            if (permissionOn && permission.UserHasPermission(player.UserIDString, permissionAutoGradeFree))
             {
-                if (permission.UserHasPermission(player.UserIDString, permissionAutoGradeFree))
-                {
-                    var ret = Interface.Call("CanUpgrade", player) as string;
-                    if (ret != null)
-                    {
-                        SendReply(player, ret);
-                        return;
-                    }
-                    if (block.grade > grade)
-                    {
-                        SendReply(player, Messages["UpgradeDownLevel"]);
-                        return;
-                    }
-                    if (block.grade == grade)
-                    {
-                        SendReply(player, Messages["UpgradeLevel"]);
-                        return;
-                    }
-                    if (block.Health() != block.MaxHealth() && !CanUpgradeDamaged)
-                    {
-                        SendReply(player, Messages["UpgradeDamaged"]);
-                        return;
-                    }
-                    block.SetGrade(grade);
-                    block.SetHealthToMax();
-                    block.UpdateSkin(false);
-                    Effect.server.Run(string.Concat("assets/bundled/prefabs/fx/build/promote_", grade.ToString().ToLower(), ".prefab"), block, 0, Vector3.zero, Vector3.zero, null, false);
-                    timers[player] = resetTime;
-                    DrawUI(player, grade, resetTime, "Upgrade");
-                    return;
-                }
-            }
-			
-            if (CanAffordUpgrade(block, grade, player))
-            {
-                var ret = Interface.Call("CanUpgrade", player) as string;
-                if (ret != null)
-                {
-                    SendReply(player, ret);
-                    return;
-                }
                 if (block.grade > grade)
                 {
-					SendReply(player, Messages["UpgradeDownLevel"]);
+                    SendReply(player, "Нельзя понижать уровень строения!");
                     return;
                 }
                 if (block.grade == grade)
                 {
-					SendReply(player, Messages["UpgradeLevel"]);
+                    SendReply(player, "Уровень строения соответствует выбранному.");
                     return;
                 }
                 if (block.Health() != block.MaxHealth() && !CanUpgradeDamaged)
                 {
-					SendReply(player, Messages["UpgradeDamaged"]);
+                    SendReply(player, "Нельзя улучшать повреждённые постройки!");
+                    return;
+                }
+                block.SetGrade(grade);
+                block.SetHealthToMax();
+                block.UpdateSkin(false);
+                Effect.server.Run(string.Concat("assets/bundled/prefabs/fx/build/promote_", grade.ToString().ToLower(), ".prefab"), block, 0, Vector3.zero, Vector3.zero, null, false);
+                timers[player] = resetTime;
+                DrawUI(player, grade, resetTime);
+                return;
+            }
+            if (CanAffordUpgrade(block, grade, player))
+            {
+                if (block.grade > grade)
+                {
+                    SendReply(player, "Нельзя понижать уровень строения!");
+                    return;
+                }
+                if (block.grade == grade)
+                {
+                    SendReply(player, "Уровень строения соответствует выбранному.");
+                    return;
+                }
+                if (block.Health() != block.MaxHealth() && !CanUpgradeDamaged)
+                {
+                    SendReply(player, "Нельзя улучшать повреждённые постройки!");
                     return;
                 }
                 PayForUpgrade(GetGrade(block, grade), player);
@@ -574,14 +506,13 @@ namespace Oxide.Plugins
                 block.UpdateSkin(false);
                 Effect.server.Run(string.Concat("assets/bundled/prefabs/fx/build/promote_", grade.ToString().ToLower(), ".prefab"), block, 0, Vector3.zero, Vector3.zero, null, false);
                 timers[player] = resetTime;
-                DrawUI(player, grade, resetTime, "Upgrade");
+                DrawUI(player, grade, resetTime);
             }
             else
             {
-				SendReply(player, Messages["UpgradeNoResources"]);
+                SendReply(player, MessageAutoGradeNo);
             }
         }
-
         int NextGrade(int grade) => ++grade;
         void GradeTimerHandler()
         {
@@ -590,118 +521,45 @@ namespace Oxide.Plugins
                 var seconds = --timers[player];
                 if (seconds <= 0)
                 {
-                    BuildingGrade.Enum mode;
                     grades.Remove(player);
                     timers.Remove(player);
                     DestroyUI(player);
                     continue;
                 }
-                DrawUI(player, grades[player], seconds, "Upgrade");
+                DrawUI(player, grades[player], seconds);
             }
         }
-		
-		public static string FormatTime(TimeSpan time)
+        void DrawUI(BasePlayer player, BuildingGrade.Enum grade, int seconds)
         {
-            string result = string.Empty;
-            if (time.Days != 0)
-                result += $"{Format(time.Days, "дней", "дня", "день")} ";
-
-            if (time.Hours != 0)
-                result += $"{Format(time.Hours, "часов", "часа", "час")} ";
-
-            if (time.Minutes != 0)
-                result += $"{Format(time.Minutes, "минут", "минуты", "минута")} ";
-
-            if (time.Seconds != 0)
-                result += $"{Format(time.Seconds, "секунд", "секунды", "секунда")} ";
-			
-            return result;
+            DestroyUI(player);
+            CuiHelper.AddUi(player, GUI.Replace("{0}", gradesString[grade]).Replace("{1}", seconds.ToString()).Replace("{PanelColor}", PanelColor.ToString()).Replace("{PanelAnchorMin}", PanelAnchorMin.ToString()).Replace("{PanelAnchorMax}", PanelAnchorMax.ToString()).Replace("{TextFontSize}", TextFontSize.ToString()).Replace("{TextСolor}", TextСolor.ToString()).Replace("{TextAnchorMin}", TextAnchorMin.ToString()).Replace("{TextAnchorMax}", TextAnchorMax.ToString()));
         }
-
-        private static string Format(int units, string form1, string form2, string form3)
-        {
-            var tmp = units % 10;
-
-            if (units >= 5 && units <= 20 || tmp >= 5 && tmp <= 9)
-                return $"{units} {form1}";
-
-            if (tmp >= 2 && tmp <= 4)
-                return $"{units} {form2}";
-
-            return $"{units} {form3}";
-        }
-
-        void DrawUI(BasePlayer player, BuildingGrade.Enum grade, int seconds, string type)
-        {
-			DestroyUI(player);
-            var msg = "";
-            if (type == "Upgrade")
-            {
-                msg = Messages["UpgradeMSG"];
-            }
-			
-            CuiHelper.AddUi(player,
-                GUI.Replace("{PanelColor}", PanelColor.ToString())
-                   .Replace("{PanelAnchorMin}", PanelAnchorMin.ToString())
-                   .Replace("{PanelAnchorMax}", PanelAnchorMax.ToString())
-				   .Replace("{FontName}", FontName.ToString())
-                   .Replace("{TextFontSize}", TextFontSize.ToString())
-                   .Replace("{TextСolor}", TextСolor.ToString())
-                   .Replace("{TextAnchorMin}", TextAnchorMin.ToString())
-                   .Replace("{TextAnchorMax}", TextAnchorMax.ToString())
-				   .Replace("{msg}", msg)
-				   .Replace("{0}", gradesString[grade])
-				   .Replace("{1}", FormatTime(TimeSpan.FromSeconds(seconds))));
-        }
-
         void DestroyUI(BasePlayer player)
         {
             CuiHelper.DestroyUi(player, "autograde.panel");
             CuiHelper.DestroyUi(player, "autogradetext");
         }
-
-        private string GUI = @"[{""name"": ""autograde.panel"",""parent"": ""Hud"",""components"": 
-		                       [{""type"": ""UnityEngine.UI.Image"",""color"": ""{PanelColor}""}, 
-							    {""type"": ""RectTransform"",""anchormin"": ""{PanelAnchorMin}"",""anchormax"": ""{PanelAnchorMax}""}]}, 
-								{""name"": ""autogradetext"",""parent"": ""Hud"",""components"": 
-							   [{""type"": ""UnityEngine.UI.Text"",""text"": ""{msg}"",""fontSize"": ""{TextFontSize}"",""font"":""{FontName}"",""align"": ""MiddleCenter""}, 
-							    {""type"": ""UnityEngine.UI.Outline"",""color"": ""{TextСolor}"",""distance"": ""0.1 -0.1""}, 
-								{""type"": ""RectTransform"",""anchormin"": ""{TextAnchorMin}"",""anchormax"": ""{TextAnchorMax}""}]}]";
-								
-        Dictionary<string, string> Messages = new Dictionary<string, string>()
-        {
-            {"UpgradeDamaged", "Нельзя улучшать повреждённые постройки!"},
-            {"UpgradeLevel", "Уровень строения соответствует выбранному!"},
-			{"UpgradeDownLevel", "Нельзя понижать уровень строения!"},
-            {"UpgradeBlock", "Вы не можете улучшить постройку находясь в ней!"},
-			{"UpgradeBuildingBlocked", "<color=ffcc00><size=16><color=#EC402C>Upgrade</color> запрещен в билдинг блоке!!!</size></color>"},
-            {"UpgradeRaid", "Вы не можете использовать Upgrade во время рейд-блока! Ремув во время рейда запрещён!\nОсталось<color=#ffd479> {0}</color>."},
-			{"UpgradePremHammer", "У вас нету доступа к улучшению киянкой!"},
-			{"UpgradePrem", "У вас нет доступа к данной команде!"},
-			{"UpgradeNoResources", "<color=ffcc00><size=16>Для улучшения нехватает ресурсов!!!</size></color>"},
-			{"UpgradeON", "<size=14><color=#EC402C>Upgrade включен!</color> \nДля быстрого переключения используйте: <color=#EC402C>/upgrade 0-4</color></size>"},
-			{"UpgradeOFF", "<color=ffcc00><size=14>Вы отключили <color=#EC402C>Upgrade!</color></size></color>"},
-			{"UpgradeNotice", "Используйте <color=#EC402C>/upgrade</color> (Или нажмите <color=#EC402C>USE - Клавиша E</color>) для быстрого улучшения при постройке."},
-		    {"UpgradeMSG", "Режим улучшения строения до {0} выключится через {1}"},
-        };
-		
-        void UpdateTimer(BasePlayer player, string type)
+        private string GUI = @"[{""name"": ""autograde.panel"",""parent"": ""Hud"",""components"": [{""type"": ""UnityEngine.UI.Image"",""color"": ""{PanelColor}""},{""type"": ""RectTransform"",""anchormin"": ""{PanelAnchorMin}"",""anchormax"": ""{PanelAnchorMax}""}]}, {""name"": ""autogradetext"",""parent"": ""Hud"",""components"": [{""type"": ""UnityEngine.UI.Text"",""text"": ""Режим улучшения строения до {0} выключится через " + @"{1} секунд."",""fontSize"": ""{TextFontSize}"",""align"": ""MiddleCenter""}, {""type"": ""UnityEngine.UI.Outline"",""color"": ""{TextСolor}"",""distance"": ""0.1 -0.1""}, {""type"": ""RectTransform"",""anchormin"": ""{TextAnchorMin}"",""anchormax"": ""{TextAnchorMax}""}]}]";
+        void UpdateTimer(BasePlayer player, ulong playerid = 2006016)
         {
             timers[player] = resetTime;
-            DrawUI(player, grades[player], timers[player], type);
+            DrawUI(player, grades[player], timers[player]);
         }
-		
-        private T GetConfig<T>(T defaultVal, params string[] path)
+        object BuildingUpgradeActivate(ulong id)
         {
-            var data = Config.Get(path);
-            if (data != null)
+            var player = BasePlayer.FindByID(id);
+            if (player != null) if (grades.ContainsKey(player)) return true;
+            return false;
+        }
+        void BuildingUpgradeDeactivate(ulong id)
+        {
+            var player = BasePlayer.FindByID(id);
+            if (player != null)
             {
-                return Config.ConvertValue<T>(data);
+                grades.Remove(player);
+                timers.Remove(player);
+                DestroyUI(player);
             }
-
-            Config.Set(path.Concat(new object[] { defaultVal }).ToArray());
-            ConfigChanged = true;
-            return defaultVal;
         }
     }
-}
+}                                                        

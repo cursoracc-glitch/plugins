@@ -6,7 +6,6 @@ using System.Diagnostics;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Configuration;
-using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using UnityEngine;
 using System.Linq;
@@ -14,13 +13,11 @@ using System.Collections;
 
 namespace Oxide.Plugins
 {
-    [Info("AutomatedSearchlights", "k1lly0u", "0.2.25")]
+    [Info("AutomatedSearchlights", "k1lly0u", "0.2.30")]
     [Description("Create searchlights that will automatically turn on and follow a variety of objects")]
     class AutomatedSearchlights : RustPlugin
     {
         #region Fields
-        [PluginReference] Plugin NightLantern;
-
         private StoredData storedData;
         private DynamicConfigFile data;
 
@@ -33,26 +30,24 @@ namespace Oxide.Plugins
         private bool wipeDetected;
         private bool automationEnabled;
         private bool isInitialized;
-        private bool nlConsume; 
+        private bool nlConsume;
 
-        const string permUse = "automatedsearchlights.use";
-        const string permIgnore = "automatedsearchlights.ignorelimit";
+        private const string PERM_USE = "automatedsearchlights.use";
+        private const string PERM_IGNORE = "automatedsearchlights.ignorelimit";
 
-        const string offlineEffect = "assets/prefabs/npc/autoturret/effects/offline.prefab";
-        const string onlineEffect = "assets/prefabs/npc/autoturret/effects/online.prefab";
-        const string aquiredEffect = "assets/prefabs/npc/autoturret/effects/targetacquired.prefab";
-        const string lostEffect = "assets/prefabs/npc/autoturret/effects/targetlost.prefab";
+        private const string FX_OFFLINE = "assets/prefabs/npc/autoturret/effects/offline.prefab";
+        private const string FX_ONLINE = "assets/prefabs/npc/autoturret/effects/online.prefab";
+        private const string FX_ACQUIRED = "assets/prefabs/npc/autoturret/effects/targetacquired.prefab";
+        private const string FX_LOST = "assets/prefabs/npc/autoturret/effects/targetlost.prefab";
 
-        const string burlapSack = "assets/prefabs/misc/burlap sack/generic_world.prefab";
-
-        const string ASUI_Overlay = "ASUI_Overlay";
+        private const string ASUI_OVERLAY = "ASUI_Overlay";
         #endregion
 
         #region Oxide Hooks
         private void Loaded()
         {
-            permission.RegisterPermission(permUse, this);
-            permission.RegisterPermission(permIgnore, this);
+            permission.RegisterPermission(PERM_USE, this);
+            permission.RegisterPermission(PERM_IGNORE, this);
             foreach (string key in configData.Management.Max.Keys)
             {
                 if (permission.PermissionExists(key, this))
@@ -81,42 +76,26 @@ namespace Oxide.Plugins
             {
                 storedData = new StoredData();
                 SaveData();
-                MonitorTime(true);
             }
+
+            MonitorTime(true);
 
             LoadDefaultImages();
 
             InvokeHandler.Invoke(ServerMgr.Instance, InitializeAllLinks, 10f);
+
             RustNET.RegisterModule(Title, this);
 
             if (!configData.Management.AutoRegister)
                 Unsubscribe(nameof(OnEntitySpawned));
-
-            if (configData.Options.ConsumeFuel)
-            {
-                Unsubscribe(nameof(CanAcceptItem));
-                Unsubscribe(nameof(OnItemUse));
-            }
-
-            timer.In(3, () =>
-            {
-                if (NightLantern)
-                {
-                    object success = NightLantern?.Call("TypeConsumesFuel", "searchlight.deployed");
-                    if (success is bool)
-                        nlConsume = (bool)success;
-                }
-            });           
-            
         }
 
         private void OnNewSave(string filename) => wipeDetected = true;
 
         private void OnServerSave() => SaveData();
 
-        private void OnEntitySpawned(BaseNetworkable networkable)
+        private void OnEntitySpawned(SearchLight searchLight)
         {
-            SearchLight searchLight = networkable as SearchLight;
             if (searchLight == null)
                 return;
 
@@ -124,30 +103,30 @@ namespace Oxide.Plugins
             if (owner == null)
                 return;
 
-            BuildingManager.Building building = searchLight.GetBuilding();
+            BuildingManager.Building building = RustNET.GetBuilding(searchLight);
             if (building == null)
                 return;
 
-            if (!building.GetDominatingBuildingPrivilege().IsAuthed(owner))            
+            if (!building.GetDominatingBuildingPrivilege()?.IsAuthed(owner) ?? false)            
                 return;
 
             RustNET.LinkManager.Link link = RustNET.linkManager.GetLinkOf(building);
             if (link == null)            
                 return;            
 
-            if (Vector3.Distance(searchLight.transform.position, link.terminal.droppedItem.transform.position) > configData.Management.DistanceFromTerminal)            
+            if (Vector3.Distance(searchLight.transform.position, link.terminal.DroppedItem.transform.position) > configData.Management.DistanceFromTerminal)            
                 return;            
 
-            LinkManager.LightLink lightLink = linkManager.GetLinkOf(link.terminal.terminalId);
+            LinkManager.LightLink lightLink = linkManager.GetLinkOf(link.terminal.TerminalID);
             if (lightLink == null)
-                lightLink = new LinkManager.LightLink(link.terminal.terminalId, searchLight, "");
+                lightLink = new LinkManager.LightLink(link.terminal.TerminalID, searchLight, "");
             else
             {
                 int lightLimit = GetMaxLights(owner.userID);
-                if (!permission.UserHasPermission(owner.UserIDString, permIgnore) && lightLink.managers.Count >= lightLimit)                
+                if (!permission.UserHasPermission(owner.UserIDString, PERM_IGNORE) && lightLink.Managers.Count >= lightLimit)                
                     return;                
 
-                lightLink.AddLightToLink(searchLight, link.terminal.terminalId, "");
+                lightLink.AddLightToLink(searchLight, link.terminal.TerminalID, "");
             }
 
             searchLight.GetComponent<LightManager>().ToggleAutomation(automationEnabled);
@@ -188,37 +167,6 @@ namespace Oxide.Plugins
             return null;
         }
 
-        private void OnItemUse(Item item, int amount)
-        {
-            if (!isInitialized)
-                return;
-
-            LightManager follower = item?.parent?.entityOwner?.GetComponent<LightManager>();
-            if (follower != null)
-            {
-                if (nlConsume)
-                    item.amount++;
-            }
-        }
-       
-        private object CanAcceptItem(ItemContainer container, Item item)
-        {
-            if (item == null || container == null)
-                return null;
-
-            LightManager follower = item?.parent?.entityOwner?.GetComponent<LightManager>();
-            if (follower != null)
-            {
-                BasePlayer player = container.playerOwner;
-                if (player != null)
-                {
-                    SendReply(player, msg("Warning.NoRemoval", player.userID));
-                    return ItemContainer.CanAcceptResult.CannotAccept;
-                }
-            }           
-            return null;
-        }
-                
         private void Unload()
         {
             UnityEngine.Object.Destroy(frameBudgeter.gameObject);
@@ -232,7 +180,7 @@ namespace Oxide.Plugins
             linkManager.DestroyAllLinks();
 
             foreach (BasePlayer player in BasePlayer.activePlayerList)
-                CuiHelper.DestroyUi(player, ASUI_Overlay);
+                CuiHelper.DestroyUi(player, ASUI_OVERLAY);
 
             LightManager.allManagers?.Clear();
             LightManager.allManagers = null;
@@ -286,27 +234,18 @@ namespace Oxide.Plugins
         {
             foreach(LinkManager.LightLink link in linkManager.links)
             {
-                foreach(LightManager manager in link.managers)
+                foreach(LightManager manager in link.Managers)
                 {
                     yield return new WaitForSeconds(UnityEngine.Random.Range(0.1f, 0.2f));
+
                     if (manager == null)
                         continue;
+
                     manager.ToggleAutomation(status);
                 }
             }            
         }       
-      
-        private bool IsValidSource(ulong playerId, DecayEntity decayEntity)
-        {
-            if (decayEntity == null || decayEntity.IsDestroyed)
-                return false;
-
-            if (!decayEntity.GetComponent<LightManager>())
-                return false;
-            
-            return true;
-        }
-
+             
         private int GetMaxLights(ulong playerId)
         {
             int max = 0;
@@ -343,7 +282,7 @@ namespace Oxide.Plugins
         {
             LinkManager.LightLink link = linkManager.GetLinkOf(terminalId);
             if (link != null)
-                return link.managers.ToArray();
+                return link.Managers.ToArray();
             return new LightManager[0];
         }
 
@@ -352,7 +291,7 @@ namespace Oxide.Plugins
             LinkManager.LightLink link = linkManager.GetLinkOf(terminalId);
             if (link != null)
             {
-                LightManager manager = link.managers.Find(x => x.searchLight.net.ID == managerId);
+                LightManager manager = link.Managers.Find(x => x.Searchlight.net.ID == managerId);
                 if (manager != null)
                     return manager.IsEnabled();
             }
@@ -371,26 +310,17 @@ namespace Oxide.Plugins
             LinkManager.LightLink link = linkManager.GetLinkOf(terminalId);
             if (link != null)
             {
-                LightManager manager = link.managers.Find(x => x.searchLight.net.ID == managerId);
+                LightManager manager = link.Managers.Find(x => x.Searchlight.net.ID == managerId);
                 if (manager != null)
+                {
                     manager.ToggleSearchAutomation(active);
-            }
-        }
-
-        private void OpenInventory(BasePlayer player, uint managerId, int terminalId)
-        {
-            LinkManager.LightLink link = linkManager.GetLinkOf(terminalId);
-            if (link != null)
-            {
-                LightManager manager = link.managers.Find(x => x.searchLight.net.ID == managerId);
-                if (manager != null)
-                    RustNET.OpenInventory(player, manager.searchLight, manager.searchLight.inventory);
+                }
             }
         }
 
         private string GetHelpString(ulong playerId, bool title) => title ? msg("UI.Help.Title", playerId) : msg("UI.Help", playerId);
 
-        private bool AllowPublicAccess() => false;
+        private bool AllowPublicAccess() => true;
         #endregion
 
         #region Component
@@ -398,11 +328,11 @@ namespace Oxide.Plugins
         {
             public List<LightLink> links = new List<LightLink>();
 
-            public LightLink GetLinkOf(LightManager manager) => links.Find(x => x.managers.Contains(manager)) ?? null;
+            public LightLink GetLinkOf(LightManager manager) => links.Find(x => x.Managers.Contains(manager)) ?? null;
 
-            public LightLink GetLinkOf(Controller controller) => links.Find(x => x.controllers.Contains(controller)) ?? null;
+            public LightLink GetLinkOf(Controller controller) => links.Find(x => x.Controllers.Contains(controller)) ?? null;
 
-            public LightLink GetLinkOf(int terminalId) => links.Find(x => x.terminalId == terminalId) ?? null;
+            public LightLink GetLinkOf(int terminalId) => links.Find(x => x.TerminalID == terminalId) ?? null;
 
             public LightLink GetLinkOf(SearchLight searchLight)
             {
@@ -426,16 +356,16 @@ namespace Oxide.Plugins
 
             public class LightLink
             {
-                public int terminalId { get; private set; }
-                public List<Controller> controllers { get; private set; }
-                public List<LightManager> managers { get; private set; }
+                public int TerminalID { get; private set; }
+                public List<Controller> Controllers { get; private set; }
+                public List<LightManager> Managers { get; private set; }
 
                 public LightLink() { }
                 public LightLink(int terminalId, SearchLight searchLight, string lightName)
                 {
-                    this.terminalId = terminalId;
-                    this.controllers = new List<Controller>();
-                    this.managers = new List<LightManager>();
+                    this.TerminalID = terminalId;
+                    this.Controllers = new List<Controller>();
+                    this.Managers = new List<LightManager>();
 
                     AddLightToLink(searchLight, terminalId, lightName);
                     linkManager.links.Add(this);
@@ -446,20 +376,20 @@ namespace Oxide.Plugins
                     LightManager manager = searchLight.gameObject.AddComponent<LightManager>();
                     manager.lightName = lightName;
                     manager.terminalId = terminalId;
-                    managers.Add(manager);
+                    Managers.Add(manager);
                 }
 
                 public void InitiateLink(BasePlayer player, uint managerId)
                 {
-                    LightManager manager = managers.FirstOrDefault(x => x.searchLight.net.ID == managerId);
+                    LightManager manager = Managers.FirstOrDefault(x => x.Searchlight.net.ID == managerId);
                     if (manager != null)
                     {
                         player.inventory.crafting.CancelAll(true);
                         Controller controller = player.gameObject.AddComponent<Controller>();
-                        controllers.Add(controller);
-                        controller.InitiateLink(terminalId);
+                        Controllers.Add(controller);
+                        controller.InitiateLink(TerminalID);
                         controller.SetLightLink(this);
-                        controller.SetSpectateTarget(managers.IndexOf(manager));
+                        controller.SetSpectateTarget(Managers.IndexOf(manager));
                     }
                 }
 
@@ -467,7 +397,7 @@ namespace Oxide.Plugins
                 {
                     if (controller != null)
                     {                        
-                        controllers.Remove(controller);
+                        Controllers.Remove(controller);
                         controller.FinishSpectating(isDead);
                     }
                 }
@@ -475,29 +405,29 @@ namespace Oxide.Plugins
                 public void OnEntityDeath(BaseNetworkable networkable)
                 {
                     LightManager manager = networkable.GetComponent<LightManager>();
-                    if (manager != null && managers.Contains(manager))
+                    if (manager != null && Managers.Contains(manager))
                     {
-                        if (manager.controller != null)
+                        if (manager.Controller != null)
                         {
-                            manager.controller.player.ChatMessage(ins.msg("Warning.SearchlightDestroyed", manager.controller.player.userID));
-                            CloseLink(manager.controller);
+                            manager.Controller.player.ChatMessage(ins.msg("Warning.SearchlightDestroyed", manager.Controller.player.userID));
+                            CloseLink(manager.Controller);
                         }
-                        managers.Remove(manager);
+                        Managers.Remove(manager);
                         return;
                     }
 
                     if (networkable.GetComponent<BaseCombatEntity>())
                     {
-                        foreach (LightManager lightManager in managers)
+                        foreach (LightManager lightManager in Managers)
                             lightManager.OnEntityDeath(networkable as BaseCombatEntity);
                     }
                 }
 
                 public void OnLinkTerminated(bool isDestroyed)
                 {
-                    for (int i = controllers.Count - 1; i >= 0; i--)
+                    for (int i = Controllers.Count - 1; i >= 0; i--)
                     {
-                        Controller controller = controllers.ElementAt(i);
+                        Controller controller = Controllers.ElementAt(i);
                         controller.player.ChatMessage(isDestroyed ? ins.msg("Warning.TerminalDestroyed", controller.player.userID) : ins.msg("Warning.TerminalShutdown", controller.player.userID));
                         CloseLink(controller);
                     }
@@ -507,7 +437,7 @@ namespace Oxide.Plugins
 
                 private void DestroyLightManagers(bool isDestroyed)
                 {
-                    foreach (LightManager manager in managers)
+                    foreach (LightManager manager in Managers)
                     {                        
                         UnityEngine.Object.Destroy(manager);
                     }
@@ -517,7 +447,7 @@ namespace Oxide.Plugins
 
         private class FrameBudgeter : MonoBehaviour
         {
-            private double maxMilliseconds = 0.4;
+            private double maxMilliseconds = 0.2;
 
             private Stopwatch sw = Stopwatch.StartNew();
 
@@ -551,8 +481,8 @@ namespace Oxide.Plugins
         {
             internal static List<LightManager> allManagers;
 
-            public SearchLight searchLight { get; private set; }
-            public Controller controller { get; private set; }
+            public SearchLight Searchlight { get; private set; }
+            public Controller Controller { get; private set; }
 
             private SphereCollider collider;
             private Rigidbody rb;
@@ -562,7 +492,7 @@ namespace Oxide.Plugins
             private int threatLevel = 10;
 
             private float searchRadius;
-            private bool consumeFuel;
+            private bool requiresPower;
             private ConfigData.LightOptions.FlickerMode flicker;
             private ConfigData.LightOptions.SearchMode search;
             private ConfigData.DetectionOptions detection;
@@ -594,7 +524,7 @@ namespace Oxide.Plugins
 
             private void Awake()
             {
-                searchLight = GetComponent<SearchLight>();
+                Searchlight = GetComponent<SearchLight>();
 
                 threatProbabilityRate = 3f + UnityEngine.Random.Range(0.1f, 1.0f);
 
@@ -605,34 +535,34 @@ namespace Oxide.Plugins
 
             internal void DoUpdate()
             {
-                if (searchLight.IsMounted() || searchLight.HasFlag(BaseEntity.Flags.Reserved5) || !HasFuel())                
+                if (Searchlight.IsMounted() || Searchlight.HasFlag(BaseEntity.Flags.Reserved5) || !Searchlight.IsPowered())                
                     return;
 
-                if (controller != null && !controller.lightsOn)
+                if (Controller != null && !Controller.lightsOn)
                     return;
 
                 if (!flicker.Enabled)
                 {
-                    if (!searchLight.IsOn())
-                        searchLight.SetFlag(BaseEntity.Flags.On, true);
+                    if (!Searchlight.IsOn())
+                        Searchlight.SetFlag(BaseEntity.Flags.On, true);
                 }
                 else
                 {
-                    float healthPercent = searchLight.health / searchLight.MaxHealth();
+                    float healthPercent = Searchlight.health / Searchlight.MaxHealth();
                     if (healthPercent * 100 <= flicker.Health)
                     {
                         if (healthPercent * 100 <= flicker.Health / 2)
-                            searchLight.SetFlag(BaseEntity.Flags.On, UnityEngine.Random.Range(1, 5) != 2);
-                        else searchLight.SetFlag(BaseEntity.Flags.On, UnityEngine.Random.Range(1, 10) != 2);
+                            Searchlight.SetFlag(BaseEntity.Flags.On, UnityEngine.Random.Range(1, 5) != 2);
+                        else Searchlight.SetFlag(BaseEntity.Flags.On, UnityEngine.Random.Range(1, 10) != 2);
                     }
                     else
                     {
-                        if (!searchLight.IsOn())
-                            searchLight.SetFlag(BaseEntity.Flags.On, true);
+                        if (!Searchlight.IsOn())
+                            Searchlight.SetFlag(BaseEntity.Flags.On, true);
                     }
                 }
 
-                if (controller != null)
+                if (Controller != null)
                     return;
                 else
                 {
@@ -656,8 +586,8 @@ namespace Oxide.Plugins
                                     searchTime = searchTime + Time.deltaTime;
                                     var single = Mathf.InverseLerp(0f, search.Speed / 9, searchTime);
 
-                                    searchLight.SetTargetAimpoint(Vector3.Lerp(searchPattern[lastSearchPoint], searchPattern[nextSearchPoint], single));
-                                    searchLight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+                                    Searchlight.SetTargetAimpoint(Vector3.Lerp(searchPattern[lastSearchPoint], searchPattern[nextSearchPoint], single));
+                                    Searchlight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
 
                                     if (single >= 1)
                                     {
@@ -670,8 +600,8 @@ namespace Oxide.Plugins
                                     lastSearchPoint = 4;
                                     nextSearchPoint = searchForwards ? 5 : 3;
                                     searchTime = 0;
-                                    searchLight.SetTargetAimpoint(searchPattern[4]);
-                                    searchLight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+                                    Searchlight.SetTargetAimpoint(searchPattern[4]);
+                                    Searchlight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
 
                                     resetSearch = false;
                                     isSearching = true;
@@ -681,10 +611,10 @@ namespace Oxide.Plugins
                     }
                     else
                     {
-                        if (IsObjectVisible(targetEntity) && Vector3.Distance(searchLight.transform.position, targetEntity.transform.position) <= maxTargetDistance)
+                        if (IsObjectVisible(targetEntity) && Vector3.Distance(Searchlight.transform.position, targetEntity.transform.position) <= maxTargetDistance)
                         {
-                            searchLight.SetTargetAimpoint(targetEntity.transform.position);
-                            searchLight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+                            Searchlight.SetTargetAimpoint(targetEntity.transform.position);
+                            Searchlight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
                             lostTargetTime = 0;
                         }
                         else
@@ -711,19 +641,17 @@ namespace Oxide.Plugins
                 if (potentialTarget == null || potentialTarget.IsDestroyed)
                     return;
 
-                float threatDistance = Vector3.Distance(searchLight.transform.position, potentialTarget.transform.position);
-                //int threatRating = 10;
+                float threatDistance = Vector3.Distance(Searchlight.transform.position, potentialTarget.transform.position);
 
                 if (potentialTarget is BasePlayer)
                 {
-                    if (RustNET.IsFriendlyPlayer(searchLight.OwnerID, potentialTarget.ToPlayer().userID))
+                    if (RustNET.IsFriendlyPlayer(Searchlight.OwnerID, potentialTarget.ToPlayer().userID))
                     {
                         if (detection.Friends.Enabled && threatDistance <= detection.Friends.Radius)
                         {
                             if (threats[detection.Friends.Threat].Contains(potentialTarget))
                                 return;
                             threats[detection.Friends.Threat].Add(potentialTarget);
-                            //threatRating = detection.Friends.Threat;
                         }
                     }
                     else if (detection.Enemies.Enabled && threatDistance <= detection.Enemies.Radius)
@@ -731,7 +659,6 @@ namespace Oxide.Plugins
                         if (threats[detection.Enemies.Threat].Contains(potentialTarget))
                             return;
                         threats[detection.Enemies.Threat].Add(potentialTarget);
-                        //threatRating = detection.Enemies.Threat;
                     }
                 }
                 else if (potentialTarget is BaseNpc)
@@ -741,17 +668,15 @@ namespace Oxide.Plugins
                         if (threats[detection.Animals.Threat].Contains(potentialTarget))
                             return;
                         threats[detection.Animals.Threat].Add(potentialTarget);
-                        //threatRating = detection.Animals.Threat;
                     }
                 }
-                else if (potentialTarget is BaseCar || potentialTarget is BradleyAPC)
+                else if (potentialTarget is BasicCar || potentialTarget is BradleyAPC)
                 {
                     if (detection.Vehicles.Enabled && threatDistance <= detection.Vehicles.Radius)
                     {
                         if (threats[detection.Vehicles.Threat].Contains(potentialTarget))
                             return;
                         threats[detection.Vehicles.Threat].Add(potentialTarget);
-                        //threatRating = detection.Vehicles.Threat;
                     }
                 }
                 else if (potentialTarget is BaseHelicopter)
@@ -761,13 +686,8 @@ namespace Oxide.Plugins
                         if (threats[detection.Helicopters.Threat].Contains(potentialTarget))
                             return;
                         threats[detection.Helicopters.Threat].Add(potentialTarget);
-                        //threatRating = detection.Helicopters.Threat;
                     }
-                }
-                else return;                
-
-                //if (threatRating < threatLevel)
-                   // CalculateThreatProbability();
+                }                
             }
 
             private void OnTriggerExit(Collider col)
@@ -791,7 +711,7 @@ namespace Oxide.Plugins
 
             private void InitializeSettings()
             {
-                consumeFuel = ins.configData.Options.ConsumeFuel;
+                requiresPower = ins.configData.Options.RequirePower;
                 flicker = ins.configData.Options.Flicker;
                 search = ins.configData.Options.Search;
                 detection = ins.configData.Detection;
@@ -827,11 +747,11 @@ namespace Oxide.Plugins
                     [detection.Vehicles.Threat] = detection.Vehicles.Radius
                 };
 
-                rb = searchLight.gameObject.AddComponent<Rigidbody>();
+                rb = Searchlight.gameObject.AddComponent<Rigidbody>();
                 rb.useGravity = false;
                 rb.isKinematic = true;
 
-                collider = searchLight.gameObject.AddComponent<SphereCollider>();
+                collider = Searchlight.gameObject.AddComponent<SphereCollider>();
                 collider.gameObject.layer = (int)Layer.Reserved1;
                 collider.radius = searchRadius;
                 collider.isTrigger = true;
@@ -842,7 +762,7 @@ namespace Oxide.Plugins
                 int count = 0;
                 for (int i = -40; i <= 40; i += 10)
                 {
-                    searchPattern[count] = searchLight.transform.position + (searchLight.transform.rotation * (new Vector3(Mathf.Cos(i * Mathf.Deg2Rad), -0.3f, Mathf.Sin(i * Mathf.Deg2Rad)) * 30));
+                    searchPattern[count] = Searchlight.transform.position + (Searchlight.transform.rotation * (new Vector3(Mathf.Cos(i * Mathf.Deg2Rad), -0.3f, Mathf.Sin(i * Mathf.Deg2Rad)) * 30));
                     count++;
                 }
             }
@@ -869,7 +789,7 @@ namespace Oxide.Plugins
                         if (potentialTarget == null || potentialTarget.IsDestroyed || !IsObjectVisible(potentialTarget))
                             continue;
 
-                        float distance = Vector3.Distance(searchLight.transform.position, potentialTarget.transform.position);
+                        float distance = Vector3.Distance(Searchlight.transform.position, potentialTarget.transform.position);
 
                         if (distance < threatRadius[list.Key])
                         {
@@ -887,7 +807,7 @@ namespace Oxide.Plugins
                 {
                     if (targetEntity != null)
                     {
-                        if (threatRating < threatLevel || (threatRating == threatLevel && targetDistance < Vector3.Distance(searchLight.transform.position, target.transform.position)))
+                        if (threatRating < threatLevel || (threatRating == threatLevel && targetDistance < Vector3.Distance(Searchlight.transform.position, target.transform.position)))
                             SetAimTarget(target, threatRating);
                     }
                     else SetAimTarget(target, threatRating);
@@ -901,17 +821,17 @@ namespace Oxide.Plugins
                 isSearching = false;
                 targetEntity = target;
 
-                if (searchLight.HasFlag(BaseEntity.Flags.On))
-                    Effect.server.Run(aquiredEffect, searchLight, 0, Vector3.zero, Vector3.zero, null, false);
-                maxTargetDistance = target is BasePlayer ? (RustNET.IsFriendlyPlayer(searchLight.OwnerID, targetEntity.ToPlayer().userID) ? detection.Friends.Radius : detection.Enemies.Radius) : target is BaseNpc ? detection.Animals.Radius : (target is BaseCar || target is BradleyAPC) ? detection.Vehicles.Radius : detection.Helicopters.Radius;
+                if (Searchlight.HasFlag(BaseEntity.Flags.On))
+                    Effect.server.Run(FX_ACQUIRED, Searchlight, 0, Vector3.zero, Vector3.zero, null, false);
+                maxTargetDistance = target is BasePlayer ? (RustNET.IsFriendlyPlayer(Searchlight.OwnerID, targetEntity.ToPlayer().userID) ? detection.Friends.Radius : detection.Enemies.Radius) : target is BaseNpc ? detection.Animals.Radius : (target is BasicCar || target is BradleyAPC) ? detection.Vehicles.Radius : detection.Helicopters.Radius;
                 threatLevel = threatRating;
             }
 
             private void ClearAimTarget()
             {
                 resetSearch = true;
-                if (targetEntity != null && searchLight.HasFlag(BaseEntity.Flags.On))
-                    Effect.server.Run(lostEffect, searchLight, 0, Vector3.zero, Vector3.zero, null, false);
+                if (targetEntity != null && Searchlight.HasFlag(BaseEntity.Flags.On))
+                    Effect.server.Run(FX_LOST, Searchlight, 0, Vector3.zero, Vector3.zero, null, false);
                 targetEntity = null;
                 threatLevel = 10;
             }
@@ -920,7 +840,7 @@ namespace Oxide.Plugins
             {               
                 List<RaycastHit> list = Pool.GetList<RaycastHit>();
 
-                Vector3 castPoint = searchLight.transform.position + (Vector3.up * 1.4f);
+                Vector3 castPoint = Searchlight.transform.position + (Vector3.up * 1.4f);
                 Vector3 aimPoint = AimOffset(obj);                
                 Vector3 direction = aimPoint - castPoint;
                 Vector3 cross = Vector3.Cross(direction.normalized, Vector3.up);
@@ -942,7 +862,7 @@ namespace Oxide.Plugins
                             Pool.FreeList<RaycastHit>(ref list);
                             return true;
                         }
-                        if (foundEntity == searchLight)
+                        if (foundEntity == Searchlight)
                         {
                             num++;
                             continue;
@@ -966,38 +886,23 @@ namespace Oxide.Plugins
                 return aimat.transform.position + new Vector3(0f, 0.3f, 0f);
             }
             
-            public bool HasFuel()
-            {
-                Item slot = searchLight.inventory.GetSlot(0);
-                if (consumeFuel)
-                {                    
-                    if (slot == null || slot.info != searchLight.fuelType)
-                        return false;
-                }
-                else
-                {
-                    if (slot == null || slot.info != searchLight.fuelType || slot.amount < 1)
-                        ItemManager.Create(searchLight.fuelType, 1, 0).MoveToContainer(searchLight.inventory);
-                }
-                return true;
-            }
-                      
             public void ToggleAutomation(bool status)
             {
                 if (isDisabled || enabled == status)
                     return;
 
+                if (requiresPower)
+                {
+                    if (!Searchlight.HasFlag(BaseEntity.Flags.Reserved8))
+                        return;
+                }
+                else Searchlight.SetFlag(BaseEntity.Flags.Reserved8, status);
+
                 enabled = status;
 
-                if (status)
-                {
-                    Effect.server.Run(onlineEffect, searchLight, 0, Vector3.zero, Vector3.zero, null, false);
-                    Item slot = searchLight.inventory.GetSlot(0);
-                    if (slot == null)
-                        ItemManager.Create(searchLight.fuelType, 1, 0).MoveToContainer(searchLight.inventory);
-                }
-                else Effect.server.Run(offlineEffect, searchLight, 0, Vector3.zero, Vector3.zero, null, false);
-                searchLight.SetFlag(BaseEntity.Flags.On, status);
+                Effect.server.Run(status ? FX_ONLINE : FX_OFFLINE, Searchlight, 0, Vector3.zero, Vector3.zero, null, false);                    
+                
+                Searchlight.SetFlag(BaseEntity.Flags.On, status);
             }
 
             public void AdjustLightRotation(float rotation)
@@ -1006,8 +911,8 @@ namespace Oxide.Plugins
                 if (enabled)
                     ToggleAutomation(false);
 
-                searchLight.transform.eulerAngles = new Vector3(0, rotation - 90, 0);
-                searchLight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+                Searchlight.transform.eulerAngles = new Vector3(0, rotation - 90, 0);
+                Searchlight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
 
                 if (search.Enabled)
                 {
@@ -1021,7 +926,7 @@ namespace Oxide.Plugins
                     ToggleAutomation(true);
             }
 
-            public void SetController(Controller controller) => this.controller = controller;
+            public void SetController(Controller controller) => this.Controller = controller;
 
             public bool IsEnabled()
             {
@@ -1030,10 +935,11 @@ namespace Oxide.Plugins
 
             public void ToggleSearchAutomation(bool status)
             {
+                print($"toggle3 {status}");
                 if (status)
                 {
                     isDisabled = false;
-                    if (controller == null)
+                    if (Controller == null)
                     {
                         if (!enabled && ins.automationEnabled)                        
                             ToggleAutomation(true);
@@ -1041,14 +947,16 @@ namespace Oxide.Plugins
                 }
                 else
                 {
+                    print($"toggle4 {enabled} && {Controller == null}");
                     isDisabled = true;
-                    if (enabled && controller == null)
+                    if (enabled && Controller == null)
                     {
+                        print("toggle ioff");
                         enabled = false;
-                        if (searchLight.HasFlag(BaseEntity.Flags.On))
+                        if (Searchlight.HasFlag(BaseEntity.Flags.On))
                         {
-                            searchLight.SetFlag(BaseEntity.Flags.On, false);
-                            searchLight.SendNetworkUpdate();
+                            Searchlight.SetFlag(BaseEntity.Flags.On, false);
+                            Searchlight.SendNetworkUpdate();
                         }
                     }
                 }
@@ -1062,7 +970,7 @@ namespace Oxide.Plugins
 
             public LightData GetLightData()
             {
-                if (searchLight == null || searchLight.IsDestroyed)
+                if (Searchlight == null || Searchlight.IsDestroyed)
                     return null;
 
                 return new LightData(this);
@@ -1077,7 +985,7 @@ namespace Oxide.Plugins
                 public LightData() { }
                 public LightData(LightManager manager)
                 {
-                    lightId = manager.searchLight.net.ID;
+                    lightId = manager.Searchlight.net.ID;
                     terminalId = manager.terminalId;
                     lightName = manager.lightName;
                 }
@@ -1112,23 +1020,23 @@ namespace Oxide.Plugins
                     return;
 
                 InputState input = player.serverInput; 
-                if (manager != null && manager.controller == this)
+                if (manager != null && manager.Controller == this)
                 {
                     if (input.WasJustPressed(BUTTON.FIRE_PRIMARY))
                     {
                         lightsOn = !lightsOn;
                         if (lightsOn)
                         {
-                            if (manager.HasFuel())
-                                manager.searchLight.SetFlag(BaseEntity.Flags.On, true);
+                            if (manager.Searchlight.IsPowered())
+                                manager.Searchlight.SetFlag(BaseEntity.Flags.On, true);
                         }
-                        else manager.searchLight.SetFlag(BaseEntity.Flags.On, false);
+                        else manager.Searchlight.SetFlag(BaseEntity.Flags.On, false);
                     }
                   
                     Vector3 aimTarget = player.transform.position + (Quaternion.Euler(input.current.aimAngles) * (Vector3.forward * 10));
                     
-                    manager.searchLight.SetTargetAimpoint(aimTarget);
-                    manager.searchLight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+                    manager.Searchlight.SetTargetAimpoint(aimTarget);
+                    manager.Searchlight.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
                 }
 
                 if (input.WasJustPressed(BUTTON.USE))
@@ -1153,7 +1061,7 @@ namespace Oxide.Plugins
                 player.SetPlayerFlag(BasePlayer.PlayerFlags.Spectating, false);
                 player.SetPlayerFlag(BasePlayer.PlayerFlags.ThirdPersonViewmode, false);
 
-                if (manager != null && manager.controller == this)
+                if (manager != null && manager.Controller == this)
                     manager.SetController(null);
                 base.OnDestroy();
             }
@@ -1167,15 +1075,15 @@ namespace Oxide.Plugins
             public void SetSpectateTarget(int spectateIndex)
             {
                 this.spectateIndex = spectateIndex;
-                manager = link.managers[spectateIndex];
+                manager = link.Managers[spectateIndex];
 
-                player.SendEntitySnapshot(manager.searchLight);
+                player.SendEntitySnapshot(manager.Searchlight);
                 player.gameObject.Identity();
                 //player.SetParent(manager.searchLight, 0);
 
-                RustNET.MovePosition(player, manager.searchLight.transform.position + (Vector3.up * 1.5f), false);
+                RustNET.MovePosition(player, manager.Searchlight.transform.position + (Vector3.up * 1.5f), false);
 
-                if (manager.controller == null)                
+                if (manager.Controller == null)                
                     manager.SetController(this);                
                 else player.ChatMessage(ins.msg("Warning.InUse", player.userID));
 
@@ -1189,15 +1097,15 @@ namespace Oxide.Plugins
 
                 int newIndex = spectateIndex + index;
 
-                if (newIndex > link.managers.Count - 1)
+                if (newIndex > link.Managers.Count - 1)
                     newIndex = 0;
                 else if (newIndex < 0)
-                    newIndex = link.managers.Count - 1;
+                    newIndex = link.Managers.Count - 1;
 
                 if (spectateIndex == newIndex)
                     return;
 
-                if (manager.controller == this)                
+                if (manager.Controller == this)                
                     manager.SetController(null);
 
                 manager = null;
@@ -1242,9 +1150,9 @@ namespace Oxide.Plugins
                 player.InvokeRepeating("InventoryUpdate", 1f, 0.1f * UnityEngine.Random.Range(0.99f, 1.01f));
                 player.Command("client.camoffset", new object[] { new Vector3(0, 1.2f, 0) });
 
-                CuiHelper.DestroyUi(player, ASUI_Overlay);
+                CuiHelper.DestroyUi(player, ASUI_OVERLAY);
 
-                if (manager.controller == this)                
+                if (manager.Controller == this)                
                     manager.SetController(null);                
 
                 if (!isDead)
@@ -1264,13 +1172,13 @@ namespace Oxide.Plugins
                 if (!ins.configData.Management.Remote.Overlay)
                     return;
 
-                CuiElementContainer container = RustNET.UI.Container("0 0 0 0", "0 0", "1 1", false, "Under", ASUI_Overlay);
-                RustNET.UI.Image(ref container, ins.GetImage("searchlightoverlay"), "0 0", "1 1", ASUI_Overlay);
+                CuiElementContainer container = RustNET.UI.Container("0 0 0 0", "0 0", "1 1", false, "Under", ASUI_OVERLAY);
+                RustNET.UI.Image(ref container, ins.GetImage("searchlightoverlay"), "0 0", "1 1", ASUI_OVERLAY);
 
-                RustNET.UI.Panel(ref container, "0 0 0 0.4", "0.82 0.9", "0.96 0.94", ASUI_Overlay);
-                RustNET.UI.Label(ref container, string.IsNullOrEmpty(manager.lightName) ? string.Format(ins.msg("UI.SearchlightName", player.userID), spectateIndex + 1) : manager.lightName, 13, "0.82 0.9", "0.96 0.94", TextAnchor.MiddleCenter, ASUI_Overlay);
+                RustNET.UI.Panel(ref container, "0 0 0 0.4", "0.82 0.9", "0.96 0.94", ASUI_OVERLAY);
+                RustNET.UI.Label(ref container, string.IsNullOrEmpty(manager.lightName) ? string.Format(ins.msg("UI.SearchlightName", player.userID), spectateIndex + 1) : manager.lightName, 13, "0.82 0.9", "0.96 0.94", TextAnchor.MiddleCenter, ASUI_OVERLAY);
 
-                CuiHelper.DestroyUi(player, ASUI_Overlay);
+                CuiHelper.DestroyUi(player, ASUI_OVERLAY);
                 CuiHelper.AddUi(player, container);
             }
         }
@@ -1302,14 +1210,11 @@ namespace Oxide.Plugins
                     if (configData.Management.Remote.ToggleEnabled)
                     {
                         bool isEnabled = manager.IsEnabled();
-                        RustNET.UI.Button(ref container, RustNET.uiColors[RustNET.Colors.Button], isEnabled ? RustNET.msg("UI.Enable", player.userID) : RustNET.msg("UI.Disable", player.userID), 11, $"0.32 {0.725f - (count * 0.04f)}", $"0.53 {0.755f - (count * 0.04f)}", $"automatedsearchlights.toggle {manager.searchLight.net.ID} {terminalId} {page} {!isEnabled}");
+                        RustNET.UI.Button(ref container, RustNET.uiColors[RustNET.Colors.Button], isEnabled ? RustNET.msg("UI.Enable", player.userID) : RustNET.msg("UI.Disable", player.userID), 11, $"0.32 {0.725f - (count * 0.04f)}", $"0.53 {0.755f - (count * 0.04f)}", $"automatedsearchlights.toggle {manager.Searchlight.net.ID} {terminalId} {page} {!isEnabled}");
                     }
 
-                    if (configData.Management.Remote.AccessInventory)
-                        RustNET.UI.Button(ref container, RustNET.uiColors[RustNET.Colors.Button], RustNET.msg("UI.Inventory", player.userID), 11, $"0.54 {0.725f - (count * 0.04f)}", $"0.75 {0.755f - (count * 0.04f)}", $"automatedsearchlights.inventory {manager.searchLight.net.ID} {terminalId}");
-
                     if (configData.Management.Remote.RemoteControl)
-                        RustNET.UI.Button(ref container, RustNET.uiColors[RustNET.Colors.Button], RustNET.msg("UI.Control", player.userID), 11, $"0.76 {0.725f - (count * 0.04f)}", $"0.96 {0.755f - (count * 0.04f)}", $"automatedsearchlights.control {manager.searchLight.net.ID} {terminalId}");
+                        RustNET.UI.Button(ref container, RustNET.uiColors[RustNET.Colors.Button], RustNET.msg("UI.Control", player.userID), 11, $"0.54 {0.725f - (count * 0.04f)}", $"0.75 {0.755f - (count * 0.04f)}", $"automatedsearchlights.control {manager.Searchlight.net.ID} {terminalId}");
 
                     count++;
                 }
@@ -1343,18 +1248,6 @@ namespace Oxide.Plugins
             RustNET.ins.DisplayToPlayer(player, arg.GetInt(1), Title, arg.GetInt(2));            
         }
 
-        [ConsoleCommand("automatedsearchlights.inventory")]
-        private void ccmdAccessInventory(ConsoleSystem.Arg arg)
-        {
-            BasePlayer player = arg.Connection.player as BasePlayer;
-            if (player == null)
-                return;
-
-            CuiHelper.DestroyUi(player, RustNET.RustNET_Panel);
-
-            OpenInventory(player, arg.GetUInt(0), arg.GetInt(1));
-        }
-
         [ConsoleCommand("automatedsearchlights.control")]
         private void ccmdControl(ConsoleSystem.Arg arg)
         {
@@ -1378,7 +1271,9 @@ namespace Oxide.Plugins
         [ChatCommand("sl")]
         private void cmdSL(BasePlayer player, string command, string[] args)
         {
-            if (!permission.UserHasPermission(player.UserIDString, permUse)) return;
+            if (!permission.UserHasPermission(player.UserIDString, PERM_USE)) 
+                return;
+
             if (args.Length == 0)
             {
                 SendReply(player, $"<color=#ce422b>{Title}</color><color=#939393>  v{Version}  -</color> <color=#ce422b>{Author} @ www.chaoscode.io</color>");
@@ -1464,23 +1359,26 @@ namespace Oxide.Plugins
                                 return;
                             }
 
-                            BuildingManager.Building building = link.terminal.parentEntity.GetBuilding();
-                            if (building == null)
+                            if (!link.IsPublicLink)
                             {
-                                SendReply(player, msg("Error.NoBuilding", player.userID));
-                                return;
-                            }
+                                BuildingManager.Building building = link.terminal.ParentEntity.GetBuilding();
+                                if (building == null)
+                                {
+                                    SendReply(player, msg("Error.NoBuilding", player.userID));
+                                    return;
+                                }
 
-                            if (!building.GetDominatingBuildingPrivilege().IsAuthed(player))
-                            {
-                                SendReply(player, msg("Error.NoPrivilege", player.userID));
-                                return;
-                            }
+                                if (!building.GetDominatingBuildingPrivilege()?.IsAuthed(player) ?? false)
+                                {
+                                    SendReply(player, msg("Error.NoPrivilege", player.userID));
+                                    return;
+                                }
 
-                            if (Vector3.Distance(searchLight.transform.position, link.terminal.droppedItem.transform.position) > configData.Management.DistanceFromTerminal)
-                            {
-                                SendReply(player, msg("Error.Distance", player.userID));
-                                return;
+                                if (Vector3.Distance(searchLight.transform.position, link.terminal.DroppedItem.transform.position) > configData.Management.DistanceFromTerminal)
+                                {
+                                    SendReply(player, msg("Error.Distance", player.userID));
+                                    return;
+                                }
                             }
 
                             LinkManager.LightLink lightLink = linkManager.GetLinkOf(terminalId);
@@ -1489,7 +1387,7 @@ namespace Oxide.Plugins
                             else
                             {
                                 int lightLimit = GetMaxLights(player.userID);
-                                if (!permission.UserHasPermission(player.UserIDString, permIgnore) && lightLink.managers.Count >= lightLimit)
+                                if (!permission.UserHasPermission(player.UserIDString, PERM_IGNORE) && lightLink.Managers.Count >= lightLimit)
                                 {
                                     SendReply(player, msg("Error.Limit", player.userID));
                                     return;
@@ -1527,10 +1425,10 @@ namespace Oxide.Plugins
                             return;
                         }
 
-                        if (manager.controller != null)
-                            link.CloseLink(manager.controller);
+                        if (manager.Controller != null)
+                            link.CloseLink(manager.Controller);
 
-                        link.managers.Remove(manager);
+                        link.Managers.Remove(manager);
                         UnityEngine.Object.Destroy(manager);
 
                         SaveData();
@@ -1608,8 +1506,10 @@ namespace Oxide.Plugins
         {
             [JsonProperty(PropertyName = "Detection Options")]
             public DetectionOptions Detection { get; set; }
+
             [JsonProperty(PropertyName = "Management Options")]
             public LightManagement Management { get; set; }
+
             [JsonProperty(PropertyName = "Light Options")]
             public LightOptions Options { get; set; }            
 
@@ -1617,12 +1517,16 @@ namespace Oxide.Plugins
             {               
                 [JsonProperty(PropertyName = "Animals")]
                 public DetectSettings Animals { get; set; }
+
                 [JsonProperty(PropertyName = "Enemy players and NPCs")]
                 public DetectSettings Enemies { get; set; }
+
                 [JsonProperty(PropertyName = "Friends and owner")]
                 public DetectSettings Friends { get; set; }
+
                 [JsonProperty(PropertyName = "Cars and tanks")]
                 public DetectSettings Vehicles { get; set; }
+
                 [JsonProperty(PropertyName = "Helicopters")]
                 public DetectSettings Helicopters { get; set; }
 
@@ -1630,8 +1534,10 @@ namespace Oxide.Plugins
                 {
                     [JsonProperty(PropertyName = "Enable this detection type")]
                     public bool Enabled { get; set; }
+
                     [JsonProperty(PropertyName = "Range of detection")]
                     public float Radius { get; set; }
+
                     [JsonProperty(PropertyName = "Threat rating for priority targeting (1 - 5, 1 being the highest threat)")]
                     public int Threat { get; set; }
                 }
@@ -1640,12 +1546,16 @@ namespace Oxide.Plugins
             {
                 [JsonProperty(PropertyName = "Automatically register light to terminal when placed (if meets other requirements)")]
                 public bool AutoRegister { get; set; }
+
                 [JsonProperty(PropertyName = "Allow lights to be set without requiring a terminal")]
                 public bool NoTerminal { get; set; }
+
                 [JsonProperty(PropertyName = "Maximum allowed searchlights per base (Permission | Amount)")]
                 public Dictionary<string, int> Max { get; set; }
+
                 [JsonProperty(PropertyName = "Maximum distance a searchlight controller can be set away from the terminal")]
                 public float DistanceFromTerminal { get; set; }
+
                 [JsonProperty(PropertyName = "Remote Settings")]
                 public RemoteOptions Remote { get; set; }
 
@@ -1653,32 +1563,40 @@ namespace Oxide.Plugins
                 {
                     [JsonProperty(PropertyName = "Allow players to cycle through all linked searchlights")]
                     public bool CanCycle { get; set; }
+
                     [JsonProperty(PropertyName = "Can players toggle searchlight automation")]
                     public bool ToggleEnabled { get; set; }
+
                     [JsonProperty(PropertyName = "Can players control the searchlight remotely")]
                     public bool RemoteControl { get; set; }
-                    [JsonProperty(PropertyName = "Can players access the searchlight inventory")]
-                    public bool AccessInventory { get; set; }
+
                     [JsonProperty(PropertyName = "Display camera overlay UI")]
                     public bool Overlay { get; set; }
+
                     [JsonProperty(PropertyName = "Camera overlay image URL")]
                     public string OverlayImage { get; set; }
+
                     [JsonProperty(PropertyName = "Searchlight icon URL for RustNET menu")]
                     public string RustNETIcon { get; set; }
                 }
             }
             public class LightOptions
             {
-                [JsonProperty(PropertyName = "Consume fuel when light is automated")]
-                public bool ConsumeFuel { get; set; }
+                [JsonProperty(PropertyName = "Require power for light automation")]
+                public bool RequirePower { get; set; }
+
                 [JsonProperty(PropertyName = "Sunrise hour")]
                 public float Sunrise { get; set; }
+
                 [JsonProperty(PropertyName = "Sunset hour")]
                 public float Sunset { get; set; }
+
                 [JsonProperty(PropertyName = "Only automate lights at night time")]
                 public bool NightOnly { get; set; }
+
                 [JsonProperty(PropertyName = "Search mode")]
                 public SearchMode Search { get; set; }
+
                 [JsonProperty(PropertyName = "Flicker mode")]
                 public FlickerMode Flicker { get; set; }
 
@@ -1686,6 +1604,7 @@ namespace Oxide.Plugins
                 {
                     [JsonProperty(PropertyName = "Enable search mode when no targets are visable")]
                     public bool Enabled { get; set; }
+
                     [JsonProperty(PropertyName = "Rotation speed of search mode")]
                     public float Speed { get; set; }
                 }
@@ -1694,6 +1613,7 @@ namespace Oxide.Plugins
                 {
                     [JsonProperty(PropertyName = "Enable flickering lights when damaged")]
                     public bool Enabled { get; set; }
+
                     [JsonProperty(PropertyName = "Percentage of health before flickering starts")]
                     public float Health { get; set; }
                 }
@@ -1764,7 +1684,6 @@ namespace Oxide.Plugins
                     NoTerminal = false,
                     Remote = new ConfigData.LightManagement.RemoteOptions
                     {
-                        AccessInventory = true,
                         CanCycle = true,
                         RemoteControl = true,
                         ToggleEnabled = true,
@@ -1775,7 +1694,7 @@ namespace Oxide.Plugins
                 },
                 Options = new ConfigData.LightOptions
                 {
-                    ConsumeFuel = false,
+                    RequirePower = false,
                     Flicker = new ConfigData.LightOptions.FlickerMode
                     {
                         Enabled = true,
@@ -1816,6 +1735,9 @@ namespace Oxide.Plugins
 
             if (configData.Version < new VersionNumber(0, 2, 13))
                 configData.Management.Remote.CanCycle = baseConfig.Management.Remote.CanCycle;
+
+            if (configData.Version < new VersionNumber(0, 2, 27))
+                configData.Options.RequirePower = true;
             
             configData.Version = Version;
             PrintWarning("Config update completed!");
@@ -1828,7 +1750,8 @@ namespace Oxide.Plugins
         {
             if (storedData == null || storedData.registeredSearchlights == null)
                 storedData = new StoredData();
-            storedData.registeredSearchlights = LightManager.allManagers?.Where(x => x != null && x.searchLight != null && !x.searchLight.IsDestroyed)?.Select(x => x.GetLightData())?.ToArray() ?? new LightManager.LightData[0];
+
+            storedData.registeredSearchlights = LightManager.allManagers?.Where(x => x != null && x.Searchlight != null && !x.Searchlight.IsDestroyed)?.Select(x => x.GetLightData())?.ToArray() ?? new LightManager.LightData[0];
             data.WriteObject(storedData);
         }
 
@@ -1892,7 +1815,7 @@ namespace Oxide.Plugins
             ["UI.Select.Searchlight"] = "> <color=#28ffa6>Searchlights</color> <",
             ["UI.NoSearchlights"] = "No searchlights registered to this terminal",
             ["UI.Help.Title"] = "> <color=#28ffa6>Searchlight Help Menu</color> <",
-            ["UI.Help"] = "> To register a searchlight you will need the terminal ID noted above.\n\n> Creating a Automated Searchlight\nStep 1. Deploy a searchlight in or around your base.\nStep 2. Look at your searchlight and type <color=#28ffa6>/sl add <terminal ID></color> replacing <terminal ID> with the ID of the terminal you are using.\n\nYour searchlight is now registered to the terminal, It will search for targets at night time and can be accessed remotely via this control panel.\nYou can also toggle the automation on or off and access the searchlight inventory.\n\n> Removing a searchlight and restoring it to default\nTo remove a searchlight look at it and type <color=#28ffa6>/sl remove</color>. This will remove its automation and remote functionality and restore it to default",
+            ["UI.Help"] = "> To register a searchlight you will need the terminal ID noted above.\n\n> Creating a Automated Searchlight\nStep 1. Deploy a searchlight in or around your base.\nStep 2. Look at your searchlight and type <color=#28ffa6>/sl add <terminal ID></color> replacing <terminal ID> with the ID of the terminal you are using.\n\nYour searchlight is now registered to the terminal, It will search for targets at night time and can be accessed remotely via this control panel.\n\n> Removing a searchlight and restoring it to default\nTo remove a searchlight look at it and type <color=#28ffa6>/sl remove</color>. This will remove its automation and remote functionality and restore it to default",
         };
         #endregion        
     }

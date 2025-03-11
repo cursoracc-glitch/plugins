@@ -9,11 +9,12 @@ using System.Collections.Generic;
 
 namespace Oxide.Plugins
 {
-    [Info("Skyfall", "Colon Blow", "1.0.14")]
+    [Info("Skyfall", "Colon Blow", "1.0.11")]
     class Skyfall : RustPlugin
     {
 
-        // added Thermals over player buildings
+        // added option to not allow players to jump out of parachute to free fall
+        // added config option for map offset when finding jump point
 
         #region Loadup
 
@@ -45,29 +46,35 @@ namespace Oxide.Plugins
 
         #region Configuration
 
-        bool enableLocalRespawn = false;
-        float localRespawnDistance = 300f;
-        static float parchuteFwdSpeed = 15f;
-        static float parachuteDownSpeed = 15f;
-        static float groundReleaseHeight = 10f;
+        private bool enableLocalRespawn = false;
+        private static float localRespawnDistance = 300;
 
-        bool enableThermals = true;
-        static float thermalsHeight = 150f;
+        private static float parchuteFwdSpeed = 15f;
+        private static float parachuteDownSpeed = 15f;
 
-        float ChaosDropCountdown = 10f;
-        static float FlightDeck = 1000f;
-        static float GlobalMapOffset = 500f;
-        bool UseCooldown = true;
-        float SkyFallCoolDown = 600f;
-        bool AllowFreeFall = false;
-        static bool ForceDismountFromPlane = true;
-        static float SkyFallPlaneDespawn = 100f;
-        bool DoSkyfallOnFirstTime = true;
-        static float ForceJumpTime = 60f;
-        bool EnableRespawnButton = true;
-        bool UseRandomRespawn = true;
-        static ulong wallskinid = 1320948157;
-        bool Changed;
+        private float ChaosDropCountdown = 10f;
+
+        private static float FlightDeck = 1000f;
+        private static float GlobalMapOffset = 500f;
+
+        private bool UseCooldown = true;
+        static float SkyFallCoolDown = 600f;
+
+        private bool AllowFreeFall = false;
+
+        private static bool ForceDismountFromPlane = true;
+        private static float SkyFallPlaneDespawn = 100f;
+
+        private bool DoSkyfallOnFirstTime = true;
+
+        private static float ForceJumpTime = 60f;
+
+        private static bool EnableRespawnButton = true;
+        private static bool UseRandomRespawn = true;
+
+        private static ulong wallskinid = 1320948157;
+
+        private bool Changed;
 
         void LoadVariables()
         {
@@ -84,10 +91,7 @@ namespace Oxide.Plugins
 
         void LoadConfigVariables()
         {
-            CheckCfgFloat("Global - Map size Offset when finding global drop position (higher number means closer to center of map, less chance over water) ", ref GlobalMapOffset);
-            CheckCfgFloat("Global - Ground Release Height for Player Parachute (default is 10.0) ", ref groundReleaseHeight);
-            CheckCfg("Global - Thermals - Enable Checks for buildings under player ? ", ref enableThermals);
-            CheckCfgFloat("Global - Thermals - Check for buildings under player starting at this height from ground (default is 150.0) : ", ref thermalsHeight);
+            CheckCfg("Global - Map size Offset when finding global drop position (higher number means closer to center of map, less chance over water) ", ref GlobalMapOffset);
 
             CheckCfgUlong("Logo - Skin ID for Back wall Skyfall plane : ", ref wallskinid);
             CheckCfg("Cooldown - Use Skyfall pack cooldown ? ", ref UseCooldown);
@@ -102,7 +106,7 @@ namespace Oxide.Plugins
             CheckCfg("Respawn - Enable Button on respawn screen.(Will do random TP in air with Chute attached) ? ", ref EnableRespawnButton);
             CheckCfg("Respawn - Use Random Respawn location when pressing Skyfall respawn button ? ", ref UseRandomRespawn);
             CheckCfg("Respawn - Local Skyfall Respawn - Enable Skyfall respawn to only drop you within a local radius of corpse ?", ref enableLocalRespawn);
-            CheckCfgFloat("Respawn - Local Skyfall Respawn - Max Distance from corpse ", ref localRespawnDistance);
+            CheckCfg("Respawn - Local Skyfall Respawn - Max Distance from corpse ", ref localRespawnDistance);
 
             CheckCfgFloat("Plane - Skyfall plane will despawn if no players are on board after this long : ", ref SkyFallPlaneDespawn);
             CheckCfgFloat("Parachute - Downward speed when using parachute : ", ref parachuteDownSpeed);
@@ -291,8 +295,7 @@ namespace Oxide.Plugins
         Vector3 FindSpawnPoint()
         {
             Vector3 spawnpoint = new Vector3();
-
-            float spawnline = Convert.ToSingle((ConVar.Server.worldsize) / 2) - GlobalMapOffset;
+            float spawnline = ((ConVar.Server.worldsize) / 2) - GlobalMapOffset;
 
             float spawnminx = spawnline;
             float spawnmaxx = spawnline;
@@ -397,12 +400,10 @@ namespace Oxide.Plugins
             if (player == null) return;
             if (player.isMounted) { SendReply(player, "You are already Mounted"); return; }
             if (cooldownlist.Contains(player.userID)) { PrintToChat(player, lang.GetMessage("undercooldown", this, player.UserIDString)); return; }
-            item.RemoveFromWorld();
-            item.RemoveFromContainer();
-            item.Remove(0f);
             if (UseCooldown) { CooldownAddPlayerID(player); }
             AddPlayerID(player);
             ActivateJumpPlane(player);
+            if (item != null) item.Remove(0f);
         }
 
         public void DoRespawnAt(BasePlayer player, Vector3 position, Quaternion rotation, bool isrespawn = false)
@@ -746,7 +747,7 @@ namespace Oxide.Plugins
                 {
                     plane.enabled = false;
                     plane.Spawn();
-                    plane.SetParent(cpentity);
+                    plane.SetParent(cpentity, 0);
                 }
                 string chairprefab = "assets/prefabs/deployable/chair/chair.deployed.prefab";
                 jumpchair1 = GameManager.server.CreateEntity(chairprefab, cpentitypos, Quaternion.identity, true);
@@ -955,23 +956,6 @@ namespace Oxide.Plugins
 
                 plane.transform.position = cpentity.transform.position + new Vector3(0f, -5f, 0f);
                 plane.transform.rotation = cpentity.transform.rotation;
-
-                RefreshAll();
-            }
-
-            public void RefreshAll()
-            {
-                cpentity.transform.hasChanged = true;
-
-                if (cpentity.children != null)
-                    for (int i = 0; i < cpentity.children.Count; i++)
-                    {
-                        cpentity.children[i].transform.hasChanged = true;
-                        cpentity.children[i].SendNetworkUpdateImmediate(false);
-                        cpentity.children[i].UpdateNetworkGroup();
-                    }
-                cpentity.SendNetworkUpdateImmediate();
-                cpentity.UpdateNetworkGroup();
             }
 
             void OnDestroy()
@@ -1019,35 +1003,16 @@ namespace Oxide.Plugins
                 if (input.WasJustReleased(BUTTON.LEFT)) rotleft = false;
             }
 
-            bool CheckForThermals(Vector3 currentpos)
-            {
-                if (Physics.Raycast(new Ray(currentpos, Vector3.down), thermalsHeight, 2097152))
-                {
-                    return true;
-                }
-                return false;
-            }
-
             void FixedUpdate()
             {
                 if (!PlayerIsMounted() || mount == null) { OnDestroy(); return; }
-                if (Physics.Raycast(new Ray(mount.transform.position, Vector3.down), groundReleaseHeight, layerMask))
+                if (Physics.Raycast(new Ray(mount.transform.position, Vector3.down), 3f, layerMask))
                 {
                     OnDestroy();
                     return;
                 }
                 if (rotright) mount.transform.eulerAngles += new Vector3(0, 2, 0);
                 else if (rotleft) mount.transform.eulerAngles += new Vector3(0, -2, 0);
-
-                if (_instance.enableThermals && CheckForThermals(mount.transform.position))
-                {
-                    mount.transform.localPosition += ((transform.forward * parchuteFwdSpeed * 4f) * Time.deltaTime);
-                    mount.transform.position = Vector3.MoveTowards(mount.transform.position, mount.transform.position + Vector3.up, (parachuteDownSpeed * 4f) * Time.deltaTime);
-                    mount.transform.hasChanged = true;
-                    mount.SendNetworkUpdateImmediate();
-                    mount.UpdateNetworkGroup();
-                    return;
-                }
 
                 if (moveforward) mount.transform.localPosition += ((transform.forward * parchuteFwdSpeed) * Time.deltaTime);
 
@@ -1087,7 +1052,7 @@ namespace Oxide.Plugins
             void FixedUpdate()
             {
                 if (player == null) { OnDestroy(); return; }
-                if (Physics.Raycast(new Ray(player.transform.position, Vector3.down), 3f, layerMask))
+                if (Physics.Raycast(new Ray(player.transform.position, Vector3.down), 10f, layerMask))
                 {
                     OnDestroy();
                     return;
