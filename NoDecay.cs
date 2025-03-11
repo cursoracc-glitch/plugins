@@ -1,321 +1,270 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-
-using Rust;
-
-using UnityEngine;
-
-using Newtonsoft.Json;
+using System.Text;
+using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("No Decay", "0x89A", "1.4.6")]
-    [Description("Scales or disables decay of items and deployables")]
-    class NoDecay : CovalencePlugin
+    [Info("NoDecay", "Deicide666ra/Piarb", "1.0.13", ResourceId = 1160)]
+    [Description("Scales or disables decay of items")]
+
+    class NoDecay : RustPlugin
     {
-        private Configuration config;
+        private float c_twigMultiplier;
+        private float c_woodMultiplier;
+        private float c_stoneMultiplier;
+        private float c_sheetMultiplier;
+        private float c_armoredMultiplier;
+		
+        private float c_campfireMultiplier;
+        private float c_highWoodWallMultiplier;
+        private float c_highStoneWallMultiplier;
+		private float c_barricadeMultiplier;
+		private float c_trapMultiplier;
+		private float c_deployablesMultiplier;
+		private float c_boxMultiplier;
+		private float c_furnaceMultiplier;
+		
+		private bool c_outputToRcon;
 
-        void Init() => permission.RegisterPermission(config.General.permission, this);
+        private bool g_configChanged;
+		private string entity_name;
 
-        void Output(string text)
+        void Loaded() => LoadConfigValues();
+        protected override void LoadDefaultConfig() => Puts("New configuration file created.");
+
+        void LoadConfigValues()
         {
-            if (config.General.Output.rconOutput) Puts(text);
-            if (config.General.Output.logToFile) LogToFile(config.General.Output.logFileName, text, this);
-        }
+            c_twigMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "twigMultiplier", 1.0));
+            c_woodMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "woodMultiplier", 0.0));
+            c_stoneMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "stoneMultiplier", 0.0));
+            c_sheetMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "sheetMultiplier", 0.0));
+            c_armoredMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "armoredMultiplier", 0.0));
+			
+			c_deployablesMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "deployablesMultiplier", 0.0));
+			c_boxMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "boxMultiplier", 0.0));
+			c_furnaceMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "furnaceMultiplier", 0.0));
+            c_campfireMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "campfireMultiplier", 0.0));
+			c_barricadeMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "barricadesMultiplier", 0.0));
+			c_trapMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "trapMultiplier", 0.0));
+            c_highWoodWallMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "highWoodWallMultiplier", 0.0));
+            c_highStoneWallMultiplier = Convert.ToSingle(GetConfigValue("Mutipliers", "highStoneWallMultiplier", 0.0));
+			
+            c_outputToRcon = Convert.ToBoolean(GetConfigValue("Debug", "outputToRcon", false));
 
-        #region -Oxide Hooks-
-
-        object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
-        {
-            if (info == null || info.damageTypes == null || entity == null || !info.damageTypes.Has(DamageType.Decay)) return null;
-
-            BuildingPrivlidge priv = entity.GetBuildingPrivilege();
-
-            if (config.General.usePermission && entity.OwnerID != 0 && !permission.UserHasPermission(priv == null ? entity.OwnerID.ToString() : GetOwnerPlayer(priv, entity.OwnerID), config.General.permission))
+            if (g_configChanged)
             {
-                Output(lang.GetMessage("NoPermission", this).Replace("{0}", $"({entity.OwnerID})"));
-
-                return null;
-            }
-            else if (config.General.usePermission && !config.General.decayNoOwner && entity.OwnerID == 0) return true;
-
-            if (config.General.CupboardSettings.requireTC && !AnyToolCupboards(entity))
-            {
-                Output(lang.GetMessage("OutOfRange", this).Replace("{0}", entity.ShortPrefabName).Replace("{1}", $"{entity.transform.position}"));
-                return null;
-            }
-
-            if (entity is BuildingBlock)
-            {
-                info.damageTypes.ScaleAll(config.buildingMultipliers[(int)((BuildingBlock)entity).grade]);
-
-                Output(lang.GetMessage("DecayBlocked", this).Replace("{0}", entity.ShortPrefabName).Replace("{1}", $"{entity.transform.position}"));
-                if (!info.hasDamage) return true;
-
-                return null;
-            }
-
-            string matchingType = null;
-            if (config.multipliers.ContainsKey(entity.ShortPrefabName) || IsOfType(entity, out matchingType))
-            {
-                if (config.General.excludeOthers) return null;
-                else
-                {
-                    info.damageTypes.ScaleAll(config.multipliers[matchingType != null ? matchingType : entity.ShortPrefabName]);
-
-                    Output(lang.GetMessage("DecayBlocked", this).Replace("{0}", entity.ShortPrefabName).Replace("{1}", $"{entity.transform.position}"));
-                    if (!info.hasDamage) return true;
-                }
-            }
-
-            if (config.General.disableAll) return true;
-
-            return null;
-        }
-
-        object CanMoveItem(Item item, PlayerInventory playerLoot, uint targetContainer, int targetSlot, int amount)
-        {
-            BaseEntity entity = playerLoot.FindContainer(targetContainer)?.entityOwner;
-
-            if (!(entity is BuildingPrivlidge)) return null;
-
-            bool flag = false;
-
-            //rip target-type conditional expression, fuck C# 7, 9.0 the move
-            switch (item.info.shortname)
-            {
-                case "wood":
-                    if (config.General.CupboardSettings.blockWood) flag = true;
-                    break;
-
-                case "stones":
-                    if (config.General.CupboardSettings.blockStone) flag = true;
-                    break;
-
-                case "metal.fragments":
-                    if (config.General.CupboardSettings.blockMetal) flag = true;
-                    break;
-
-                case "metal.refined":
-                    if (config.General.CupboardSettings.blockHighQ) flag = true;
-                    break;
-            }
-
-            if (flag)
-            {
-                Output(lang.GetMessage("ItemMoveBlocked", this).Replace("{0}", item.info.shortname).Replace("{1}", $"{entity.ShortPrefabName}"));
-                return true;
-            }
-
-            return null;
-        }
-
-        private bool IsOfType(BaseCombatEntity entity, out string matchingType)
-        {
-            matchingType = null;
-
-            foreach (var pair in config.multipliers)
-            {
-                if (pair.Key == entity.GetType()?.Name)
-                {
-                    matchingType = pair.Key;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool AnyToolCupboards(BaseEntity entity)
-        {
-            if (entity is BuildingBlock)
-            {
-                BuildingBlock block = (BuildingBlock)entity;
-
-                BuildingManager.Building building = block?.GetBuilding();
-                if (building != null && building.GetDominatingBuildingPrivilege() != null)
-                    return true;
-            }
-
-            Collider[] hits = Physics.OverlapSphere(entity.transform.position, config.General.CupboardSettings.cupboardRange, Layers.Mask.Deployed);
-
-            if (hits.Length > 0)
-            {
-                for (int i = 0; i < hits.Length; i++)
-                {
-                    if (hits[i]?.ToBaseEntity() is BuildingPrivlidge)
-                        return true;
-                }
-            }
-
-            return false;
-        }
-
-        private string GetOwnerPlayer(BuildingPrivlidge priv, ulong id = 0UL)
-        {
-            if (priv == null || !priv.AnyAuthed()) return string.Empty;
-
-            if (config.General.CupboardSettings.anyAuthed)
-            {
-                for (int i = 0; i < priv.authorizedPlayers.Count; i++)
-                {
-                    var player = priv.authorizedPlayers[i];
-
-                    if (player != null && permission.UserHasPermission(player.userid.ToString(), config.General.permission))
-                        return player.userid.ToString();
-                }
-            }
-            else
-            {
-                var player = priv.authorizedPlayers.Find(x => x.userid == id);
-
-                if (player != null)
-                    return player.userid.ToString();
-            }
-
-            return string.Empty;
-        }
-
-        #endregion
-
-        #region -Configuration-
-
-        private class Configuration
-        {
-            [JsonProperty(PropertyName = "General")]
-            public GeneralSettings General = new GeneralSettings();
-
-            [JsonProperty(PropertyName = "Building grade multipliers")]
-            public TierMultipliers BuildingTiers = new TierMultipliers();
-
-            [JsonProperty(PropertyName = "Other multipliers")]
-            public Dictionary<string, float> multipliers = new Dictionary<string, float>();
-
-            #region -Classes-
-
-            public class GeneralSettings
-            {
-                [JsonProperty(PropertyName = "Disable decay for all entities")]
-                public bool disableAll = false;
-
-                [JsonProperty(PropertyName = "Exclude \"Other Multipliers\"")]
-                public bool excludeOthers = false;
-
-                [JsonProperty(PropertyName = "Use permission")]
-                public bool usePermission = true;
-
-                [JsonProperty(PropertyName = "Decay if there is no owner (and perms enabled)")]
-                public bool decayNoOwner = false;
-
-                [JsonProperty(PropertyName = "Permission")]
-                public string permission = "nodecay.use";
-
-                [JsonProperty(PropertyName = "Output")]
-                public OutputClass Output = new OutputClass();
-
-                [JsonProperty(PropertyName = "Cupboard Settings")]
-                public CupboardSettingsClass CupboardSettings = new CupboardSettingsClass();
-
-                public class OutputClass
-                {
-                    [JsonProperty(PropertyName = "Output to server console")]
-                    public bool rconOutput = false;
-
-                    [JsonProperty(PropertyName = "Log to file")]
-                    public bool logToFile = true;
-
-                    [JsonProperty(PropertyName = "Log file name")]
-                    public string logFileName = "NoDecay-Log";
-                }
-
-                public class CupboardSettingsClass
-                {
-                    [JsonProperty(PropertyName = "Disable No Decay if resources placed in TC")]
-                    public bool disableOnResources = false;
-
-                    [JsonProperty(PropertyName = "Require Tool Cupboard")]
-                    public bool requireTC = false;
-
-                    [JsonProperty(PropertyName = "Any authed on TC")]
-                    public bool anyAuthed = false;
-
-                    [JsonProperty(PropertyName = "Cupboard Range")]
-                    public float cupboardRange = 30f;
-
-                    [JsonProperty(PropertyName = "Block cupboard wood")]
-                    public bool blockWood = false;
-
-                    [JsonProperty(PropertyName = "Block cupboard stone")]
-                    public bool blockStone = false;
-
-                    [JsonProperty(PropertyName = "Block cupbard metal")]
-                    public bool blockMetal = false;
-
-                    [JsonProperty(PropertyName = "Block cupboard high quality")]
-                    public bool blockHighQ = false;
-                }
-            }
-
-            public class TierMultipliers
-            {
-                [JsonProperty(PropertyName = "Twig multiplier")]
-                public float twig = 1f;
-
-                [JsonProperty(PropertyName = "Wood multiplier")]
-                public float wood = 0f;
-
-                [JsonProperty(PropertyName = "Stone multiplier")]
-                public float stone = 0f;
-
-                [JsonProperty(PropertyName = "Sheet Metal multiplier")]
-                public float metal = 0f;
-
-                [JsonProperty(PropertyName = "Armoured multiplier")]
-                public float armoured = 0f;
-            }
-
-            #endregion -Classes-
-
-            [JsonIgnore]
-            public float[] buildingMultipliers;
-        }
-
-        protected override void LoadConfig()
-        {
-            base.LoadConfig();
-            try
-            {
-                config = Config.ReadObject<Configuration>();
-                if (config == null) throw new Exception();
-                config.buildingMultipliers = new float[5] { config.BuildingTiers.twig, config.BuildingTiers.wood, config.BuildingTiers.stone, config.BuildingTiers.metal, config.BuildingTiers.armoured };
+                Puts("Configuration file updated.");
                 SaveConfig();
             }
-            catch
+        }
+
+        object GetConfigValue(string category, string setting, object defaultValue)
+        {
+            var data = Config[category] as Dictionary<string, object>;
+            object value;
+            if (data == null)
             {
-                PrintError("Error loading config, using default values");
-                LoadDefaultConfig();
+                data = new Dictionary<string, object>();
+                Config[category] = data;
+                g_configChanged = true;
+            }
+
+            if (data.TryGetValue(setting, out value)) return value;
+            value = defaultValue;
+            data[setting] = value;
+            g_configChanged = true;
+            return value;
+        }
+
+        [HookMethod("SendHelpText")]
+        private void SendHelpText(BasePlayer player)
+        {
+            var sb = new StringBuilder();
+            sb.Append("<color=yellow>NoDecay 1.0.3</color> Â· Controls decay\n");
+            sb.Append("  Â· ").AppendLine($"twig={c_twigMultiplier} - campfire={c_campfireMultiplier}");
+            sb.Append("  Â· ").Append($"wood ={ c_woodMultiplier} - stone ={ c_stoneMultiplier} - sheet ={ c_sheetMultiplier} - armored ={ c_armoredMultiplier}");
+            player.ChatMessage(sb.ToString());
+        }
+
+        void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo hitInfo)
+        {
+            var tick = DateTime.Now;
+			
+			entity_name = entity.LookupPrefab().name;
+            try
+            {
+                if (!hitInfo.damageTypes.Has(Rust.DamageType.Decay)) return;
+
+                var block = entity as BuildingBlock;
+                if (entity.LookupPrefab().name == "campfire")
+                    ProcessCampfireDamage(hitInfo);
+				else if (entity.LookupPrefab().name == "box.wooden.large" ||
+						entity.LookupPrefab().name == "woodbox_deployed")
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_boxMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay ({entity_name}) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }								
+				else if (entity.LookupPrefab().name.Contains("deployed"))
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_deployablesMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay ({entity_name}) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }
+				else if (entity.LookupPrefab().name.Contains("furnace"))
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_furnaceMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay ({entity_name}) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }								
+				else if (entity.LookupPrefab().name == "WaterBarrel" ||
+						entity.LookupPrefab().name == "jackolantern.angry" ||
+						entity.LookupPrefab().name == "jackolantern.happy" ||
+						entity.LookupPrefab().name == "water_catcher_small" ||
+						entity.LookupPrefab().name == "water_catcher_large")
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_deployablesMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay ({entity_name}) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }												
+				else if (entity.LookupPrefab().name == "beartrap" ||
+						entity.LookupPrefab().name == "landmine" ||
+						entity.LookupPrefab().name == "spikes.floor")
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_trapMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay ({entity_name}) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }												
+                else if (entity.LookupPrefab().name.Contains("barricade"))
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_barricadeMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay ({entity_name}) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }				
+                else if (entity.LookupPrefab().name == "gates.external.high.stone")
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_highStoneWallMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay (high stone gate) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }
+                else if (entity.LookupPrefab().name == "gates.external.high.wood")
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_highWoodWallMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay (high wood gate) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }
+                else if (entity.LookupPrefab().name == "wall.external.high.stone")
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_highStoneWallMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay (high stone wall) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }
+                else if (entity.LookupPrefab().name == "wall.external.high.wood")
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_highWoodWallMultiplier);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay (high wood wall) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }
+                else if (entity.LookupPrefab().name == "mining.pumpjack")
+                {
+                    var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, 0.0f);
+
+                    if (c_outputToRcon)
+                        Puts($"Decay (pumpjack) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+                }
+                else if (block != null)
+                    ProcessBuildingDamage(block, hitInfo);
+                else
+                    Puts($"Unsupported decaying entity detected: {entity.LookupPrefab().name} --- please notify author");
+            }
+            finally
+            {
+                var ms = (DateTime.Now - tick).TotalMilliseconds;
+                if (ms > 10) Puts($"NoDecay.OnEntityTakeDamage took {ms} ms to execute.");
             }
         }
 
-        protected override void LoadDefaultConfig() => config = new Configuration();
-
-        protected override void SaveConfig() => Config.WriteObject(config);
-
-        #endregion -Configuration-
-
-        #region -Localisation-
-
-        protected override void LoadDefaultMessages()
+        void ProcessCampfireDamage(HitInfo hitInfo)
         {
-            lang.RegisterMessages(new Dictionary<string, string>
-            {
-                ["NoPermission"] = "{0} does not have permission",
-                ["ItemMoveBlocked"] = "{0} was blocked from being added to TC at {1}",
-                ["DecayBlocked"] = "Decay was overriden on {0} at {1}",
-                ["OutOfRange"] = "{0} was out of TC range, at {1}",
-            }, this);
+            var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+            hitInfo.damageTypes.Scale(Rust.DamageType.Decay, c_campfireMultiplier);
+            if (c_outputToRcon)
+                Puts($"Decay campfire before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
         }
 
-        #endregion -Localisation-
+        void ProcessBuildingDamage(BuildingBlock block, HitInfo hitInfo)
+        {
+            var multiplier = 1.0f;
+            var isHighWall = block.LookupPrefab().name.Contains("wall.external");
+
+            string type = "other";
+            switch (block.grade)
+            {
+                case BuildingGrade.Enum.Twigs:
+                    multiplier = c_twigMultiplier;
+                    type = "twig";
+                    break;
+                case BuildingGrade.Enum.Wood:
+                    if (isHighWall)
+                    {
+                        multiplier = c_highWoodWallMultiplier;
+                        type = "high wood wall";
+                    }
+                    else
+                    {
+                        multiplier = c_woodMultiplier;
+                        type = "wood";
+                    }
+                    break;
+                case BuildingGrade.Enum.Stone:
+                    if (isHighWall)
+                    {
+                        multiplier = c_highStoneWallMultiplier;
+                        type = "high stone wall";
+                    }
+                    else
+                    {
+                        multiplier = c_stoneMultiplier;
+                        type = "stone";
+                    }
+                    break;
+                case BuildingGrade.Enum.Metal:
+                    multiplier = c_sheetMultiplier;
+                    type = "sheet";
+                    break;
+                case BuildingGrade.Enum.TopTier:
+                    multiplier = c_armoredMultiplier;
+                    type = "armored";
+                    break;
+            };
+
+            var before = hitInfo.damageTypes.Get(Rust.DamageType.Decay);
+            hitInfo.damageTypes.Scale(Rust.DamageType.Decay, multiplier);
+
+            if (c_outputToRcon)
+                Puts($"Decay ({type}) before: {before} after: {hitInfo.damageTypes.Get(Rust.DamageType.Decay)}");
+        }
     }
 }

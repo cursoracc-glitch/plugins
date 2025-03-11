@@ -1,138 +1,43 @@
-﻿using System;
-using System.Collections.Generic;
-using Newtonsoft.Json;
-using Oxide.Core.Plugins;
+using System;
 
 namespace Oxide.Plugins
 {
-    [Info("No Durability", "Wulf/lukespragg/Arainrr", "2.2.5", ResourceId = 1061)]
-    public class NoDurability : RustPlugin
+    [Info("NoDurability", "Wulf/lukespragg", "2.0.0", ResourceId = 1061)]
+    public class NoDurability : CovalencePlugin
     {
-        #region Fields
+        #region Initialization
 
-        [PluginReference] private readonly Plugin ZoneManager, DynamicPVP;
-        private const string PERMISSION_USE = "nodurability.allowed";
-
-        #endregion Fields
-
-        #region Oxide Hooks
-
-        private void Init() => permission.RegisterPermission(PERMISSION_USE, this);
-
-        private void OnLoseCondition(Item item, ref float amount)
+        void Loaded()
         {
-            if (item == null) return;
-            if (configData.itemListIsBlackList
-                ? configData.itemList.Contains(item.info.shortname)
-                : !configData.itemList.Contains(item.info.shortname))
-            {
-                return;
-            }
-            var player = item.GetOwnerPlayer() ?? item.GetRootContainer()?.GetOwnerPlayer();
-            if (player == null || !permission.UserHasPermission(player.UserIDString, PERMISSION_USE)) return;
-            if (configData.useZoneManager && ZoneManager != null)
-            {
-                var zoneIDs = GetPlayerZoneIDs(player);
-                if (zoneIDs != null && zoneIDs.Length > 0)
-                {
-                    if (configData.excludeAllZone)
-                    {
-                        return;
-                    }
-                    if (configData.excludeDynPVPZone && DynamicPVP != null)
-                    {
-                        foreach (var zoneId in zoneIDs)
-                        {
-                            if (IsPlayerInZone(zoneId, player) && IsDynamicPVPZone(zoneId))
-                            {
-                                return;
-                            }
-                        }
-                        return;
-                    }
+            #if !RUST
+            throw new NotSupportedException($"This plugin does not support {(covalence.Game ?? "this game")}");
+            #endif
 
-                    foreach (var zoneId in configData.zoneList)
-                    {
-                        if (IsPlayerInZone(zoneId, player))
-                        {
-                            return;
-                        }
-                    }
-                }
-            }
-
-            amount = 0;
-            if (configData.keepMaxDurability)
-            {
-                item.condition = item.maxCondition;
-            }
+            permission.RegisterPermission("nodurability.allowed", this);
         }
 
-        #endregion Oxide Hooks
+        #endregion
 
-        #region Methods
+        #region Durability Control
 
-        private bool IsDynamicPVPZone(string zoneID) => (bool)DynamicPVP.Call("IsDynamicPVPZone", zoneID);
-
-        private bool IsPlayerInZone(string zoneID, BasePlayer player) => (bool)ZoneManager.Call("IsPlayerInZone", zoneID, player);
-
-        private string[] GetPlayerZoneIDs(BasePlayer player) => (string[])ZoneManager.Call("GetPlayerZoneIDs", player);
-
-        #endregion Methods
-
-        #region ConfigurationFile
-
-        private ConfigData configData;
-
-        private class ConfigData
+        #if RUST
+        void OnLoseCondition(Item item, ref float amount)
         {
-            [JsonProperty(PropertyName = "Use ZoneManager")]
-            public bool useZoneManager;
+            var player = item?.GetOwnerPlayer();
+            if (player == null) return;
 
-            [JsonProperty(PropertyName = "Keep Max Durability")]
-            public bool keepMaxDurability = true;
+            if (HasPermission(player.UserIDString, "nodurability.allowed")) item.condition = item.maxCondition;
 
-            [JsonProperty(PropertyName = "Exclude all zone")]
-            public bool excludeAllZone;
-
-            [JsonProperty(PropertyName = "Exclude dynamic pvp zone")]
-            public bool excludeDynPVPZone;
-
-            [JsonProperty(PropertyName = "Zone exclude list (Zone ID)")]
-            public HashSet<string> zoneList = new HashSet<string>();
-
-            [JsonProperty(PropertyName = "Item list (Item short name)")]
-            public HashSet<string> itemList = new HashSet<string>();
-
-            [JsonProperty(PropertyName = "Item list is a blacklist? (If false, it's is a whitelist)")]
-            public bool itemListIsBlackList = true;
+            //Puts($"{item.info.shortname} was damaged by: {amount} | Condition is: {item.condition}/{item.maxCondition}");
         }
+        #endif
 
-        protected override void LoadConfig()
-        {
-            base.LoadConfig();
-            try
-            {
-                configData = Config.ReadObject<ConfigData>();
-                if (configData == null)
-                    LoadDefaultConfig();
-            }
-            catch (Exception ex)
-            {
-                PrintError($"The configuration file is corrupted. \n{ex}");
-                LoadDefaultConfig();
-            }
-            SaveConfig();
-        }
+        #endregion
 
-        protected override void LoadDefaultConfig()
-        {
-            PrintWarning("Creating a new configuration file");
-            configData = new ConfigData();
-        }
+        #region Helper Methods
 
-        protected override void SaveConfig() => Config.WriteObject(configData);
+        bool HasPermission(string steamId, string perm) => permission.UserHasPermission(steamId, perm);
 
-        #endregion ConfigurationFile
+        #endregion
     }
 }

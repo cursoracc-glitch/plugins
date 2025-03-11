@@ -1,208 +1,108 @@
 using System;
-using Oxide.Core.Libraries.Covalence;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
-
-// TODO: Look into utilizing CommunityEntity.ServerInstance.StartCoroutine
+using Facepunch;
 
 namespace Oxide.Plugins
 {
-    [Info("Prefab Sniffer", "Wulf", "2.0.0")]
-    [Description("Searches the game files for prefab file locations")]
-    public class PrefabSniffer : CovalencePlugin
-    {
-        #region Localization
+	[Info("PrefabSniffer", "Ayrin", "1.1.1", ResourceId = 1938)]
+	class PrefabSniffer : RustPlugin
+	{
+		private static List<string> resourcesList;
 
-        protected override void LoadDefaultMessages()
-        {
-            lang.RegisterMessages(new Dictionary<string, string>
+        private string argmsg = "Usage: prefabs build/fx";
+
+		[ConsoleCommand("prefabs")]
+		void cmdSniffPrefabs(ConsoleSystem.Arg arg)
+		{
+            if (arg.Args == null || arg.Args.Length == 0)
             {
-                ["CommandPrefab"] = "prefab",
-                ["NoResultsFound"] = "No results found for {0}",
-                ["ResultsSaved"] = "Prefab results saved to logs/{0}.txt",
-                ["UsagePrefab"] = "Usage: {0} <build, find, fx, or all> [keyword]",
-                ["UsagePrefabFind"] = "Usage: prefabs find <keyword>"
-            }, this);
-        }
-
-        #endregion Localization
-
-        #region Initializaton
-
-        private const string permissionUse = "prefabsniffer.use";
-
-        private Dictionary<string, UnityEngine.Object> files;
-        private GameManifest.PooledString[] manifest;
-
-        private void OnServerInitialized()
-        {
-            AddLocalizedCommand(nameof(CommandPrefab));
-            permission.RegisterPermission(permissionUse, this);
-
-            files = FileSystemBackend.cache;
-            manifest = GameManifest.Current.pooledStrings;
-        }
-
-        #endregion Initialization
-
-        #region Commands
-
-        private void CommandPrefab(IPlayer player, string command, string[] args)
-        {
-            if (!player.HasPermission(permissionUse))
-            {
-                Message(player, "NotAllowed", command);
+                SendReply(arg, argmsg);
                 return;
             }
 
-            if (args.Length == 0)
+
+            resourcesList = new List<string>();
+            var argname = "default";
+            var filesraw = GameManifest.Get().pooledStrings;
+            var filesField = typeof(FileSystem_AssetBundles).GetField("files", BindingFlags.Instance | BindingFlags.NonPublic);
+            var files = (Dictionary<string, AssetBundle>)filesField.GetValue(FileSystem.iface);
+            
+            switch (arg.Args[0].ToLower())
             {
-                Message(player, "UsagePrefab", command);
-                return;
-            }
-
-            List<string> resourcesList = new List<string>();
-            string argName = "";
-
-            switch (args[0].ToLower())
-            {
-                case "find":
-                    if (args.Length > 2)
-                    {
-                        Message(player, "UsagePrefabFind", command);
-                    }
-                    foreach (GameManifest.PooledString asset in manifest)
-                    {
-                        if (asset.str.Contains(args[1]) && asset.str.EndsWith(".prefab"))
-                        {
-                            resourcesList.Add(asset.str);
-                        }
-                    }
-                    argName = "find";
-                    break;
-
                 case "build":
-                    foreach (string asset in files.Keys)
+                    foreach (var str in files.Keys)
                     {
-                        if ((!asset.StartsWith("assets/content/")
-                            && !asset.StartsWith("assets/bundled/")
-                            && !asset.StartsWith("assets/prefabs/"))
-                            || !asset.EndsWith(".prefab")) continue;
-
-                        if (asset.Contains(".worldmodel.")
-                            || asset.Contains("/fx/")
-                            || asset.Contains("/effects/")
-                            || asset.Contains("/build/skins/")
-                            || asset.Contains("/_unimplemented/")
-                            || asset.Contains("/ui/")
-                            || asset.Contains("/sound/")
-                            || asset.Contains("/world/")
-                            || asset.Contains("/env/")
-                            || asset.Contains("/clothing/")
-                            || asset.Contains("/skins/")
-                            || asset.Contains("/decor/")
-                            || asset.Contains("/monument/")
-                            || asset.Contains("/crystals/")
-                            || asset.Contains("/projectiles/")
-                            || asset.Contains("/meat_")
-                            || asset.EndsWith(".skin.prefab")
-                            || asset.EndsWith(".viewmodel.prefab")
-                            || asset.EndsWith("_test.prefab")
-                            || asset.EndsWith("_collision.prefab")
-                            || asset.EndsWith("_ragdoll.prefab")
-                            || asset.EndsWith("_skin.prefab")
-                            || asset.Contains("/clutter/")) continue;
-
-                        GameObject go = GameManager.server.FindPrefab(asset);
-                        if (go?.GetComponent<BaseEntity>() != null)
+                        if ((str.StartsWith("assets/content/")
+                        	|| str.StartsWith("assets/bundled/")
+                        	|| str.StartsWith("assets/prefabs/")) && str.EndsWith(".prefab"))
                         {
-                            resourcesList.Add(asset);
+                            if (str.Contains(".worldmodel.")
+                            	|| str.Contains("/fx/")
+                            	|| str.Contains("/effects/")
+                            	|| str.Contains("/build/skins/")
+                            	|| str.Contains("/_unimplemented/")
+                            	|| str.Contains("/ui/")
+                            	|| str.Contains("/sound/")
+                            	|| str.Contains("/world/")
+                            	|| str.Contains("/env/")
+                            	|| str.Contains("/clothing/")
+                            	|| str.Contains("/skins/")
+                            	|| str.Contains("/decor/")
+                            	|| str.Contains("/monument/")
+                            	|| str.Contains("/crystals/")
+                            	|| str.Contains("/projectiles/")
+                            	|| str.Contains("/meat_")
+                            	|| str.EndsWith(".skin.prefab")
+                            	|| str.EndsWith(".viewmodel.prefab")
+                            	|| str.EndsWith("_test.prefab")
+                            	|| str.EndsWith("_collision.prefab")
+                            	|| str.EndsWith("_ragdoll.prefab")
+                            	|| str.EndsWith("_skin.prefab")
+                            	|| str.Contains("/clutter/")) continue;
+                            
+                            var gmobj = GameManager.server.FindPrefab(str);
+                            if (gmobj?.GetComponent<BaseEntity>() != null)
+                                resourcesList.Add(str);
                         }
                     }
-                    argName = "build";
+                    argname = "Build";
+                    Puts("Check your ~/oxide/logs folder");
                     break;
-
                 case "fx":
-                    foreach (GameManifest.PooledString asset in manifest)
+                    foreach (var str in filesraw)
                     {
-                        if ((!asset.str.StartsWith("assets/content/")
-                            && !asset.str.StartsWith("assets/bundled/")
-                            && !asset.str.StartsWith("assets/prefabs/"))
-                            || !asset.str.EndsWith(".prefab")) continue;
-
-                        if (asset.str.Contains("/fx/"))
+                        if ((str.str.StartsWith("assets/content/")
+                        	|| str.str.StartsWith("assets/bundled/")
+                        	|| str.str.StartsWith("assets/prefabs/")) && str.str.EndsWith(".prefab"))
                         {
-                            resourcesList.Add(asset.str);
+                            if (!str.str.Contains("/fx/")) continue;
+
+                            resourcesList.Add(str.str.ToString());
                         }
                     }
-                    argName = "fx";
+                    argname = "FX";
+                    Puts("Check your ~/oxide/logs folder");
                     break;
-
                 case "all":
-                    foreach (GameManifest.PooledString asset in manifest)
-                    {
-                        resourcesList.Add(asset.str);
-                    }
-                    argName = "all";
-                    break;
-
+                	foreach (var str in filesraw)
+                	{
+                		resourcesList.Add(str.str.ToString());
+                	}
+                	argname = "ALL";
+                	Puts("Check your ~/oxide/logs folder");
+                	break;
                 default:
-                    Message(player, "UsagePrefab", command);
+                    SendReply(arg, argmsg);
                     break;
             }
-
-            if (!string.IsNullOrEmpty(argName))
+            
+            var now = DateTime.Now.ToString("dd-MM-yyyy");
+            for (int i = 0; i < resourcesList.Count - 1; i++)
             {
-                if (resourcesList.Count > 0)
-                {
-                    for (int i = 0; i < resourcesList.Count; i++)
-                    {
-                        player.Reply($"{i} - {resourcesList[i]}");
-                        LogToFile(argName, $"{i} - {resourcesList[i]}", this);
-                    }
-                    Message(player, "ResultsSaved", $"{Name}/{Name.ToLower()}/{argName}-{DateTime.Now:yyyy-MM-dd}");
-                } else {
-                    Message(player, "NoResultsFound", args[1]);
-                }
+                ConVar.Server.Log("oxide/logs/Prefabs" + argname + "_" + now + ".txt", string.Format("{0} - {1}", i, resourcesList[i]));
             }
-        }
-
-        #endregion Commands
-
-        #region Helpers
-
-        private void AddLocalizedCommand(string command)
-        {
-            foreach (string language in lang.GetLanguages(this))
-            {
-                Dictionary<string, string> messages = lang.GetMessages(language, this);
-                foreach (KeyValuePair<string, string> message in messages)
-                {
-                    if (message.Key.Equals(command))
-                    {
-                        if (!string.IsNullOrEmpty(message.Value))
-                        {
-                            AddCovalenceCommand(message.Value, command);
-                        }
-                    }
-                }
-            }
-        }
-
-        private string GetLang(string langKey, string playerId = null, params object[] args)
-        {
-            return string.Format(lang.GetMessage(langKey, this, playerId), args);
-        }
-
-        private void Message(IPlayer player, string textOrLang, params object[] args)
-        {
-            if (player.IsConnected)
-            {
-                string message = GetLang(textOrLang, player.Id, args);
-                player.Reply(message != textOrLang ? message : textOrLang);
-            }
-        }
-
-        #endregion Helpers
-    }
+		}
+	}
 }

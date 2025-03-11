@@ -1,22 +1,21 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("No Weapon Drop", "Fujikura", "1.2.0")]
-	[Description("Prevents dropping of active weapon when players start to die")]
-    class NoWeaponDrop : CovalencePlugin
+    [Info("NoWeaponDrop", "Fujikura", "0.2.3", ResourceId = 1960)]
+	[Description("Prevents dropping of active weapon on wounded or headshot/instant-kill")]
+    class NoWeaponDrop : RustPlugin
     {
-        [PluginReference]
+		[PluginReference]
 		Plugin RestoreUponDeath;
 		
-		private const string permissionName = "noweapondrop.active";
-
 		private bool Changed = false;
 		private bool usePermission;
+		private string permissionName;
+		private bool disableForROD;
 		
 		private object GetConfig(string menu, string datavalue, object defaultValue)
         {
@@ -40,6 +39,8 @@ namespace Oxide.Plugins
 		void LoadVariables()
         {
 			usePermission = Convert.ToBoolean(GetConfig("Settings", "Use permissions", false));
+			permissionName = Convert.ToString(GetConfig("Settings", "Permission name", "noweapondrop.active"));
+			disableForROD =  Convert.ToBoolean(GetConfig("Settings", "Disable death handler when RestoreUponDeath was found", false));
 
             if (!Changed) return;
             SaveConfig();
@@ -52,17 +53,33 @@ namespace Oxide.Plugins
             LoadVariables();
         }
 		
-		void Init()
+		void Loaded()
 		{
 			LoadVariables();
-			permission.RegisterPermission(permissionName, this);
+			if (!permission.PermissionExists(permissionName)) permission.RegisterPermission(permissionName, this);
+		}
+				
+		void OnItemRemovedFromContainer(ItemContainer container, Item item)
+		{
+			if (container.HasFlag(ItemContainer.Flag.Belt))		
+			NextTick(() => {
+				if(usePermission && !permission.UserHasPermission(container.playerOwner.userID.ToString(), permissionName)) return;
+				if (container.playerOwner.IsWounded() && (item.info.category.value__ == 0 ||  item.info.category.value__ == 5))
+					item.MoveToContainer(container);
+			});
 		}
 		
-		object CanDropActiveItem(BasePlayer player)
-		{
-			if (player.IsNpc || (usePermission && !permission.UserHasPermission(player.UserIDString, permissionName)))
-				return null;
-			return false;
-		}
+		object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {
+			if ((entity as BasePlayer) != null && ( info.isHeadshot == true || info.damageTypes.Has(Rust.DamageType.Suicide) )) 
+			{
+				if(RestoreUponDeath && disableForROD) return null;
+				if(usePermission && !permission.UserHasPermission((entity as BasePlayer).userID.ToString(), permissionName)) return null;
+				(entity as BasePlayer).svActiveItemID = 0u;
+				(entity as BasePlayer).SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+			}
+			return null;
+        }
 	}
 }
+
