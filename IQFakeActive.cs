@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Newtonsoft.Json;
@@ -8,50 +8,40 @@ using System.Linq;
 using Oxide.Core;
 using System.Collections;
 using Newtonsoft.Json.Linq;
+using System.Text;
 
 namespace Oxide.Plugins
 {
-    [Info("IQFakeActive", "Mercury", "0.0.3")]
+    [Info("IQFakeActive", "SkuliDropek", "1.2.15")]
     [Description("Актив вашего сервера, но немного не тот :)")]
     class IQFakeActive : RustPlugin
     {
-        /// <summary>
-        /// Обновление 0.0.2 :
-        /// - Изменил метод подсчета дней вайпов(Плагин поймет какой у вас день вайпа,независимо от его загрузки на ваш сервер)
-        /// - Оптимизировал плагин
-        /// - Избавился от дата файла, заменил на автоматизированный процесс
-        /// - Добавил настройку скачков онлайна в конфигурации
-        /// - Исправил мою оплошность в проигрывании звуков(после дебага не сменил показатели таймера)
-        /// - Добавил настройку интервала проигрывания звуков
-        /// - Тестово ввел метод парсинга чата
-        /// - Тестово ввел метод парсинга игроков
-        /// - Парсинг чата и игроков работает по принципу : Используете общую базу - пополняйте общую базу
-        /// - Добавил в методы с парсингом на защиту Администратора
-        /// - Добавил в метод с парсингом проверки на пустые сообщения
-        /// - Добавил в метод парсинга сообщений проверку на запрещенные слова, чтобы ваш сервер не пополнял базу плохими словами
-        /// - Добавил API во вкладку с API(Если вам что-то не понятно,обращайтесь, помогу)
-        /// - Добавил зависимость к генерации онлайна от времени суток
-        /// 
-        /// Обновление 0.0.3
-        /// - Поправил локальную генерацию игроков
-        /// - Исправил автоматический подсчет времени вайпа для более корректного отображения и генерации онлайна
-        /// - Переделал резервирование игроков с учетом реальных игроков
-        /// - Изменил API для получения резервированных игроков, теперь оно более корректно и удобно
-        /// - Добавил проверку на сходство фейка с реальным игроком в сообщениях, теперь вы не встретите фейк чат с схожими никами реальных игроков
-        /// - Добавил проверку на сходство фейка с реальным игроком в личных сообщения
-        /// - Добавил проверку на сходство фейка с реальным игроком при сообщении о подсоединение к серверву
-        /// - Добавил проверку на сходство фейка с реальным игроком при сообщении о отключении от серверва
-        /// - Добавил замену фейкового игрока при сообщении о его отлючении с заменой в резерве
-        /// - Привел активность в чате к общему, теперь сообщения для всех одинаковые
-        /// - Добавил коррекцию логирования
         /// </summary>
-
+        /// Обновленеи 1.0.х
+        /// - Добавлена возможность выбора вариации генераций онлайна (Автоматическая, ручная, Автоматическая + ваш онлайн)
+        /// - Изменен метод генерации онлайна
+        /// 
 
         #region Vars
+        private enum TypeOnline
+        {
+            Auto,
+            Manual,
+            Auto_Plus_Server,
+        }
         public int FakeOnline = 0;
         public static DateTime TimeCreatedSave = SaveRestore.SaveCreatedTime.Date;
         public static DateTime RealTime = DateTime.Now.Date;
         public static int SaveCreated = RealTime.Subtract(TimeCreatedSave).Days;
+        private Timer timeActivateMessage;
+        private Timer timeActivateMessagePm;
+        private Timer timerSynh;
+        private Timer timerGenerateOnline;
+        private Timer timerPlaySounds;
+        private Coroutine RoutineInitPlugin;
+        private Coroutine RoutineAddAvatars;
+        private List<Configuration.ActiveSettings.SounActiveSettings.Sounds> SortedSoundList;
+
         #endregion
 
         #region Reference
@@ -64,24 +54,24 @@ namespace Oxide.Plugins
             ChatColor,
             NickColor,
         }
-        private string GetInfoIQChat(IQChatGetType TypeInfo, ulong ID, bool Default)
+        private string GetInfoIQChat(IQChatGetType TypeInfo)
         {
-            if (!IQChat) return "";
+            if (!IQChat) return String.Empty;
             switch (TypeInfo)
             {
                 case IQChatGetType.Prefix:
                     {
-                        string Prefix = Default == true ? (string)IQChat?.Call("API_GET_DEFUALT_PRFIX") : (string)(IQChat?.Call("API_GET_PREFIX", ID));
+                        String Prefix = (String)IQChat?.Call("API_GET_DEFAULT_PREFIX");
                         return Prefix;
                     }
                 case IQChatGetType.ChatColor:
                     {
-                        string ChatColor = Default == true ? (string)IQChat?.Call("API_GET_DEFUALT_COLOR_CHAT") : (string)(IQChat?.Call("API_GET_CHAT_COLOR", ID));
+                        String ChatColor = (String)IQChat?.Call("API_GET_DEFAULT_MESSAGE_COLOR");
                         return ChatColor;
                     }
                 case IQChatGetType.NickColor:
                     {
-                        string NickColor = Default == true ? (string)IQChat?.Call("API_GET_DEFUALT_COLOR_NICK") : (string)(IQChat?.Call("API_GET_NICK_COLOR", ID)); 
+                        String NickColor = (String)IQChat?.Call("API_GET_DEFAULT_NICK_COLOR");
                         return NickColor;
                     }
             }
@@ -108,8 +98,22 @@ namespace Oxide.Plugins
             public ActiveSettings FakeActive = new ActiveSettings();
             [JsonProperty("Настройка онлайна")]
             public FakeOnlineSettings FakeOnline = new FakeOnlineSettings();
+            [JsonProperty("Общая настройка")]
+            public GeneralSettings GeneralSetting = new GeneralSettings();
             [JsonProperty("Включить лоигрование действий плагина в консоль")]
             public bool UseLogConsole;
+            [JsonProperty("Введите ваш стимКлюч для подгрузки аватарок(https://steamcommunity.com/dev/apikey - взять тут.Если потребует домен на сайте - введите абсолютно любой)")]
+            public string APIKeySteam;
+
+            internal class GeneralSettings
+            {
+                [JsonProperty("IQChat : Steam64ID для аватарки в чате")]
+                public String AvatarSteamID;
+                [JsonProperty("IQChat : Отображаемый префикс в чате")]
+                public String PrefixName;
+                [JsonProperty("Максимально допустимый предел фейкового онлайна(если вам не нужно это значение, оставьвте 0 - по умолчанию)")]
+                public Int32 MaximalOnline;
+            }
 
             internal class FakeOnlineSettings
             {
@@ -119,8 +123,12 @@ namespace Oxide.Plugins
                 public UpdateOnline SettingsUpdateOnline = new UpdateOnline();
                 internal class UpdateOnline
                 {
+                    [JsonProperty("Настройка типа онлайна (0 - Автоматический, 1 - Ручная настройка, 2 - Автоматический + ваш онлайн)")]
+                    public TypeOnline TypeOnline;
                     [JsonProperty("Настройка обновления онлайна")]
                     public StandartFormul StandartFormulSetting = new StandartFormul();
+                    [JsonProperty("Ручная настройка онлайна")]
+                    public ManualFormul ManualFormule = new ManualFormul();
                     internal class StandartFormul
                     {
                         [JsonProperty("Минимальный множитель онлайна(От этого показателя зависит скачок онлайна при обновлении)")]
@@ -129,6 +137,11 @@ namespace Oxide.Plugins
                         public float MaximumFactor;
                         [JsonProperty("Включить зависимость генерации оналйна от времени суток?")]
                         public bool DayTimeGerenation;
+                    }
+                    internal class ManualFormul
+                    {
+                        [JsonProperty("Ручная настройка онлайна (будет к вашему онлайну добавлять указанный в списке) | [время(цифра)] = количество онлайна ")]
+                        public Dictionary<Int32, Int32> ManualTimeOnline = new Dictionary<Int32, Int32>();
                     }
                 }
             }
@@ -176,8 +189,8 @@ namespace Oxide.Plugins
                 }
                 internal class ChatActiveSetting
                 {
-                    [JsonProperty("IQChat : Дополниттельные настройки для IQChat")]
-                    public IQChat IQChatSettings = new IQChat();
+                    [JsonProperty("HEX : Цвет ника для ботов")]
+                    public String ColorChatNickDefault;
                     [JsonProperty("IQChat : Настройки подключения и отключения для IQChat")]
                     public IQChatNetwork IQChatNetworkSetting = new IQChatNetwork();
                     [JsonProperty("IQChat : Настройки личных сообщений для IQChat")]
@@ -191,17 +204,6 @@ namespace Oxide.Plugins
                     [JsonProperty("Укажите максимальный интервал отправки сообщения в чат(секунды)")]
                     public int MaximumInterval;
 
-                    internal class IQChat
-                    {
-                        [JsonProperty("IQChat : Использовать отображение стандартного префикса/цветов в IQChat(для общей базы,игнорируются настройки ниже, в этом классе)")]
-                        public bool DefaultSettings;
-                        [JsonProperty("IQChat : Использовать отображение префикса IQChat(Для общей базы игроков)")]
-                        public bool PrefixUse;
-                        [JsonProperty("IQChat : Использовать цвет ника IQChat(Для общей базы игроков)")]
-                        public bool ColorNickUse;
-                        [JsonProperty("IQChat : Использовать цвет сообщения IQChat(Для общей базы игроков)")]
-                        public bool ColorChatUse;
-                    }
                     internal class IQChatNetwork
                     {
                         [JsonProperty("IQChat : Использовать подключение/отключение в чате")]
@@ -228,12 +230,51 @@ namespace Oxide.Plugins
             {
                 return new Configuration
                 {
+                    APIKeySteam = "",
                     UseLogConsole = true,
+                    GeneralSetting = new GeneralSettings
+                    {
+                        MaximalOnline = 0,
+                        PrefixName = "",
+                        AvatarSteamID = "",
+                    },
                     FakeOnline = new FakeOnlineSettings
                     {
+                        
                         IntervalUpdateOnline = 20,
                         SettingsUpdateOnline = new FakeOnlineSettings.UpdateOnline
                         {
+                            TypeOnline = TypeOnline.Auto,
+                            ManualFormule = new FakeOnlineSettings.UpdateOnline.ManualFormul
+                            {
+                                ManualTimeOnline = new Dictionary<int, int>
+                                {
+                                    [00] = 3,
+                                    [01] = 3,
+                                    [02] = 3,
+                                    [03] = 3,
+                                    [04] = 2,
+                                    [05] = 2,
+                                    [06] = 5,
+                                    [07] = 4,
+                                    [08] = 5,
+                                    [09] = 7,
+                                    [10] = 7,
+                                    [11] = 8,
+                                    [12] = 12,
+                                    [13] = 13,
+                                    [14] = 16,
+                                    [15] = 19,
+                                    [16] = 20,
+                                    [17] = 21,
+                                    [18] = 24,
+                                    [19] = 27,
+                                    [20] = 29,
+                                    [21] = 22,
+                                    [22] = 15,
+                                    [23] = 7,
+                                }
+                            },
                             StandartFormulSetting = new FakeOnlineSettings.UpdateOnline.StandartFormul
                             {
                                 DayTimeGerenation = true,
@@ -248,7 +289,7 @@ namespace Oxide.Plugins
                         PlayersDB = true,
                         ListNickName = new List<string>
                         {
-                            "Mercury",
+                            "SkuliDropek",
                             "Debil",
                             "Fake#1",
                             "Fake#2",
@@ -327,7 +368,7 @@ namespace Oxide.Plugins
                                     MinPos = 10,
                                     MaxPos = 30,
                                     SoundPath = "assets/prefabs/weapons/bow/effects/fire.prefab"
-                                },       
+                                },
                                 new ActiveSettings.SounActiveSettings.Sounds
                                 {
                                     DayFaktor = 1,
@@ -335,7 +376,7 @@ namespace Oxide.Plugins
                                     MinPos = 10,
                                     MaxPos = 30,
                                     SoundPath = "assets/prefabs/weapons/knife/effects/strike-soft.prefab"
-                                }, 
+                                },
                                 new ActiveSettings.SounActiveSettings.Sounds
                                 {
                                     DayFaktor = 2,
@@ -364,6 +405,7 @@ namespace Oxide.Plugins
                         },
                         ChatActive = new ActiveSettings.ChatActiveSetting
                         {
+                            ColorChatNickDefault = "#44edc0",
                             UseBlackList = true,
                             BlackList = new List<string>
                             {
@@ -382,13 +424,6 @@ namespace Oxide.Plugins
                             },
                             MinimumInterval = 5,
                             MaximumInterval = 30,
-                            IQChatSettings = new ActiveSettings.ChatActiveSetting.IQChat
-                            {
-                                DefaultSettings = true,
-                                PrefixUse = true,
-                                ColorChatUse = true,
-                                ColorNickUse = true,
-                            },
                             IQChatNetworkSetting = new ActiveSettings.ChatActiveSetting.IQChatNetwork
                             {
                                 UseNetwork = true,
@@ -430,6 +465,39 @@ namespace Oxide.Plugins
             {
                 config = Config.ReadObject<Configuration>();
                 if (config == null) LoadDefaultConfig();
+                else
+                {
+                    if(config.FakeOnline.SettingsUpdateOnline.ManualFormule.ManualTimeOnline == null || config.FakeOnline.SettingsUpdateOnline.ManualFormule.ManualTimeOnline.Count == 0)
+                    {
+                        config.FakeOnline.SettingsUpdateOnline.ManualFormule.ManualTimeOnline = new Dictionary<int, int>
+                        {
+                            [00] = 3,
+                            [01] = 3,
+                            [02] = 3,
+                            [03] = 3,
+                            [04] = 2,
+                            [05] = 2,
+                            [06] = 5,
+                            [07] = 4,
+                            [08] = 5,
+                            [09] = 7,
+                            [10] = 7,
+                            [11] = 8,
+                            [12] = 12,
+                            [13] = 13,
+                            [14] = 16,
+                            [15] = 19,
+                            [16] = 20,
+                            [17] = 21,
+                            [18] = 24,
+                            [19] = 27,
+                            [20] = 29,
+                            [21] = 22,
+                            [22] = 15,
+                            [23] = 7,
+                        };
+                    }
+                }
             }
             catch
             {
@@ -450,7 +518,7 @@ namespace Oxide.Plugins
 
         public void GeneratedOnline()
         {
-            timer.Every(config.FakeOnline.IntervalUpdateOnline, () =>
+            timerGenerateOnline = timer.Every(config.FakeOnline.IntervalUpdateOnline, () =>
             {
                 if (BasePlayer.activePlayerList.Count == 0)
                 {
@@ -459,19 +527,49 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var SettingsOnline = config.FakeOnline.SettingsUpdateOnline.StandartFormulSetting;
+                Int32 LastFakeOnline = FakeOnline;
+                switch (config.FakeOnline.SettingsUpdateOnline.TypeOnline)
+                {
+                    case TypeOnline.Auto:
+                        {
+                            var SettingsOnline = config.FakeOnline.SettingsUpdateOnline.StandartFormulSetting;
 
-                int MaxOnline = ConVar.Server.maxplayers;
-                int ThisOnline = BasePlayer.activePlayerList.Count;
-                float Randoming = UnityEngine.Random.Range(SettingsOnline.MinimumFactor, SettingsOnline.MaximumFactor); 
-                float Time = float.Parse($"1.{DateTime.Now.Hour}{DateTime.Now.Minute}");
-                int DayFactor = SaveCreated <= 1 ? 2 : SaveCreated;
-                PrintError(DayFactor.ToString());
-                float AvaregeOnline = SettingsOnline.DayTimeGerenation ? (((MaxOnline - ThisOnline) / DayFactor * Randoming) / Time) : ((MaxOnline - ThisOnline) / DayFactor * Randoming);
-                FakeOnline = Convert.ToInt32(AvaregeOnline);
+                            int MaxOnline = config.GeneralSetting.MaximalOnline != 0 && config.GeneralSetting.MaximalOnline <= ConVar.Server.maxplayers ? config.GeneralSetting.MaximalOnline : ConVar.Server.maxplayers;
+                            int ThisOnline = BasePlayer.activePlayerList.Count;
+                            float Randoming = Oxide.Core.Random.Range(SettingsOnline.MinimumFactor, SettingsOnline.MaximumFactor);
+                            float Time = float.Parse($"1.{DateTime.Now.Hour}{DateTime.Now.Minute}");
+                            int DayFactor = SaveCreated <= 1 ? 2 : SaveCreated;
+                            float AvaregeOnline = SettingsOnline.DayTimeGerenation ? (((MaxOnline - ThisOnline) / DayFactor * Randoming) / Time) : ((MaxOnline - ThisOnline) / DayFactor * Randoming);
+
+                            FakeOnline = Convert.ToInt32(AvaregeOnline);
+                            break;
+                        }
+                    case TypeOnline.Auto_Plus_Server:
+                        {
+                            var SettingsOnline = config.FakeOnline.SettingsUpdateOnline.StandartFormulSetting;
+
+                            int MaxOnline = config.GeneralSetting.MaximalOnline != 0 && config.GeneralSetting.MaximalOnline <= ConVar.Server.maxplayers ? config.GeneralSetting.MaximalOnline : ConVar.Server.maxplayers;
+                            int ThisOnline = BasePlayer.activePlayerList.Count;
+                            float Randoming = Oxide.Core.Random.Range(SettingsOnline.MinimumFactor, SettingsOnline.MaximumFactor);
+                            float Time = float.Parse($"1.{DateTime.Now.Hour}{DateTime.Now.Minute}");
+                            int DayFactor = SaveCreated <= 1 ? 2 : SaveCreated;
+                            float AvaregeOnline = SettingsOnline.DayTimeGerenation ? (((MaxOnline - ThisOnline) / DayFactor * Randoming) / Time) : ((MaxOnline - ThisOnline) / DayFactor * Randoming);
+
+                            FakeOnline = (BasePlayer.activePlayerList.Count + Convert.ToInt32(AvaregeOnline));
+
+                            break;
+                        }
+                    case TypeOnline.Manual:
+                        {
+                            Int32 Time = DateTime.Now.Hour;
+                            Int32 ManualOnline = config.FakeOnline.SettingsUpdateOnline.ManualFormule.ManualTimeOnline.ContainsKey(Time) ? config.FakeOnline.SettingsUpdateOnline.ManualFormule.ManualTimeOnline[Time] : 0;
+                            FakeOnline = BasePlayer.activePlayerList.Count + ManualOnline;
+                            break;
+                        }
+                }
 
                 foreach (var player in BasePlayer.activePlayerList)
-                    if (AvaregeOnline > FakeOnline)
+                    if (LastFakeOnline > FakeOnline)
                         ChatNetworkConnected(player);
                     else ChatNetworkDisconnected(player);
 
@@ -493,15 +591,12 @@ namespace Oxide.Plugins
         }
         public class FakePlayer
         {
-            public ulong UserID;
+            public String UserID;
             public string DisplayName;
-            public string IQChatPreifx;
-            public string IQChatColorChat;
-            public string IQChatColorNick;
         }
         void SyncReserved()
         {
-            if(BasePlayer.activePlayerList.Count == 0)
+            if (BasePlayer.activePlayerList.Count == 0)
             {
                 if (config.UseLogConsole)
                 {
@@ -514,17 +609,14 @@ namespace Oxide.Plugins
             ReservedPlayer.Clear();
             for (int i = 0; i < FakeOnline - BasePlayer.activePlayerList.Count; i++)
             {
-                int RandomIndex = UnityEngine.Random.Range(0, FakePlayerList.Count);
+                int RandomIndex = Oxide.Core.Random.Range(0, FakePlayerList.Count);
                 ReservedPlayer.Add(FakePlayerList[RandomIndex]);
             }
-            foreach(BasePlayer player in BasePlayer.activePlayerList) 
+            foreach (BasePlayer player in BasePlayer.activePlayerList)
             {
                 FakePlayer presetPlayer = new FakePlayer();
-                presetPlayer.DisplayName = player.displayName; 
-                presetPlayer.UserID = player.userID;
-                presetPlayer.IQChatPreifx = IQChat ? GetInfoIQChat(IQChatGetType.Prefix, player.userID, false) : "";
-                presetPlayer.IQChatColorChat = IQChat ? GetInfoIQChat(IQChatGetType.ChatColor, player.userID, false) : "";
-                presetPlayer.IQChatColorNick = IQChat ? GetInfoIQChat(IQChatGetType.NickColor, player.userID, false) : "";
+                presetPlayer.DisplayName = player.displayName;
+                presetPlayer.UserID = player.UserIDString;
                 ReservedPlayer.Add(presetPlayer);
             }
             string JSON = JsonConvert.SerializeObject(ReservedPlayer);
@@ -538,12 +630,22 @@ namespace Oxide.Plugins
                 PrintWarning("=============SYNC==================");
             }
 
-            ServerMgr.Instance.StartCoroutine(AddPlayerAvatar());
+            if (!String.IsNullOrWhiteSpace(config.APIKeySteam))
+            {
+                if (RoutineAddAvatars == null)
+                    RoutineAddAvatars = ServerMgr.Instance.StartCoroutine(AddPlayerAvatar());
+                else
+                {
+                    ServerMgr.Instance.StopCoroutine(RoutineAddAvatars);
+                    RoutineAddAvatars = ServerMgr.Instance.StartCoroutine(AddPlayerAvatar());
+                }
+            }
             Interface.Oxide.CallHook("SyncReservedFinish", JSON);
         }
         private void GeneratedAll()
         {
             PrintWarning("Генерация активности..");
+
             if (config.FakePlayers.PlayersDB)
                 GetPlayerDB();
             else GeneratedPlayer();
@@ -554,17 +656,22 @@ namespace Oxide.Plugins
 
             PrintWarning("Генерация игроков сообщений в чате завершена..");
         }
-
+        private void GenerateSounds()
+        {
+            Configuration.ActiveSettings.SounActiveSettings Sound = config.FakeActive.SoundActive;
+            if (!Sound.UseLocalSoundBase) return;
+            SortedSoundList = config.FakeActive.SoundActive.SoundLists.Where(x => x.SoundPath != null && !String.IsNullOrWhiteSpace(x.SoundPath)).OrderBy(x => x.DayFaktor == SaveCreated).ToList();
+        }
         #region Local Base
 
         private ulong GeneratedSteam64ID()
         {
-            ulong GeneratedID = (ulong)UnityEngine.Random.Range(76561100000000011, 76561199999999999);
+            ulong GeneratedID = (ulong)Oxide.Core.Random.Range(76561100000000011, 76561199999999999);
             return GeneratedID;
         }
         private string GeneratedNickName()
         {
-            int RandomIndexNick = UnityEngine.Random.Range(0, config.FakePlayers.ListNickName.Count);
+            int RandomIndexNick = Oxide.Core.Random.Range(0, config.FakePlayers.ListNickName.Count);
             string NickName = config.FakePlayers.ListNickName[RandomIndexNick];
             return NickName;
         }
@@ -573,7 +680,7 @@ namespace Oxide.Plugins
         {
             if (config.FakePlayers.ListNickName.Count == 0)
             {
-                PrintError("Ошибка # генерации локальной базы игроков! Введите ники в список ников");
+                PrintError("Ошибка #14534 генерации локальной базы игроков! Введите ники в список ников"); //
                 return;
             }
             for (int i = 0; i < config.FakePlayers.ListNickName.Count; i++)
@@ -584,10 +691,7 @@ namespace Oxide.Plugins
                 FakePlayerList.Add(new FakePlayer
                 {
                     DisplayName = DisplayName,
-                    UserID = UserID,
-                    IQChatColorChat = "",
-                    IQChatColorNick = "",
-                    IQChatPreifx = ""
+                    UserID = UserID.ToString(),
                 });
             }
             PrintWarning("Игроки с локальной базы сгенерированы успешно!");
@@ -597,7 +701,7 @@ namespace Oxide.Plugins
         {
             if (config.FakePlayers.ListMessages.Count == 0)
             {
-                PrintError("Ошибка генерации локальной базы сообщений! Введите в нее сообщения");
+                PrintError("Ошибка #14533 генерации локальной базы сообщений! Введите в нее сообщения"); //
                 return;
             }
             for (int i = 0; i < config.FakePlayers.ListMessages.Count; i++)
@@ -607,20 +711,33 @@ namespace Oxide.Plugins
         #endregion
 
         #region Set Data Base
+
         private void DumpPlayers(BasePlayer player)
         {
             if (!config.FakePlayers.PlayersDB) return;
             if (player.IsAdmin) return;
 
-            string Prefix = IQChat ? GetInfoIQChat(IQChatGetType.Prefix, player.userID, false) : "";
-            string ChatColor = IQChat ? GetInfoIQChat(IQChatGetType.ChatColor, player.userID, false) : "";
-            string NickColor = IQChat ? GetInfoIQChat(IQChatGetType.NickColor, player.userID, false) : "";
-            string DisplayName = player.displayName;
-            ulong UserID = player.userID;
-            string API = $"http://utilite.skyplugins.ru/iqfake/iqfacekphp.php?action=dump&actiondump=user&displayname={DisplayName}&userid={UserID}&iqchatprefix={Prefix}&iqchatcolorchat={ChatColor}&iqchatcolornick={NickColor}";
+            String DisplayName = player.displayName;
+            String UserID = player.UserIDString;
+            String Body = JsonConvert.SerializeObject(new FakePlayer
+            {
+                DisplayName = DisplayName,
+                UserID = UserID
+            });
 
-            try { webrequest.Enqueue(API, null, (code, response) => { }, this); }
+            string API = $"http://iqsystem.skyplugins.ru/iqsystem/iqfakeactive/dumpplayer";
+            Dictionary<string, string> Head = new Dictionary<string, string>
+            {
+                ["Content-Type"] = "application/json; charset=utf-8"
+            };
+
+            try { webrequest.Enqueue(API, Body, (code, response) => { }, this, Core.Libraries.RequestMethod.POST, Head); }
             catch (Exception ex) { }
+        }
+
+        internal class MessageToJson
+        {
+            public String Message;
         }
 
         private void DumpChat(string Message)
@@ -628,8 +745,16 @@ namespace Oxide.Plugins
             if (!config.FakePlayers.ChatsDB) return;
             if (config.FakeActive.ChatActive.BlackList.Contains(Message)) return;
 
-            string API = $"http://utilite.skyplugins.ru/iqfake/iqfacekphp.php?action=dump&actiondump=message&text={Message}";
-            try { webrequest.Enqueue(API, null, (code, response) => { }, this); }
+            String MessageJson = JsonConvert.SerializeObject(new MessageToJson
+            {
+                Message = Message
+            });
+            string API = $"http://iqsystem.skyplugins.ru/iqsystem/iqfakeactive/dumpmessage";
+            Dictionary<string, string> Head = new Dictionary<string, string>
+            {
+                ["Content-Type"] = "application/json"
+            };
+            try { webrequest.Enqueue(API, MessageJson, (code, response) => { }, this, Core.Libraries.RequestMethod.POST, Head); }
             catch (Exception ex) { }
         }
 
@@ -641,17 +766,36 @@ namespace Oxide.Plugins
         {
             if (!config.FakePlayers.PlayersDB) return;
 
-            string API = "http://utilite.skyplugins.ru/iqfake/iqfacekphp.php?action=get&actionget=user";
+            string API = $"http://iqsystem.skyplugins.ru/iqsystem/iqfakeactive/getplayers/v5rsBqzl7wCvFqb45b56bb45"; 
+
             try
             {
                 webrequest.Enqueue(API, null, (code, response) =>
                 {
+                    if (code == 503)
+                    {
+                        PrintError("Вышло обновление плагина, обновите версию плагина чтобы вы могли подключаться в базе-данных!");
+                        NextTick(() =>
+                        {
+                            Interface.Oxide.UnloadPlugin(Name);
+                        });
+                        return;
+                    }
+                    if (code == 404)
+                    {
+                        PrintError("Произошла ошибка на сервере базы-данных, сообщите разработчику - SkuliDropek#5212");
+                        NextTick(() =>
+                        {
+                            Interface.Oxide.UnloadPlugin(Name);
+                        });
+                        return;
+                    }
                     FakePlayerList = JsonConvert.DeserializeObject<List<FakePlayer>>(response);
                 }, this);
             }
             catch (Exception ex)
             {
-                PrintError($"Ошибка с генерацией игроков в базе данных\n\n{ex.ToString()}");
+                PrintError($"Ошибка #2214538 с генерацией игроков в базе данных\n\n{ex.ToString()}");
             }
 
             PrintWarning("Игроки с базы данных успешно сгенерированы!");
@@ -661,11 +805,29 @@ namespace Oxide.Plugins
         {
             if (!config.FakePlayers.ChatsDB) return;
 
-            string API = "http://utilite.skyplugins.ru/iqfake/iqfacekphp.php?action=get&actionget=chat";
+            string API = $"http://iqsystem.skyplugins.ru/iqsystem/iqfakeactive/getmessages/v5rsBqzl7wCvFqb45b56bb45"; 
             try
             {
                 webrequest.Enqueue(API, null, (code, response) =>
                 {
+                    if (code == 503)
+                    {
+                        PrintError("Вышло обновление плагина, обновите версию плагина чтобы вы могли подключаться в базе-данных!");
+                        NextTick(() =>
+                        {
+                            Interface.Oxide.UnloadPlugin(Name);
+                        });
+                        return;
+                    }
+                    if (code == 404)
+                    {
+                        PrintError("Произошла ошибка на сервере базы-данных, сообщите разработчику - SkuliDropek#5212");
+                        NextTick(() =>
+                        {
+                            Interface.Oxide.UnloadPlugin(Name);
+                        });
+                        return;
+                    }
                     FakeMessageList = JsonConvert.DeserializeObject<List<Messages>>(response);
                 }, this);
             }
@@ -689,7 +851,7 @@ namespace Oxide.Plugins
                 {
                     if (HasImage(p.UserID.ToString())) continue;
 
-                    string url = "http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=3F2959BD838BF8FB544B9A767F873457&" + "steamids=" + p.UserID;
+                    string url = "http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=" + config.APIKeySteam + "&" + "steamids=" + p.UserID;
                     webrequest.Enqueue(url, null, (code, response) =>
                     {
                         string Avatar = (string)JObject.Parse(response)["response"]["players"][0]["avatarfull"];
@@ -712,11 +874,11 @@ namespace Oxide.Plugins
         {
             if (ReservedPlayer == null) return null;
             if (ReservedPlayer.Count == 0) return null;
-            return ReservedPlayer[UnityEngine.Random.Range(0, ReservedPlayer.Count)];
+            return ReservedPlayer[Oxide.Core.Random.Range(0, ReservedPlayer.Count)];
         }
         public bool IsRare(int Rare)
         {
-            if (UnityEngine.Random.Range(0, 100) >= (100 - Rare))
+            if (Oxide.Core.Random.Range(0, 100) >= (100 - Rare))
                 return true;
             else return false;
         }
@@ -724,20 +886,41 @@ namespace Oxide.Plugins
         #region Chat Active
         private void StartChat()
         {
-            int TimerRandom = UnityEngine.Random.Range(config.FakeActive.ChatActive.MinimumInterval, config.FakeActive.ChatActive.MaximumInterval);
-            timer.Every(TimerRandom, () =>
-            {
-                string Message = GetMessage();
-                foreach (var player in BasePlayer.activePlayerList)
-                    SendMessage(player, Message);
-            });
-
-            int TimerRandomPM = UnityEngine.Random.Range(config.FakeActive.ChatActive.IQChatPMSettings.MinimumInterval, config.FakeActive.ChatActive.IQChatPMSettings.MaximumInterval);
-            timer.Every(TimerRandomPM, () => { SendRandomPM(); });
+            ActivateMessageChat();
+            ActivateMessageChatPM();
         }
-        public void SendMessage(BasePlayer player, string Message) 
+
+        private void ActivateMessageChatPM()
         {
-            var MessageSettings = config.FakeActive.ChatActive.IQChatSettings;
+            Int32 TimerRandomPM = Oxide.Core.Random.Range(config.FakeActive.ChatActive.IQChatPMSettings.MinimumInterval, config.FakeActive.ChatActive.IQChatPMSettings.MaximumInterval);
+
+            if (timeActivateMessagePm == null || timeActivateMessagePm.Destroyed)
+                timeActivateMessagePm = timer.Once(TimerRandomPM, ActivateMessageChatPM);
+            else
+            {
+                timeActivateMessagePm.Destroy();
+                timeActivateMessagePm = timer.Once(TimerRandomPM, ActivateMessageChatPM);
+            }
+            SendRandomPM();
+        }
+        private void ActivateMessageChat()
+        {
+            Int32 TimerRandom = Oxide.Core.Random.Range(config.FakeActive.ChatActive.MinimumInterval, config.FakeActive.ChatActive.MaximumInterval);
+
+            if (timeActivateMessage == null || timeActivateMessage.Destroyed)
+                timeActivateMessage = timer.Once(TimerRandom, ActivateMessageChat);
+            else
+            {
+                timeActivateMessage.Destroy();
+                timeActivateMessage = timer.Once(TimerRandom, ActivateMessageChat);
+            }
+
+            String Message = GetMessage();
+            foreach (BasePlayer player in BasePlayer.activePlayerList)
+                SendMessage(player, Message);
+        }
+        public void SendMessage(BasePlayer player, String Message) 
+        {
             if (String.IsNullOrWhiteSpace(Message)) return;
             FakePlayer Player = GetFake();
             if (Player == null) return;
@@ -747,18 +930,18 @@ namespace Oxide.Plugins
                 ReservedPlayer.Remove(Player);
                 return;
             }
-            string Prefix = IQChat ? config.FakeActive.ChatActive.IQChatSettings.DefaultSettings ? GetInfoIQChat(IQChatGetType.Prefix, player.userID, true) : MessageSettings.PrefixUse ? !String.IsNullOrWhiteSpace(Player.IQChatPreifx) ? Player.IQChatPreifx : "" : "" : "";
-            string DisplayName = IQChat ? config.FakeActive.ChatActive.IQChatSettings.DefaultSettings ? !String.IsNullOrWhiteSpace(GetInfoIQChat(IQChatGetType.NickColor, player.userID, true)) ? $"<color={GetInfoIQChat(IQChatGetType.NickColor, player.userID, true)}>{Player.DisplayName}</color> " : Player.DisplayName : MessageSettings.ColorNickUse ? !String.IsNullOrWhiteSpace(Player.IQChatColorNick) ? $"<color={Player.IQChatColorNick}>{Player.DisplayName}</color> " : Player.DisplayName : Player.DisplayName : Player.DisplayName;
-            string ColorMessage = IQChat ? config.FakeActive.ChatActive.IQChatSettings.DefaultSettings ? GetInfoIQChat(IQChatGetType.ChatColor, player.userID, true) : MessageSettings.ColorChatUse ? !String.IsNullOrWhiteSpace(Player.IQChatColorChat) ? Player.IQChatColorChat : "#ffffff" : "#ffffff" : "#ffffff";
-            string FormatPlayer = $"{Prefix} {DisplayName}";
-            string FormatMessage = !String.IsNullOrWhiteSpace(ColorMessage) ? $"<color={ColorMessage}>{Message}</color>" : $"{Message}";
+
+            String Prefix = IQChat ? GetInfoIQChat(IQChatGetType.Prefix) : String.Empty;
+            String ColorNick = IQChat ? GetInfoIQChat(IQChatGetType.NickColor) : config.FakeActive.ChatActive.ColorChatNickDefault;
+            String ColorMessage = IQChat ? GetInfoIQChat(IQChatGetType.ChatColor) : "#ffffff";
+
+            String DisplayName = !String.IsNullOrWhiteSpace(ColorNick) ? $"<color={ColorNick}>{Player.DisplayName}</color> " : Player.DisplayName;
+            String FormatPlayer = $"{Prefix} {DisplayName}";
+            String FormatMessage = !String.IsNullOrWhiteSpace(ColorMessage) ? $"<color={ColorMessage}>{Message}</color>" : $"{Message}";
 
             if (IQChat)
                 IQChat?.Call("API_SEND_PLAYER", player, FormatPlayer, FormatMessage, $"{Player.UserID}");
-            else player.SendConsoleCommand("chat.add", Chat.ChatChannel.Global, Player.UserID, $"{FormatPlayer}");
-
-            if (config.UseLogConsole)
-                PrintWarning($"\nОтправлено сообщение в общий чат от Fake-Player: {FormatPlayer}({Player.UserID})\nСообщение: {Message}\n\n");
+            else player.SendConsoleCommand("chat.add", Chat.ChatChannel.Global, Player.UserID, $"{FormatPlayer}: {FormatMessage}");
         }
         public void ChatNetworkConnected(BasePlayer player)
         {
@@ -806,13 +989,15 @@ namespace Oxide.Plugins
         public void SendRandomPM()
         {
             if (!config.FakeActive.ChatActive.IQChatPMSettings.UseRandomPM) return;
-            int IndexRandomPlayer = UnityEngine.Random.Range(0, BasePlayer.activePlayerList.Count);
+            if (!IQChat) return;
+
+            int IndexRandomPlayer = Oxide.Core.Random.Range(0, BasePlayer.activePlayerList.Count);
             BasePlayer RandomPlayer = BasePlayer.activePlayerList[IndexRandomPlayer];
             if (RandomPlayer == null) return;
             if (!RandomPlayer.IsConnected) return;
-            if (!IQChat) return;
             string Message = GetPM();
             FakePlayer Player = GetFake();
+            if (Player == null) return;
             BasePlayer RealUser = BasePlayer.Find(Player.DisplayName);
             if (RealUser != null && RealUser.IsConnected && !RealUser.IsSleeping())
             {
@@ -830,7 +1015,7 @@ namespace Oxide.Plugins
         public string GetMessage()
         {
             var MessageSettings = config.FakeActive.ChatActive;
-            string Message = FakeMessageList[UnityEngine.Random.Range(0, FakeMessageList.Count)].Message;
+            string Message = FakeMessageList[Oxide.Core.Random.Range(0, FakeMessageList.Count)].Message;
             foreach (var BlackList in MessageSettings.BlackList)
                 Message = Message.Replace(BlackList, "");
             return Message;
@@ -838,19 +1023,19 @@ namespace Oxide.Plugins
         public string GetCountry()
         {
             var CountryList = config.FakeActive.ChatActive.IQChatNetworkSetting.CountryListConnected;
-            int RandomCountry = UnityEngine.Random.Range(0, CountryList.Count);
+            int RandomCountry = Oxide.Core.Random.Range(0, CountryList.Count);
             return CountryList[RandomCountry];
         }
         public string GetReason()
         {
             var ReasonList = config.FakeActive.ChatActive.IQChatNetworkSetting.ReasonListDisconnected;
-            int RandomReason = UnityEngine.Random.Range(0, ReasonList.Count);
+            int RandomReason = Oxide.Core.Random.Range(0, ReasonList.Count);
             return ReasonList[RandomReason];
         }
         public string GetPM()
         {
             var PMList = config.FakeActive.ChatActive.IQChatPMSettings.PMListMessage;
-            int RnadomPM = UnityEngine.Random.Range(0, PMList.Count);
+            int RnadomPM = Oxide.Core.Random.Range(0, PMList.Count);
             return PMList[RnadomPM];
         }
         #endregion
@@ -858,48 +1043,64 @@ namespace Oxide.Plugins
         #endregion
 
         #region Sound Active
-        private string GetRandomEffect()
+
+        private Configuration.ActiveSettings.SounActiveSettings.Sounds GetSound()
         {
-            var Sound = config.FakeActive.SoundActive;
-            if (!Sound.UseLocalSoundBase) return null;
+            Int32 RandomSoundList = Oxide.Core.Random.Range(0, SortedSoundList.Count());
+            if (!IsRare(SortedSoundList[RandomSoundList].Rare)) return null;
 
-            var SoundList = Sound.SoundLists.OrderBy(x => x.DayFaktor == SaveCreated);
-            int RandomSoundList = UnityEngine.Random.Range(0, SoundList.Count());
-            if (!IsRare(SoundList.ToList()[RandomSoundList].Rare)) return null;
-
-            return SoundList.ToList()[RandomSoundList].SoundPath;
+            return SortedSoundList[RandomSoundList];
         }
         void StartSoundEffects()
         {
-            var Sound = config.FakeActive.SoundActive;
-            int RandomTimer = UnityEngine.Random.Range(Sound.MinimumIntervalSound, Sound.MaximumIntervalSound);
-            timer.Once(RandomTimer, () =>
+            Configuration.ActiveSettings.SounActiveSettings Sound = config.FakeActive.SoundActive;
+            if (!Sound.UseLocalSoundBase) return;
+            
+            Int32 RandomTimer = Oxide.Core.Random.Range(Sound.MinimumIntervalSound, Sound.MaximumIntervalSound);
+
+            if (timerPlaySounds == null || timeActivateMessagePm.Destroyed)
+                timerPlaySounds = timer.Once(RandomTimer, StartSoundEffects);
+            else
             {
-                foreach (var player in BasePlayer.activePlayerList)
-                {
-                    string PathEffect = GetRandomEffect();
-                    if (String.IsNullOrWhiteSpace(PathEffect) || PathEffect == null)
-                    {
-                        StartSoundEffects();
-                        return;
-                    }
-                    var EffectPos = config.FakeActive.SoundActive.SoundLists.FirstOrDefault(x => x.SoundPath == PathEffect);
-                    if (EffectPos == null)
-                    {
-                        StartSoundEffects();
-                        return;
-                    }
-                    Effect effect = new Effect();
-                    int RandomXZ = UnityEngine.Random.Range(EffectPos.MinPos, EffectPos.MaxPos);
-                    Vector3 PosSound = new Vector3(player.transform.position.x + RandomXZ, player.transform.position.y, player.transform.position.z + RandomXZ);
-                    effect.Init(Effect.Type.Generic, PosSound, PosSound, (Network.Connection)null);
-                    effect.pooledString = PathEffect;
-                    EffectNetwork.Send(effect, player.net.connection);
-                }
-                StartSoundEffects();
-                if (config.UseLogConsole)
-                    PrintWarning($"\n\nДля игроков были проиграны звуки");
-            });
+                timerPlaySounds.Destroy();
+                timerPlaySounds = timer.Once(RandomTimer, StartSoundEffects);
+            }
+
+            PlaySoundEffects();
+        }
+        private void PlaySoundEffects()
+        {
+            Configuration.ActiveSettings.SounActiveSettings.Sounds Sound = GetSound();
+            if (Sound == null) return;
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                Effect effect = new Effect();
+                int RandomXZ = Oxide.Core.Random.Range(Sound.MinPos, Sound.MaxPos);
+                Vector3 PosSound = new Vector3(player.transform.position.x + RandomXZ, player.transform.position.y, player.transform.position.z + RandomXZ);
+                effect.Init(Effect.Type.Generic, PosSound, PosSound, (Network.Connection)null);
+                effect.pooledString = Sound.SoundPath;
+                EffectNetwork.Send(effect, player.net.connection);
+            }
+
+            if (config.UseLogConsole)
+                PrintWarning($"\n\nДля игроков были проиграны звуки");
+        }
+
+        #endregion
+
+        #region InfoMetods
+
+        void ShowFakeOnline(BasePlayer player)
+        {
+            if (IQChat) return;
+            if (ReservedPlayer == null) return;
+            if (ReservedPlayer.Count == 0) return;
+
+            String OnlinePlayers = String.Join(", ", ReservedPlayer.Select(p => p.DisplayName.Sanitize()).ToArray());
+            String Message = GetLang("SHOW_ONLINE_USERS", player.UserIDString, OnlinePlayers, ReservedPlayer.Count);
+
+            player.SendConsoleCommand("chat.add", Chat.ChatChannel.Global, 0, Message);
         }
 
         #endregion
@@ -909,44 +1110,85 @@ namespace Oxide.Plugins
         #region Hooks
         private void OnServerInitialized()
         {
+            RoutineInitPlugin = ServerMgr.Instance.StartCoroutine(InitializePlugin());
+        }
+        
+        public IEnumerator InitializePlugin()
+        {
             PrintWarning("------------------------");
-            PrintWarning("IQFakeActive by Mercury");
+            PrintWarning("IQFakeActive by SkuliDropek");
             PrintWarning($"Текущий реальный онлайн : {BasePlayer.activePlayerList.Count}");
-            PrintWarning("Сейчас начнется генерация активности, ожидайте..Process: 478.."); 
+            PrintWarning("Сейчас начнется генерация активности, ожидайте..Process: ..");
             PrintWarning("------------------------");
+            yield return new WaitForSeconds(0.3f);
+
             //Генерация игроков и чата
             GeneratedAll();
+
+            yield return new WaitForSeconds(3f);
 
             //Генерируем онлайн от множителя и дополнительных факторов
             GeneratedOnline();
 
+            yield return new WaitForSeconds(1f);
+
+            GenerateSounds();
+
+            yield return new WaitForSeconds(1f);
+
             //Запуск актива в чате
             StartChat();
 
+            yield return new WaitForSeconds(30f);
+
             //Резервируем игроков
-            timer.Once(30f, () =>
-            {
-                SyncReserved();
-                timer.Every(600f, () => { SyncReserved(); });
-            });
+            SyncReserved();
+            timerSynh = timer.Every(600f, () => { SyncReserved(); });
+
+            yield return new WaitForSeconds(3f);
 
             //Запускаем звуки
             StartSoundEffects();
         }
-        void Unload() => ServerMgr.Instance.StopCoroutine(AddPlayerAvatar());
-
-        private bool OnPlayerChat(BasePlayer player, string message, Chat.ChatChannel channel)
+        void Unload()
         {
-            if (player.IsAdmin) return false;
-            if (String.IsNullOrWhiteSpace(message)) return false;
-            if (channel == Chat.ChatChannel.Team || channel == Chat.ChatChannel.Server) return false;
+            if (RoutineAddAvatars != null)
+                ServerMgr.Instance.StopCoroutine(RoutineAddAvatars);
+            if (RoutineInitPlugin != null)
+                ServerMgr.Instance.StopCoroutine(RoutineInitPlugin);
+
+            RoutineAddAvatars = null;
+            RoutineInitPlugin = null;
+            if (timeActivateMessage != null && !timeActivateMessage.Destroyed)
+                timeActivateMessage.Destroy();
+            if (timeActivateMessagePm != null && !timeActivateMessagePm.Destroyed)
+                timeActivateMessagePm.Destroy();
+            if (timerSynh != null && !timerSynh.Destroyed)
+                timerSynh.Destroy();
+            if (timerGenerateOnline != null && !timerGenerateOnline.Destroyed)
+                timerGenerateOnline.Destroy();
+            if (timerPlaySounds != null && !timerPlaySounds.Destroyed)
+                timerPlaySounds.Destroy();
+        }
+
+        object OnPlayerChat(BasePlayer player, string message, Chat.ChatChannel channel)
+        {
+            if (player.IsAdmin) return null;
+            if (String.IsNullOrWhiteSpace(message)) return null;
+            if (channel == Chat.ChatChannel.Team || channel == Chat.ChatChannel.Server) return null;
             DumpChat(message);
-            return false;
+            return null;
         }
         void OnPlayerConnected(BasePlayer player) => DumpPlayers(player);
         #endregion
 
         #region Commands
+        [ChatCommand("online")]
+        void ChatCommandShowOnline(BasePlayer player) => ShowFakeOnline(player);
+
+        [ChatCommand("players")]
+        void ChatCommandShowPlayers(BasePlayer player) => ShowFakeOnline(player);
+
         [ConsoleCommand("iqfa")]
         void IQFakeActiveCommand(ConsoleSystem.Arg arg)
         {
@@ -986,18 +1228,54 @@ namespace Oxide.Plugins
 
         #region API
 
-        bool IsFake(ulong userID) => FakePlayerList.Where(x => x.UserID == userID).Count() > 0;
+
+        bool IsFake(ulong userID) => FakePlayerList.Where(x => x.UserID == userID.ToString()).Count() > 0;
         bool IsFake(string DisplayName) => FakePlayerList.Where(x => x.DisplayName.Contains(DisplayName)).Count() > 0;
         int GetOnline() => FakeOnline;
-        ulong GetFakeIDRandom() => (ulong)FakePlayerList[UnityEngine.Random.Range(0, FakePlayerList.Count)].UserID;
-        string GetFakeNameRandom() => (string)FakePlayerList[UnityEngine.Random.Range(0, FakePlayerList.Count)].DisplayName;
+        ulong GetFakeIDRandom() => (ulong)ulong.Parse(FakePlayerList[Oxide.Core.Random.Range(0, FakePlayerList.Count)].UserID);
+        string GetFakeNameRandom() => (string)FakePlayerList[Oxide.Core.Random.Range(0, FakePlayerList.Count)].DisplayName;
         string FindFakeName(ulong ID)
         {
-            var Fake = ReservedPlayer.FirstOrDefault(x => x.UserID == ID);
+            var Fake = ReservedPlayer.FirstOrDefault(x => x.UserID == ID.ToString());
             if (Fake == null) return null;
             return Fake.DisplayName;
         }
         int DayWipe() => SaveCreated;
+        void RemoveReserver(UInt64 ID)
+        {
+            var Fake = ReservedPlayer.FirstOrDefault(x => x.UserID == ID.ToString());
+            if (Fake == null) return;
+
+            ReservedPlayer.Remove(Fake);
+        }
+        #endregion
+
+        #region Lang
+        private new void LoadDefaultMessages()
+        {
+            lang.RegisterMessages(new Dictionary<String, String>
+            {
+                ["SHOW_ONLINE_USERS"] = "Players Online: <color=#79d36b>{0}</color> (<color=#dda32e>{1}</color>)",
+            }, this);
+
+            lang.RegisterMessages(new Dictionary<String, String>
+            {
+                ["SHOW_ONLINE_USERS"] = "Игроки онлайн: <color=#79d36b>{0}</color> (<color=#dda32e>{1}</color>)",
+            }, this, "ru");
+            PrintWarning("Языковой файл загружен успешно");
+        }
+
+        public static StringBuilder sb = new StringBuilder();
+        public String GetLang(String LangKey, String userID = null, params object[] args)
+        {
+            sb.Clear();
+            if (args != null)
+            {
+                sb.AppendFormat(lang.GetMessage(LangKey, this, userID), args);
+                return sb.ToString();
+            }
+            return lang.GetMessage(LangKey, this, userID);
+        }
         #endregion
     }
 }

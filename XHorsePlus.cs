@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("XHorsePlus", "TopPlugin.ru/Sempai#3239", "1.0.1")]
+    [Info("XHorsePlus", "SkuliDropek", "1.0.1")]
     class XHorsePlus : RustPlugin
     {	
 	    #region Configuration
@@ -94,8 +94,9 @@ namespace Oxide.Plugins
 		private void OnServerInitialized()
 		{		
 			PrintWarning("\n-----------------------------\n" +
-			"     Author - Sempai#3239\n" +
-			"    Discord - Sempai#3239 - Sempai#3239\n" +
+			"     Author - SkuliDropek\n" +
+			"     VK - vk.com/idannopol\n" +
+			"    Discord - Skuli Dropek#4816 - KINGSkuliDropek#4837\n" +
 			"     Config - v.1459\n" +
 			"-----------------------------");
 		}

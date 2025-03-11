@@ -5,11 +5,11 @@ using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Game.Rust.Cui;
 using UnityEngine;
-using System.Linq;
+using System.Linq; 
 
 namespace Oxide.Plugins
 {
-    [Info("XRPG", "Monster.", "1.0.9")]
+    [Info("XRPG", "SkuliDropek.", "1.1.101")]
     class XRPG : RustPlugin
     {
         #region Configuration
@@ -33,6 +33,8 @@ namespace Oxide.Plugins
 				[JsonProperty("Включить рпг панель")] public bool Panel;
                 [JsonProperty("Включить рпг сообщения")] public bool Messages;
                 [JsonProperty("Стартовый умножитель прокачки рейтов")] public float Boost;
+                [JsonProperty("Размер текста")] public int TextSize;
+				[JsonProperty("Список игнорируемых инструментов")] public List<string> BlockItem;
             }
 
             internal class Permissions
@@ -62,7 +64,7 @@ namespace Oxide.Plugins
 
                 [JsonProperty("Ресурсы за добычу/подбор которых начислять рейты рудокопа | Ресурсы на которые будут действовать рейты рудокопа")] public Dictionary<string, float> Item = new Dictionary<string, float>();
             }
-
+ 
             internal class AnimalSetting
             {
                 [JsonProperty("Максимальные рейты охотника")] public float RateMax;
@@ -105,7 +107,13 @@ namespace Oxide.Plugins
 						Slow = false,
                         Panel = true,
                         Messages = true,
-                        Boost = 1.0f
+                        Boost = 1.0f,
+						TextSize = 13,
+						BlockItem = new List<string>
+						{
+							"jackhammer.entity",
+							"chainsaw.entity"
+						}
                     },
                     Permisssion = new Dictionary<string, Permissions>
                     {
@@ -259,10 +267,10 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             PrintWarning("\n-----------------------------\n" +
-            "     Author - Monster\n" +
+            "     Author - SkuliDropek\n" +
             "     VK - vk.com/idannopol\n" +
-            "     Discord - Monster#4837\n" +
-            "     Config - v.2046\n" +
+            "    Discord - Skuli Dropek#4816 - KINGSkuliDropek#4837\n" +
+            "     Config - v.1436\n" +
             "-----------------------------");
 
             if (Interface.Oxide.DataFileSystem.ExistsDatafile("XRPG"))
@@ -338,25 +346,26 @@ namespace Oxide.Plugins
                 if (config.Wood.Item.ContainsKey(item.info.shortname))
 				{
                         if (!(StoredData[player.userID].Wood >= StoredData[player.userID].WoodRate))
-                        {
-							var itemw = config.Wood.Item[item.info.shortname];
-							float wrate = 0;
+							if(!config.Setting.BlockItem.Contains(player.GetHeldEntity().ShortPrefabName))
+							{
+								var itemw = config.Wood.Item[item.info.shortname];
+								float wrate = 0; 
 							
-							if (config.Setting.Slow)
-                                wrate = (itemw - (itemw / StoredData[player.userID].WoodRate * (int)StoredData[player.userID].Wood)) * StoredData[player.userID].Boost;
-							else
-								wrate = itemw * StoredData[player.userID].Boost;
+								if (config.Setting.Slow)
+									wrate = (itemw - (itemw / StoredData[player.userID].WoodRate * (int)StoredData[player.userID].Wood)) * StoredData[player.userID].Boost;
+								else
+									wrate = itemw * StoredData[player.userID].Boost;
 
-                            StoredData[player.userID].Wood += wrate;
+								StoredData[player.userID].Wood += wrate;
 
-                            if (config.Setting.Panel)
-								if (StoredData[player.userID].ActiveUI)
-								{
-                                    WoodUI(player);
-                                    if (config.Setting.Messages)
-                                        UPMessageWood(player, $"+ {Math.Round(wrate, 5)}");
-								}
-                        }
+								if (config.Setting.Panel)
+									if (StoredData[player.userID].ActiveUI)
+									{
+										WoodUI(player);
+										if (config.Setting.Messages)
+											UPMessageWood(player, $"+ {Math.Round(wrate, 5)}");
+									}
+							}
 						
 					item.amount = (int)Math.Round(item.amount * StoredData[player.userID].Wood, 1);
 				}
@@ -364,25 +373,26 @@ namespace Oxide.Plugins
                 if (config.Ore.Item.ContainsKey(item.info.shortname))
 				{
                         if (!(StoredData[player.userID].Ore >= StoredData[player.userID].OreRate))
-                        {
-							var itemo = config.Ore.Item[item.info.shortname];
-							float orate = 0;
+							if(!config.Setting.BlockItem.Contains(player.GetHeldEntity().ShortPrefabName))
+							{	
+								var itemo = config.Ore.Item[item.info.shortname];
+								float orate = 0;
 							
-							if (config.Setting.Slow)
-                                orate = (itemo - (itemo / StoredData[player.userID].OreRate * (int)StoredData[player.userID].Ore)) * StoredData[player.userID].Boost;
-							else
-								orate = itemo * StoredData[player.userID].Boost;
+								if (config.Setting.Slow)
+									orate = (itemo - (itemo / StoredData[player.userID].OreRate * (int)StoredData[player.userID].Ore)) * StoredData[player.userID].Boost;
+								else
+									orate = itemo * StoredData[player.userID].Boost;
 
-                            StoredData[player.userID].Ore += orate;
+								StoredData[player.userID].Ore += orate;
 
-                            if (config.Setting.Panel)
-								if (StoredData[player.userID].ActiveUI)
-								{
-                                    OreUI(player);
-                                    if (config.Setting.Messages)
-                                        UPMessageOre(player, $"+ {Math.Round(orate, 5)}");
-								}
-                        }
+								if (config.Setting.Panel)
+									if (StoredData[player.userID].ActiveUI)
+									{
+										OreUI(player);
+										if (config.Setting.Messages)
+											UPMessageOre(player, $"+ {Math.Round(orate, 5)}");
+									}
+							}
 						
 					item.amount = (int)Math.Round(item.amount * StoredData[player.userID].Ore, 1);
 				}
@@ -390,25 +400,26 @@ namespace Oxide.Plugins
                 if (config.Animal.Item.ContainsKey(item.info.shortname))
 				{
                         if (!(StoredData[player.userID].Animal >= StoredData[player.userID].AnimalRate))
-                        {
-							var itema = config.Animal.Item[item.info.shortname];
-							float arate = 0;
+							if(!config.Setting.BlockItem.Contains(player.GetHeldEntity().ShortPrefabName))
+							{
+								var itema = config.Animal.Item[item.info.shortname];
+								float arate = 0;
 							
-							if (config.Setting.Slow)
-                                arate = (itema - (itema / StoredData[player.userID].AnimalRate * (int)StoredData[player.userID].Animal)) * StoredData[player.userID].Boost;
-							else
-								arate = itema * StoredData[player.userID].Boost;
+								if (config.Setting.Slow)
+									arate = (itema - (itema / StoredData[player.userID].AnimalRate * (int)StoredData[player.userID].Animal)) * StoredData[player.userID].Boost;
+								else
+									arate = itema * StoredData[player.userID].Boost;
 
-                            StoredData[player.userID].Animal += arate;
+								StoredData[player.userID].Animal += arate;
 
-                            if (config.Setting.Panel)
-								if (StoredData[player.userID].ActiveUI)
-								{
-                                    AnimalUI(player);
-                                    if (config.Setting.Messages)
-                                        UPMessageAnimal(player, $"+ {Math.Round(arate, 5)}");
-								}
-                        }
+								if (config.Setting.Panel)
+									if (StoredData[player.userID].ActiveUI)
+									{
+										AnimalUI(player);
+										if (config.Setting.Messages)
+											UPMessageAnimal(player, $"+ {Math.Round(arate, 5)}");
+									}
+							}
 						
 					item.amount = (int)Math.Round(item.amount * StoredData[player.userID].Animal, 1);
 				}
@@ -522,7 +533,7 @@ namespace Oxide.Plugins
 
             BasePlayer player = info?.InitiatorPlayer;
 
-            if (player == null || player is NPCPlayer || player is HTNPlayer) return;
+			if (player == null || player.IsNpc) return;
 
             if (!permission.UserHasPermission(player.UserIDString, "xrpg.use")) return;
 
@@ -653,14 +664,14 @@ namespace Oxide.Plugins
         {
             CuiHelper.DestroyUi(player, ".RPG");
             CuiElementContainer container = new CuiElementContainer();
-
+ 
             container.Add(new CuiPanel
             {
                 RectTransform = { AnchorMin = config.Panel.AnchorMin, AnchorMax = config.Panel.AnchorMax, OffsetMin = config.Panel.OffsetMin, OffsetMax = config.Panel.OffsetMax },
                 Image = { Color = "0 0 0 0" }
             }, "Hud", ".RPG");
 
-            CuiHelper.AddUi(player, container);
+            CuiHelper.AddUi(player, container); 
 			
 			WoodUI(player);
 			OreUI(player);
@@ -668,9 +679,16 @@ namespace Oxide.Plugins
         }
 		
 		void HideUI(BasePlayer player)
-		{
-			CuiHelper.DestroyUi(player, ".Hide");
-            CuiElementContainer container = new CuiElementContainer();
+		{ 
+			CuiHelper.DestroyUi(player, ".Hide");  
+            CuiElementContainer container = new CuiElementContainer();		
+			
+			container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "-0.1475 0", AnchorMax = "-0.01 0.315", OffsetMax = "0 0" },
+                Button = { Color = "0.9686275 0.9176471 0.8784314 0.02921569", Material = "assets/icons/greyout.mat", Command = "ui hide" },
+                Text = { Text = ">>", Align = TextAnchor.MiddleCenter, FontSize = config.Setting.TextSize, Color = "1 1 1 0.6" }
+            }, ".RPG", ".Hide");
 			
 			CuiHelper.AddUi(player, container);
 		}
@@ -680,7 +698,14 @@ namespace Oxide.Plugins
 			CuiHelper.DestroyUi(player, ".Show");
             CuiElementContainer container = new CuiElementContainer();
 			
-			CuiHelper.AddUi(player, container); 
+			container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-236 16", OffsetMax = "-210 42" },
+                Button = { Color = "0.9686275 0.9176471 0.8784314 0.02921569", Material = "assets/icons/greyout.mat", Command = "ui show" },
+                Text = { Text = "<<", Align = TextAnchor.MiddleCenter, FontSize = 13, Color = "1 1 1 0.6" }
+            }, "Overlay", ".Show");
+			
+			CuiHelper.AddUi(player, container);  
 		}
 		
 		void WoodUI(BasePlayer player)
@@ -690,32 +715,32 @@ namespace Oxide.Plugins
 			
 			float ratewood = StoredData[player.userID].Wood;
             float maxratewood = StoredData[player.userID].WoodRate;
-            string pregresswood = ratewood >= maxratewood ? "-3 23" : config.Panel.Progress ?  $"{-166 + ((ratewood - config.Wood.RateStart) * (163 / (maxratewood - config.Wood.RateStart)))} 23" : $"{-163 + (ratewood * (160 / maxratewood))} 23";
+            string pregresswood = ratewood >= maxratewood ? "0.985 0.9" : config.Panel.Progress ?  $"{0.137 + ((ratewood - config.Wood.RateStart) * (0.848 / (maxratewood - config.Wood.RateStart)))} 0.9" : $"{0.137 + (ratewood * (0.848 / maxratewood))} 0.9";
             string textwood = ratewood >= maxratewood ? $"{lang.GetMessage("W", this, player.UserIDString)} {maxratewood}x" : $"{lang.GetMessage("W", this, player.UserIDString)} {Math.Round(ratewood, 2)}x";
-
+ 
             container.Add(new CuiPanel
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-192 56", OffsetMax = "0 82" },
+                RectTransform = { AnchorMin = "0 0.685", AnchorMax = "1 1", OffsetMax = "0 0" },
                 Image = { Color = "0.9686275 0.9176471 0.8784314 0.02921569", Material = "assets/icons/greyout.mat" }
             }, ".RPG", ".Wood");
 
             container.Add(new CuiButton
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-189 4", OffsetMax = "-171 22" },
+                RectTransform = { AnchorMin = "0.0125 0.155", AnchorMax = "0.11 0.845", OffsetMax = "0 0" },
                 Button = { Color = "1 1 1 0.5", Sprite = "assets/icons/level_wood.png" },
                 Text = { Text = "" }
-            }, ".Wood");
+            }, ".Wood"); 
 
             container.Add(new CuiPanel
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-166 3", OffsetMax = pregresswood },
+                RectTransform = { AnchorMin = "0.137 0.1", AnchorMax = pregresswood, OffsetMax = "0 0" },
                 Image = { Color = "0.5586275 0.7376471 0.2484314 0.92921569", Material = "assets/icons/greyout.mat" }
-            }, ".Wood");
+            }, ".Wood");    	
 
             container.Add(new CuiLabel
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-154 0", OffsetMax = "0 26" },
-                Text = { Text = textwood, Align = TextAnchor.MiddleLeft, FontSize = 13, Color = "1 1 1 0.6" }
+                RectTransform = { AnchorMin = "0.2 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                Text = { Text = textwood, Align = TextAnchor.MiddleLeft, FontSize = config.Setting.TextSize, Color = "1 1 1 0.6" }
             }, ".Wood");
 			
 			CuiHelper.AddUi(player, container);
@@ -726,39 +751,39 @@ namespace Oxide.Plugins
 			CuiHelper.DestroyUi(player, ".Ore");
             CuiElementContainer container = new CuiElementContainer();
 			
-			float rateore = StoredData[player.userID].Ore;
+			float rateore = StoredData[player.userID].Ore; 
             float maxrateore = StoredData[player.userID].OreRate;
-			string pregressore = rateore >= maxrateore ? "-3 23" : config.Panel.Progress ?  $"{-166 + ((rateore - config.Ore.RateStart) * (163 / (maxrateore - config.Ore.RateStart)))} 23" : $"{-163 + (rateore * (160 / maxrateore))} 23";
+			string pregressore = rateore >= maxrateore ? "0.985 0.9" : config.Panel.Progress ?  $"{0.137 + ((rateore - config.Ore.RateStart) * (0.848 / (maxrateore - config.Ore.RateStart)))} 0.9" : $"{0.137 + (rateore * (0.848 / maxrateore))} 0.9";
             string textore = rateore >= maxrateore ? $"{lang.GetMessage("O", this, player.UserIDString)} {maxrateore}x" : $"{lang.GetMessage("O", this, player.UserIDString)} {Math.Round(rateore, 2)}x";
 
             container.Add(new CuiPanel
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-192 28", OffsetMax = "0 54" },
+                RectTransform = { AnchorMin = "0 0.345", AnchorMax = "1 0.66", OffsetMax = "0 0" },
                 Image = { Color = "0.9686275 0.9176471 0.8784314 0.02921569", Material = "assets/icons/greyout.mat" }
             }, ".RPG", ".Ore");
 
             container.Add(new CuiButton
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-189 4", OffsetMax = "-171 22" },
+                RectTransform = { AnchorMin = "0.0125 0.155", AnchorMax = "0.11 0.845", OffsetMax = "0 0" },
                 Button = { Color = "1 1 1 0.5", Sprite = "assets/icons/player_carry.png" },
                 Text = { Text = "" }
             }, ".Ore");
 
             container.Add(new CuiPanel
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-166 3", OffsetMax = pregressore },
+                RectTransform = { AnchorMin = "0.137 0.1", AnchorMax = pregressore, OffsetMax = "0 0" },
                 Image = { Color = "0.2986275 0.6076471 0.8384314 0.92921569", Material = "assets/icons/greyout.mat" }
             }, ".Ore");
 
             container.Add(new CuiLabel
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-154 0", OffsetMax = "0 26" },
-                Text = { Text = textore, Align = TextAnchor.MiddleLeft, FontSize = 13, Color = "1 1 1 0.6" }
+                RectTransform = { AnchorMin = "0.2 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                Text = { Text = textore, Align = TextAnchor.MiddleLeft, FontSize = config.Setting.TextSize, Color = "1 1 1 0.6" }
             }, ".Ore");
 			
-			CuiHelper.AddUi(player, container);
+			CuiHelper.AddUi(player, container); 
 		}		
-		
+		 
 		void AnimalUI(BasePlayer player)
 		{
 			CuiHelper.DestroyUi(player, ".Animal");
@@ -766,32 +791,32 @@ namespace Oxide.Plugins
 			
 			float rateanimal = StoredData[player.userID].Animal;
             float maxrateanimal = StoredData[player.userID].AnimalRate;
-			string pregressanimal = rateanimal >= maxrateanimal ? "-3 23" : config.Panel.Progress ?  $"{-166 + ((rateanimal - config.Animal.RateStart) * (163 / (maxrateanimal - config.Animal.RateStart)))} 23" : $"{-163 + (rateanimal * (160 / maxrateanimal))} 23";
+			string pregressanimal = rateanimal >= maxrateanimal ? "0.985 0.9" : config.Panel.Progress ?  $"{0.137 + ((rateanimal - config.Animal.RateStart) * (0.848 / (maxrateanimal - config.Animal.RateStart)))} 0.9" : $"{0.137 + (rateanimal * (0.848 / maxrateanimal))} 0.9";
             string textanimal = rateanimal >= maxrateanimal ? $"{lang.GetMessage("A", this, player.UserIDString)} {maxrateanimal}x" : $"{lang.GetMessage("A", this, player.UserIDString)} {Math.Round(rateanimal, 2)}x";
 
             container.Add(new CuiPanel
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-192 0", OffsetMax = "0 26" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.315", OffsetMax = "0 0" },
                 Image = { Color = "0.9686275 0.9176471 0.8784314 0.02921569", Material = "assets/icons/greyout.mat" }
             }, ".RPG", ".Animal");
 
             container.Add(new CuiButton
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-189 4", OffsetMax = "-171 22" },
+                RectTransform = { AnchorMin = "0.0125 0.155", AnchorMax = "0.11 0.845", OffsetMax = "0 0" },
                 Button = { Color = "1 1 1 0.5", Sprite = "assets/icons/bite.png" },
                 Text = { Text = "" }
             }, ".Animal");
 
             container.Add(new CuiPanel
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-166 3", OffsetMax = pregressanimal },
+                RectTransform = { AnchorMin = "0.137 0.1", AnchorMax = pregressanimal, OffsetMax = "0 0" },
                 Image = { Color = "0.7886275 0.4476471 0.2184314 0.92921569", Material = "assets/icons/greyout.mat" }
             }, ".Animal");
 
             container.Add(new CuiLabel
             {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-154 0", OffsetMax = "0 26" },
-                Text = { Text = textanimal, Align = TextAnchor.MiddleLeft, FontSize = 13, Color = "1 1 1 0.6" }
+                RectTransform = { AnchorMin = "0.2 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                Text = { Text = textanimal, Align = TextAnchor.MiddleLeft, FontSize = config.Setting.TextSize, Color = "1 1 1 0.6" }
             }, ".Animal");
 			
 			CuiHelper.AddUi(player, container);
@@ -809,8 +834,8 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 FadeOut = 0.5f,
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-285 0", OffsetMax = "-225 26" },
-                Text = { FadeIn = 0.5f, Text = $"{Messages}", Align = TextAnchor.MiddleRight, Font = "robotocondensed-regular.ttf", FontSize = 13, Color = "1 1 1 0.6" }
+                RectTransform = { AnchorMin = "-0.5 0", AnchorMax = "-0.165 1", OffsetMax = "0 0" },
+                Text = { FadeIn = 0.5f, Text = $"{Messages}", Align = TextAnchor.MiddleRight, Font = "robotocondensed-regular.ttf", FontSize = config.Setting.TextSize, Color = "1 1 1 0.6" }
             }, ".Wood", ".UPMessageWood");
 
             CuiHelper.AddUi(player, container);
@@ -826,8 +851,8 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 FadeOut = 0.5f,
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-285 0", OffsetMax = "-225 26" },
-                Text = { FadeIn = 0.5f, Text = $"{Messages}", Align = TextAnchor.MiddleRight, Font = "robotocondensed-regular.ttf", FontSize = 13, Color = "1 1 1 0.6" }
+                RectTransform = { AnchorMin = "-0.5 0", AnchorMax = "-0.165 1", OffsetMax = "0 0" },
+                Text = { FadeIn = 0.5f, Text = $"{Messages}", Align = TextAnchor.MiddleRight, Font = "robotocondensed-regular.ttf", FontSize = config.Setting.TextSize, Color = "1 1 1 0.6" }
             }, ".Ore", ".UPMessageOre");
 
             CuiHelper.AddUi(player, container);
@@ -843,8 +868,8 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 FadeOut = 0.5f,
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-285 0", OffsetMax = "-225 26" },
-                Text = { FadeIn = 0.5f, Text = $"{Messages}", Align = TextAnchor.MiddleRight, Font = "robotocondensed-regular.ttf", FontSize = 13, Color = "1 1 1 0.6" }
+                RectTransform = { AnchorMin = "-0.5 0", AnchorMax = "-0.165 1", OffsetMax = "0 0" },
+                Text = { FadeIn = 0.5f, Text = $"{Messages}", Align = TextAnchor.MiddleRight, Font = "robotocondensed-regular.ttf", FontSize = config.Setting.TextSize, Color = "1 1 1 0.6" }
             }, ".Animal", ".UPMessageAnimal");
 
             CuiHelper.AddUi(player, container);

@@ -9,7 +9,7 @@ using System.Linq;
 
 namespace Oxide.Plugins
 {
-    [Info("XScan", "Я", "1.0.1")]
+    [Info("XScan", "SkuliDropek.", "1.0.1")]
     class XScan : RustPlugin
     {
 		[PluginReference] private Plugin ImageLibrary;	
@@ -170,6 +170,12 @@ namespace Oxide.Plugins
 
 		private void OnServerInitialized()
 		{		
+			PrintWarning("\n-----------------------------\n" +
+			"     Author - SkuliDropek\n" +
+			"     VK - vk.com/idannopol\n" +
+			"    Discord - Skuli Dropek#4816 - KINGSkuliDropek#4837\n" +
+			"     Config - v.1517\n" +
+			"-----------------------------");
 			
 			if (Interface.Oxide.DataFileSystem.ExistsDatafile("XScan/ScanUSE"))
                 StoredData = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<string, string>>("XScan/ScanUSE");

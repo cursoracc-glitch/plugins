@@ -1,16 +1,24 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json;
 using Rust.Modular;
 
 namespace Oxide.Plugins
 {
-    [Info("IQControllerSpawnCars", "Mercury", "0.0.3")]
+    [Info("IQControllerSpawnCars", "SkuliDropek", "1.0.3")]
     [Description("Хочу следовать за трендами блин")]
     class IQControllerSpawnCars : RustPlugin
     {
         // - Исправил NRE
-
-        public bool Init = false;
+        /// <summary>
+        /// Обновление 0.0.4
+        /// - Заменил хук OnEntitySpawned на OnVehicleModulesAssigned
+        /// - Исправил некорректное заполнение машин заспавненых до загрузки плагина
+        /// - Добавил заполнение уже созданных (до загрузки плагина) машин! (Если они пустые)
+        /// Обновление 1.0.1
+        /// - Добавлена возможность заспавнить топливо в транспорте
+        /// </summary>
 
         #region Vars
         public enum SpawnType
@@ -27,24 +35,76 @@ namespace Oxide.Plugins
             [JsonProperty("Выберите тип спавна. 0 - полный спавн по тирам(настраивайте шансы и тиры в листе)(т.е все детали сразу,в разном виде качества). 1 - Спавн отдельных деталей, с ограничениями в количестве и рандомным качеством в зависимости от шанса")]
             public SpawnType spawnType;
             [JsonProperty("Настройки тиров. Номер тира(1-3) и шанс.")]
-            public Dictionary<int, int> TierRare = new Dictionary<int, int>();
+            public Dictionary<Int32, Int32> TierRare = new Dictionary<Int32, Int32>();
             [JsonProperty("Настройка деталей и их шанс спавна.Шортнейм детали и шанс ее спавна")]
-            public Dictionary<string, int> ElementSpawnRare = new Dictionary<string, int>();
+            public Dictionary<String, Int32> ElementSpawnRare = new Dictionary<String, Int32>();
             [JsonProperty("Ограниченное количество спавна деталей. 0 - без ограничений")]
-            public int LimitSpawnElement;
+            public Int32 LimitSpawnElement;
+
+            [JsonProperty("Настройка заполнения топливом машин")]
+            public FuelSettings fuelSettings = new FuelSettings();
+            internal class FuelSettings
+            {
+                [JsonProperty("Включить спавн топлива в машинах (true - да/false - нет)")]
+                public Boolean UseFuelSpawned = true;
+                [JsonProperty("Статичное количество топлива (Если включен рандом, то этот показатель не будет учитываться)")]
+                public Int32 FuelStatic = 100;
+                [JsonProperty("Шанс заполнения топливом транспорт (0-100)")]
+                public Int32 RareUsing = 100;
+
+                [JsonProperty("Настройка рандомного спавна топлива")]
+                public RandomFuel randomFuel = new RandomFuel();
+
+                internal class RandomFuel
+                {
+                    [JsonProperty("Включить рандомное количество спавна топлива (true - да/false - нет)")]
+                    public Boolean UseRandom = false;
+                    [JsonProperty("Минимальное количество топлива")]
+                    public Int32 MinFuel = 30;
+                    [JsonProperty("Максимальное количество топлива")]
+                    public Int32 MaxFuel = 200;
+                }
+
+                public Int32 GetFuelSpawned()
+                {
+                    Int32 Fuel = 0;
+
+                    if(UseFuelSpawned)
+                        if (Oxide.Core.Random.Range(0, 100) <= RareUsing)
+                        {
+                            if (randomFuel.UseRandom)
+                                Fuel = Oxide.Core.Random.Range(randomFuel.MinFuel, randomFuel.MaxFuel);
+                            else Fuel = FuelStatic;
+                        }
+
+                    return Fuel;
+                }
+            }
 
             public static Configuration GetNewConfiguration()
             {
                 return new Configuration
                 {
                     spawnType = SpawnType.TierFull,
-                    TierRare = new Dictionary<int, int>
+                    fuelSettings = new FuelSettings
+                    {
+                        FuelStatic = 100,
+                        RareUsing = 100,
+                        UseFuelSpawned = true,
+                        randomFuel = new FuelSettings.RandomFuel
+                        {
+                            MinFuel = 30,
+                            MaxFuel = 200,
+                            UseRandom = false,
+                        }
+                    },
+                    TierRare = new Dictionary<Int32, Int32>
                     {
                         [1] = 80,
                         [2] = 50,
                         [3] = 25,
                     },
-                    ElementSpawnRare = new Dictionary<string, int>
+                    ElementSpawnRare = new Dictionary<String, Int32>
                     {
                         ["carburetor1"] = 80,
                         ["crankshaft1"] = 80,
@@ -74,7 +134,7 @@ namespace Oxide.Plugins
             }
             catch
             {
-                PrintWarning($"Ошибка чтения #57 конфигурации 'oxide/config/{Name}', создаём новую конфигурацию!!");
+                PrintWarning($"Ошибка чтения #1434 конфигурации 'oxide/config/{Name}', создаём новую конфигурацию!!"); //
                 LoadDefaultConfig();
             }
 
@@ -85,34 +145,53 @@ namespace Oxide.Plugins
         protected override void SaveConfig() => Config.WriteObject(config);
         #endregion
 
-        private void OnServerInitialized() => Init = true;
-        void OnEntitySpawned(BaseNetworkable entity)
-		{
-            if (!Init) return;
-            if (entity == null) return;
-			if (entity is ModularCar)
-			{
-                ModularCar Car = entity as ModularCar;
-                if (Car == null) return;
-                var CarSetting = config.spawnType;
-                switch(CarSetting)
-                {
-                    case SpawnType.TierFull:
-                        {
-                            SpawnFullTier(Car);
-                            break;
-                        }
-                    case SpawnType.ElementsTier:
-                        {
-                            SpawnElementsTier(Car);
-                            break;
-                        }
-                    default: { break; }
-                }
-			}
-		}
+        private void OnServerInitialized()
+        {
+            foreach(var Entity in BaseNetworkable.serverEntities.entityList.Where(x => x.Value.ShortPrefabName.Contains("module_car") && x.Value?.GetComponentInChildren<VehicleModuleEngine>()?.GetContainer()?.inventory.itemList.Count == 0))
+            {
+                ModularCar Car = Entity.Value as ModularCar;
+                CarUpgrade(Car);
+            }
+        }
+        void OnVehicleModulesAssigned(ModularCar Car, ItemModVehicleModule[] modulePreset) => CarUpgrade(Car);
+        private void CarUpgrade(ModularCar Car)
+        {
+            if (Car == null) return;
+            var CarSetting = config.spawnType;
+            switch (CarSetting)
+            {
+                case SpawnType.TierFull:
+                    {
+                        SpawnFullTier(Car);
+                        break;
+                    }
+                case SpawnType.ElementsTier:
+                    {
+                        SpawnElementsTier(Car);
+                        break;
+                    }
+                default: { break; }
+            }
+
+            FuelSystemSpawned(Car.GetFuelSystem());
+        }
 
         #region Metods
+        private void FuelSystemSpawned(EntityFuelSystem FuelSystem)
+        {
+            if (FuelSystem == null) return;
+            Int32 FuelAmount = config.fuelSettings.GetFuelSpawned();
+            if (FuelAmount == 0) return;
+
+            NextTick(() =>
+            {
+                StorageContainer FuelContainer = FuelSystem.fuelStorageInstance.Get(true);
+                if (FuelContainer == null || FuelContainer.inventory == null) return;
+                Item FuelItem = ItemManager.CreateByName("lowgradefuel", FuelAmount);
+                if (FuelItem == null) return;
+                FuelItem.MoveToContainer(FuelContainer.inventory);
+            });
+        }
 
         void SpawnFullTier(ModularCar Car)
         {
@@ -130,10 +209,10 @@ namespace Oxide.Plugins
         {
             if (Car == null) return;
             var CarSetting = config.ElementSpawnRare;
-            int LimitElement = (int)(config.LimitSpawnElement != 0 ? config.LimitSpawnElement : Car?.GetComponentInChildren<VehicleModuleEngine>()?.GetContainer()?.inventory.capacity);
-            for (int j = 0; j < LimitElement; j++)
+            Int32 LimitElement = (Int32)(config.LimitSpawnElement != 0 ? config.LimitSpawnElement : Car?.GetComponentInChildren<VehicleModuleEngine>()?.GetContainer()?.inventory.capacity);
+            for (Int32 j = 0; j < LimitElement; j++)
             {
-                int SlotElemt = UnityEngine.Random.Range(0, (int)(Car?.GetComponentInChildren<VehicleModuleEngine>()?.GetContainer()?.inventory.capacity));
+                Int32 SlotElemt = UnityEngine.Random.Range(0, (Int32)(Car?.GetComponentInChildren<VehicleModuleEngine>()?.GetContainer()?.inventory.capacity));
                 foreach (var TierElement in CarSetting)
                 {
                     if (!IsRare(TierElement.Value)) continue;
@@ -145,7 +224,7 @@ namespace Oxide.Plugins
                 }
             }
         }
-        public bool IsRare(int Rare)
+        public bool IsRare(Int32 Rare)
         {
             if (UnityEngine.Random.Range(0, 100) >= (100 - Rare))
                 return true;

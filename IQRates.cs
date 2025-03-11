@@ -8,15 +8,19 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("IQRates", "Valt1 fix", "1.4.0")]
-    [Description("Мамашу разраба по кругу пускал")]
+    [Info("IQRates", "SkuliDropek", "1.3.67")]
+    [Description("Настройка рейтинга на сервере")]
     class IQRates : RustPlugin
     {
         /// <summary>
 
-        /// Обновление 1.4.x
-        /// - Плагин был предназначен для 261 девблога, но Valt1 конченный пидорас переделал под 245 (247).
-        /// - Пофиксил конченную хуйню разраба, он конченный пидорас и я его семье своим хуем гланды вырывал.
+        /// Обновление 1.3.x
+        /// - Исправил удаление чинука на оилриге после активации ящика
+        /// - Изменил методы удаления ивентов
+        /// - Сделал печки более чувствителньыми к рейтам
+        /// - Теперь можно настраивать уровень потребляемого топлива в печах
+        /// - Добавил реагирование добычи экскаватора на рейтинг игрока по привилегии
+        /// - Добавлен черный список предметов для печек
 
         [PluginReference] Plugin IQChat;
         public void SendChat(String Message, BasePlayer player, ConVar.Chat.ChatChannel channel = ConVar.Chat.ChatChannel.Global)
@@ -243,8 +247,8 @@ namespace Oxide.Plugins
                         RateSetting = new PluginSettings.Rates
                         {
                             UseSpeedBurnable = true,
-                            SpeedBurnable = 10.0f,
-                            SpeedFuelBurnable = 1,
+                            SpeedBurnable = 3.5f,
+                            SpeedFuelBurnable = 2,
                             BlackListBurnable = new List<String>
                             {
                                 "wolfmeat.cooked",
@@ -261,47 +265,41 @@ namespace Oxide.Plugins
                                 new PluginSettings.Rates.SpeedBurnablePreset
                                 {
                                     Permissions = "iqrates.vip",
-                                    SpeedBurnable = 20.0f,
-                                    SpeedFuelBurnable = 1,
+                                    SpeedBurnable = 5.0f,
+                                    SpeedFuelBurnable = 20,
                                 },
                                 new PluginSettings.Rates.SpeedBurnablePreset
                                 {
-                                    Permissions = "iqrates.premium",
-                                    SpeedBurnable = 25.0f,
-                                    SpeedFuelBurnable = 1,
+                                    Permissions = "iqrates.speedrun",
+                                    SpeedBurnable = 55.0f,
+                                    SpeedFuelBurnable = 20,
                                 },
                                 new PluginSettings.Rates.SpeedBurnablePreset
                                 {
-                                    Permissions = "iqrates.extra",
-                                    SpeedBurnable = 30.0f,
-                                    SpeedFuelBurnable = 1,
-                                },
-                                new PluginSettings.Rates.SpeedBurnablePreset
-                                {
-                                    Permissions = "iqrates.bonus",
-                                    SpeedBurnable = 30.0f,
-                                    SpeedFuelBurnable = 1,
+                                    Permissions = "iqrates.fuck",
+                                    SpeedBurnable = 200f,
+                                    SpeedFuelBurnable = 20,
                                 },
                             },
                             DayRates = new PluginSettings.Rates.AllRates
                             {
-                                GatherRate = 3.0f,
+                                GatherRate = 1.0f,
                                 LootRate = 1.0f,
-                                PickUpRate = 3.0f,
-                                GrowableRate = 3.0f,
-                                QuarryRate = 3.0f,
-                                ExcavatorRate = 3.0f,
-                                CoalRare = 100,
+                                PickUpRate = 1.0f,
+                                GrowableRate = 1.0f,
+                                QuarryRate = 1.0f,
+                                ExcavatorRate = 1.0f,
+                                CoalRare = 10,
                             },
                             NightRates = new PluginSettings.Rates.AllRates
                             {
-                                GatherRate = 3.0f,
-                                LootRate = 1.0f,
-                                PickUpRate = 3.0f,
-                                GrowableRate = 3.0f,
-                                QuarryRate = 3.0f,
-                                ExcavatorRate = 3.0f,
-                                CoalRare = 100,
+                                GatherRate = 2.0f,
+                                LootRate = 2.0f,
+                                PickUpRate = 2.0f,
+                                GrowableRate = 2.0f,
+                                QuarryRate = 2.0f,
+                                ExcavatorRate = 2.0f,
+                                CoalRare = 15,
                             },
                             CustomRatesPermissions = new PluginSettings.Rates.PermissionsRate
                             {
@@ -316,7 +314,7 @@ namespace Oxide.Plugins
                                         },
                                         new PluginSettings.Rates.PermissionsRate.PermissionsRateDetalis
                                         {
-                                              Rate = 20.0f,
+                                              Rate = 200.0f,
                                               Shortname = "stones",
                                         }
                                     }
@@ -344,92 +342,46 @@ namespace Oxide.Plugins
                                 {
                                     DayRates =
                                     {
-                                        GatherRate = 4.0f,
-                                        LootRate = 1.0f,
-                                        PickUpRate = 4.0f,
-                                        QuarryRate = 4.0f,
-                                        GrowableRate = 4.0f,
-                                        ExcavatorRate = 4.0f,
-                                        CoalRare = 100,
+                                        GatherRate = 3.0f,
+                                        LootRate = 3.0f,
+                                        PickUpRate = 3.0f,
+                                        QuarryRate = 3.0f,
+                                        GrowableRate = 3.0f,
+                                        ExcavatorRate = 3.0f,
+                                        CoalRare = 15,
                                     },
                                     NightRates = new PluginSettings.Rates.AllRates
                                     {
-                                        GatherRate = 4.0f,
-                                        LootRate = 1.0f,
-                                        PickUpRate = 4.0f,
-                                        GrowableRate = 4.0f,
-                                        QuarryRate = 4.0f,
-                                        ExcavatorRate = 4.0f,
-                                        CoalRare = 100,
+                                        GatherRate = 13.0f,
+                                        LootRate = 13.0f,
+                                        PickUpRate = 13.0f,
+                                        GrowableRate = 13.0f,
+                                        QuarryRate = 13.0f,
+                                        ExcavatorRate = 13.0f,
+                                        CoalRare = 25,
                                     }
                                 },
                                 ["iqrates.premium"] = new PluginSettings.Rates.DayAnNightRate
                                 {
                                     DayRates =
                                     {
-                                        GatherRate = 4.5f,
-                                        LootRate = 1.0f,
-                                        PickUpRate = 4.5f,
-                                        GrowableRate = 4.5f,
-                                        QuarryRate = 4.5f,
-                                        ExcavatorRate = 4.5f,
-                                        CoalRare = 100,
+                                        GatherRate = 3.5f,
+                                        LootRate = 3.5f,
+                                        PickUpRate = 3.5f,
+                                        GrowableRate = 3.5f,
+                                        QuarryRate = 3.5f,
+                                        ExcavatorRate = 3.5f,
+                                        CoalRare = 20,
                                     },
                                     NightRates = new PluginSettings.Rates.AllRates
                                     {
-                                        GatherRate = 4.5f,
-                                        LootRate = 1.0f,
-                                        PickUpRate = 4.5f,
-                                        GrowableRate = 4.5f,
-                                        QuarryRate = 4.5f,
-                                        ExcavatorRate = 4.5f,
-                                        CoalRare = 100,
-                                    }
-                                },
-                                ["iqrates.extra"] = new PluginSettings.Rates.DayAnNightRate
-                                {
-                                    DayRates =
-                                    {
-                                        GatherRate = 5.0f,
-                                        LootRate = 1.0f,
-                                        PickUpRate = 5.0f,
-                                        GrowableRate = 5.0f,
-                                        QuarryRate = 5.0f,
-                                        ExcavatorRate = 5.0f,
-                                        CoalRare = 100,
-                                    },
-                                    NightRates = new PluginSettings.Rates.AllRates
-                                    {
-                                        GatherRate = 5.0f,
-                                        LootRate = 1.0f,
-                                        PickUpRate = 5.0f,
-                                        GrowableRate = 5.0f,
-                                        QuarryRate = 5.0f,
-                                        ExcavatorRate = 5.0f,
-                                        CoalRare = 100,
-                                    }
-                                },
-                                ["iqrates.bonus"] = new PluginSettings.Rates.DayAnNightRate
-                                {
-                                    DayRates =
-                                    {
-                                        GatherRate = 4.5f,
-                                        LootRate = 1.0f,
-                                        PickUpRate = 4.5f,
-                                        GrowableRate = 4.5f,
-                                        QuarryRate = 4.5f,
-                                        ExcavatorRate = 4.5f,
-                                        CoalRare = 100,
-                                    },
-                                    NightRates = new PluginSettings.Rates.AllRates
-                                    {
-                                        GatherRate = 4.5f,
-                                        LootRate = 1.0f,
-                                        PickUpRate = 4.5f,
-                                        GrowableRate = 4.5f,
-                                        QuarryRate = 4.5f,
-                                        ExcavatorRate = 4.5f,
-                                        CoalRare = 100,
+                                        GatherRate = 13.5f,
+                                        LootRate = 13.5f,
+                                        PickUpRate = 13.5f,
+                                        GrowableRate = 13.5f,
+                                        QuarryRate = 13.5f,
+                                        ExcavatorRate = 13.5f,
+                                        CoalRare = 20,
                                     }
                                 },
                             },
@@ -1336,6 +1288,11 @@ namespace Oxide.Plugins
             if (boat == null) return;
             FuelSystemRating(boat.GetFuelSystem(), config.pluginSettings.OtherSetting.FuelSetting.AmountBoat);
         }     
+        private void OnEntitySpawned(BaseSubmarine submarine)
+        {
+            if (submarine == null) return;
+            FuelSystemRating(submarine.GetFuelSystem(), config.pluginSettings.OtherSetting.FuelSetting.AmountSubmarine);
+        }
         private void OnEntitySpawned(MiniCopter copter)
         {
             if (copter == null) return;

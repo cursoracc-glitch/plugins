@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using ConVar;
 using Newtonsoft.Json;
@@ -9,35 +9,21 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("IQPlagueSkill", "Mercury", "0.0.9")]
+    [Info("IQPlagueSkill", "SkuliDropek", "1.0.5")]
     [Description("Скилл система новых веков")]
     class IQPlagueSkill : RustPlugin
     {
         /// <summary>
-        /// Обновление 0.0.7
-        /// - Изменил значение возможное устанавливать в навыке Шахетр (ранее х1, теперь можете устанавливать х1.1 и т.д)
-        /// - Добавлен интерфейс для нейтральных навыков
-        /// - Добавлена новая ветка "Нейтральные" навыки, которые работают с другими плагинами
-        /// - Добавлен новый дизайн для нейтральных навыков
-        /// - Добавлены отметки "А" и "N" обозначающие "Активный" и "Нейтральный" навык
-        /// - Добавлена информация о метках "N" и "A" в левом нижнем углу на главной панели
-        /// - Добавлено два нейтральных навыка с обвязкой плагина IQCraftSystem
-        /// - Навык на дополнительные возможности в IQCraftSystem
-        /// - Исправил API - API_HEAD_REWARD_SKILL
-        /// - Исправил ошибку в хуке - OnHealingItemUse
-        /// - Добавил поддержку IQKits
-        /// - Добавлен нейтральный навык для IQKits на ускорение перезарядки набора
-        /// - Добавлен нейтральный навык для IQKits на увеличение шанса выпадения предмета из набора 
-        /// - Добавлено API для проверки на нейтральный скилл из IQKits на уменьшение КД => bool API_IS_COOLDOWN_SKILL_KITS(BasePlayer player)
-        /// - Добавлено API для проверки на нейтральный скилл из IQKits на увеличение шанса выпадения предмета => bool API_IS_RARE_SKILL_KITS(BasePlayer player)
-        /// - Изменена структура конфигурационного файла(пересоздайте файл)
-        /// Обновление 0.0.8
-        /// - Поправил проверку в навыке "Единство с землей"
-        /// Обновление 0.0.9
-        /// - Поправил API для IQHeadReward
+        /// Обновление 1.0.х
+        /// - Добавил мультиязычность в кофнигурации и датафайле
+        /// - Добавлена проверка на null в методе RegisteredData()
+        /// - Изменена проверка на кланы, добавлена поддержка еще одного плагина на кланы
+        /// - Корректировка метода на выдачу ДНК
         /// </summary>
 
         #region Vars
+        private const Boolean LanguageEn = false;
+
         public static string PermissionsPatogenArmor = "iqplagueskill.patogenarmory";
         public enum TypeSkill
         {
@@ -87,10 +73,10 @@ namespace Oxide.Plugins
 
             try
             {
-                webrequest.Enqueue($"http://rust.skyplugins.ru/getimage/BACKGROUND_PLAGUE/12/IMAGELIBRARY_{Name}_{Author}_skykey1", null, (i, s) =>
+                webrequest.Enqueue($"http://rust.skyplugins.ru/getimage/BACKGROUND_PLAGUE/12/IMAGELIBRARY_{Name}_{Author}_14321", null, (i, s) =>
                 {
                     if (i != 200) { }
-                    if (s.Contains("success")) { AddImage(i.ToString(), $"{i.ToString()}_BACKGROUND_PLAGUE", ulong.Parse($"skykey1")); }
+                    if (s.Contains("success")) { AddImage(i.ToString(), $"{i.ToString()}_BACKGROUND_PLAGUE", ulong.Parse($"14321")); }
                     if (s.Contains("fail")) { return; }
                 }, this);
             }
@@ -217,11 +203,18 @@ namespace Oxide.Plugins
                 return (bool)Friends?.Call("HasFriend", userID, targetID);
             else return false;
         }
-        public bool IsClans(ulong userID, ulong targetID)
+        private bool IsClans(String userID, String targetID)
         {
             if (Clans)
-                return (bool)Clans?.Call("HasFriend", userID, targetID);
-            else return false;
+            {
+                String TagUserID = (String)Clans?.Call("GetClanOf", userID);
+                String TagTargetID = (String)Clans?.Call("GetClanOf", targetID);
+                if (TagUserID == null && TagTargetID == null)
+                    return false;
+                return (bool)(TagUserID == TagTargetID);
+            }
+            else
+                return false;
         }
         public bool IsDuel(ulong userID)
         {
@@ -241,47 +234,47 @@ namespace Oxide.Plugins
 
         #region Data
 
-        [JsonProperty("Информация пользователях и их ДНК")]
+        [JsonProperty(LanguageEn ? "user Information and their DNA" : "Информация пользователях и их ДНК")]
         public Dictionary<ulong, int> DataInformation = new Dictionary<ulong, int>();
-        [JsonProperty("Информация о скиллах пользователей")]
+        [JsonProperty(LanguageEn ? "information about user skills" : "Информация о скиллах пользователей")]
         public Dictionary<ulong, InformationSkills> DataSkills = new Dictionary<ulong, InformationSkills>();
 
         public class InformationSkills
         {
-            [JsonProperty("Шахтер")]
+            [JsonProperty(LanguageEn ? "Miner" : "Шахтер")]
             public bool Miner;
-            [JsonProperty("Регенерация")]
+            [JsonProperty(LanguageEn ? "Regeneration" : "Регенерация")]
             public bool Regeneration;
-            [JsonProperty("Военный")]
+            [JsonProperty(LanguageEn ? "Military" : "Военный")]
             public bool Military;
-            [JsonProperty("Кожа")]
+            [JsonProperty(LanguageEn ? "Skin" : "Кожа")]
             public bool ThickSkin;
-            [JsonProperty("Дух")]
+            [JsonProperty(LanguageEn ? "Spirit" : "Дух")]
             public bool WoundedShake;
-            [JsonProperty("Метаболизм")]
+            [JsonProperty(LanguageEn ? "Metabolism" : "Метаболизм")]
             public bool Metabolism;
-            [JsonProperty("Защита от патогена")]
+            [JsonProperty(LanguageEn ? "pathogen Protection" : "Защита от патогена")]
             public bool PatogenAmrory;
-            [JsonProperty("Генезиз ген")]
+            [JsonProperty(LanguageEn ? "the Genesis gene" : "Генезиз ген")]
             public bool GenesisGens;
-            [JsonProperty("Единство с животными")]
+            [JsonProperty(LanguageEn ? "Unity with animals" : "Единство с животными")]
             public bool AnimalFriends;
-            [JsonProperty("Единство с природой")]
+            [JsonProperty(LanguageEn ? "Unity with nature" : "Единство с природой")]
             public bool GatherFriends;
-            [JsonProperty("Анабиотики")]
+            [JsonProperty(LanguageEn ? "Anabiotics" : "Анабиотики")]
             public bool Anabiotics;
-            [JsonProperty("Крафтер")]
+            [JsonProperty(LanguageEn ? "Crafter" : "Крафтер")]
             public bool Crafter;
-            [JsonProperty("IQHeadReward")]
+            [JsonProperty(LanguageEn ? "IQHeadReward" : "IQHeadReward")]
             public bool IQHeadReward;
-            [JsonProperty("IQCraftSystem : Продвинутый крафтер")]
+            [JsonProperty(LanguageEn ? "IQCraftSystem: Advanced Crafter" : "IQCraftSystem : Продвинутый крафтер")]
             public bool IQCraftSystemAdvanced;
-            [JsonProperty("IQKits : Уменьшенная перезарядка")]
+            [JsonProperty(LanguageEn ? "IQKits: Reduced recharge" : "IQKits : Уменьшенная перезарядка")]
             public bool IQKitsCooldownPercent;
-            [JsonProperty("IQKits : Увеличенный шанс выпадения")]
+            [JsonProperty(LanguageEn ? "IQKits: Increased drop chance" : "IQKits : Увеличенный шанс выпадения")]
             public bool IQKitsRareup;
 
-            [JsonProperty("Имеется ли патоген")]
+            [JsonProperty(LanguageEn ? "is there a pathogen" : "Имеется ли патоген")]
             public bool PatogenAttack;
         }
 
@@ -300,6 +293,7 @@ namespace Oxide.Plugins
 
         void RegisteredDataUser(BasePlayer player)
         {
+            if (player == null) return;
             if (!DataInformation.ContainsKey(player.userID))
                 DataInformation.Add(player.userID, 0);
             if (!DataSkills.ContainsKey(player.userID))
@@ -332,49 +326,49 @@ namespace Oxide.Plugins
         private static Configuration config = new Configuration();
         private class Configuration
         {
-            [JsonProperty("Настройка плагина")]
+            [JsonProperty(LanguageEn ? "configuring the plugin" : "Настройка плагина")]
             public GeneralSetting GeneralSettings = new GeneralSetting();
-            [JsonProperty("Настройка всех скиллов")]
+            [JsonProperty(LanguageEn ? "configuring all skills" : "Настройка всех скиллов")]
             public Skills SkillSettings = new Skills();
-            [JsonProperty("Настройка интерфейса")]
+            [JsonProperty(LanguageEn ? "configuring the interface" : "Настройка интерфейса")]
             public InterfaceSetting InterfaceSettings = new InterfaceSetting();
-            [JsonProperty("Настройка совместимостей с другими плагинами")]
+            [JsonProperty(LanguageEn ? "configuring compatibility with other plugins" : "Настройка совместимостей с другими плагинами")]
             public ReferenceSetting ReferenceSettings = new ReferenceSetting();
-            [JsonProperty("Настройка получения ДНК")]
+            [JsonProperty(LanguageEn ? "configuring getting DNA" : "Настройка получения ДНК")]
             public FarmingDNK FarmingDNKS = new FarmingDNK();
 
             #region Skills
             internal class Skills
             {
-                [JsonProperty("Разрешить просмотр навыка без нужного кол-во ДНК")]
+                [JsonProperty(LanguageEn ? "Allow viewing a skill without the required number of DNA" : "Разрешить просмотр навыка без нужного кол-во ДНК")]
                 public bool ShowSkillNotDNK;
-                [JsonProperty("Настройка скилла шахтер(Увеличивает рейт добычи)")]
+                [JsonProperty(LanguageEn ? "setting the miner skill (Increases the mining rate)" : "Настройка скилла шахтер(Увеличивает рейт добычи)")]
                 public Miner MinerSettings = new Miner();
-                [JsonProperty("Настройка скилла регенерации(Регенирация ХП после боя)")]
+                [JsonProperty(LanguageEn ? "setting the regeneration skill(HP Regeneration after battle)" : "Настройка скилла регенерации(Регенирация ХП после боя)")]
                 public Regeneration RegenerationSettings = new Regeneration();
-                [JsonProperty("Настройка скилла военный(Уменьшает изнашивания оружия)")]
+                [JsonProperty(LanguageEn ? "skill setting(Reduces weapon wear)" : "Настройка скилла военный(Уменьшает изнашивания оружия)")]
                 public Military MilitarySettings = new Military();
-                [JsonProperty("Настройка скилла Твердая кожа(Защищает от холода в зимних биомах)")]
+                [JsonProperty(LanguageEn ? "Hard skin skill setting (Protects from cold in winter biomes)" : "Настройка скилла Твердая кожа(Защищает от холода в зимних биомах)")]
                 public ThickSkin ThickSkinSettings = new ThickSkin();   
-                [JsonProperty("Настройка скилла Не поколебим(Дает шанс встать после падения)")]
+                [JsonProperty(LanguageEn ? "setting the skill Will not shake(Gives a chance to get up after a fall)" : "Настройка скилла Не поколебим(Дает шанс встать после падения)")]
                 public WoundedShake WoundedShakeSettings = new WoundedShake(); 
-                [JsonProperty("Настройка скилла Метаболизм(При возраждении дает N значения сытности,хп,жажды)")]
+                [JsonProperty(LanguageEn ? "setting up the skill Metabolism (when revived gives N values of satiety, HP, thirst)" : "Настройка скилла Метаболизм(При возраждении дает N значения сытности,хп,жажды)")]
                 public Metabolism MetabolismSettings = new Metabolism(); 
-                [JsonProperty("Настройка скилла Защита от патогена(Одноразовая защита от грибка Патоген(При заражаении патогеном , вирус - со временем разрушает скиллы игрока))")]
+                [JsonProperty(LanguageEn ? "configure spell Protection from a pathogen(one-time protection from the fungus Pathogen(If zarazhenie pathogen , a virus eventually destroys the skills of the player))" : "Настройка скилла Защита от патогена(Одноразовая защита от грибка Патоген(При заражаении патогеном , вирус - со временем разрушает скиллы игрока))")]
                 public PatogenAmrory PatogenAmrorySettings = new PatogenAmrory();
-                [JsonProperty("Настройка скилла Убийство патогена(Одноразовое убийство грибка,если игрок заразился Патогеном)")]
+                [JsonProperty(LanguageEn ? "setting up skill the Killing of a pathogen(one-time killing of the fungus,if the player was infected by a Pathogen)" : "Настройка скилла Убийство патогена(Одноразовое убийство грибка,если игрок заразился Патогеном)")]
                 public PatogenKill PatogenKillSettings = new PatogenKill();
-                [JsonProperty("Настройка скилла Генезиз ген(Сохраняет % ДНК в конце вайпа)")]
+                [JsonProperty(LanguageEn ? "setting up skill the Genesis gene(Keeps the % of DNA at the end of a wipe)" : "Настройка скилла Генезиз ген(Сохраняет % ДНК в конце вайпа)")]
                 public GenesisGens GenesisGensSettings = new GenesisGens();
-                [JsonProperty("Настройка скилла Единство с природой(Добавляет возможность получать больше ДНК за добычу животных)")]
+                [JsonProperty(LanguageEn ? "setting up the Unity with nature skill (Adds the ability to get more DNA for animal prey)" : "Настройка скилла Единство с природой(Добавляет возможность получать больше ДНК за добычу животных)")]
                 public AnimalFriends AnimalFriendsSettings = new AnimalFriends(); 
-                [JsonProperty("Настройка скилла Единство с землей(Добавляет возможность получать больше ДНК за полную добычу ресурса)")]
+                [JsonProperty(LanguageEn ? "setting up the Unity with earth skill (Adds the ability to get more DNA for full resource extraction)" : "Настройка скилла Единство с землей(Добавляет возможность получать больше ДНК за полную добычу ресурса)")]
                 public GatherFriends GatherFriendsSettings = new GatherFriends();
-                [JsonProperty("Настройка скилла Анабиотики(Игроки будут получать больше лечения от препаратов)")]
+                [JsonProperty(LanguageEn ? "setting up the Anabiotics skill(Players will get more treatment from drugs)" : "Настройка скилла Анабиотики(Игроки будут получать больше лечения от препаратов)")]
                 public Anabiotics AnabioticsSettings = new Anabiotics();
-                [JsonProperty("Настройка скилла Крафтер(Скорость крафта увеличивается)")]
+                [JsonProperty(LanguageEn ? "setting up the Crafter skill(crafting Speed increases)" : "Настройка скилла Крафтер(Скорость крафта увеличивается)")]
                 public Crafter CrafterSettings = new Crafter();
-                [JsonProperty("Настройка НЕЙТРАЛЬНЫХ навыков")]
+                [JsonProperty(LanguageEn ? "setting up NEUTRAL skills" : "Настройка НЕЙТРАЛЬНЫХ навыков")]
                 public NeutralSkill NeutralSkills = new NeutralSkill();
 
                 #region Classes
@@ -382,48 +376,48 @@ namespace Oxide.Plugins
                 #region NeutralClasses
                 internal class NeutralSkill
                 {
-                    [JsonProperty("Увеличивает уровень крафта до продвинутого открывая возможность крафтить предметы с условием продвинутого крафта")]
+                    [JsonProperty(LanguageEn ? "Increases crafting level to advanced opening the possibility to craft items with the advanced crafting condition" : "Увеличивает уровень крафта до продвинутого открывая возможность крафтить предметы с условием продвинутого крафта")]
                     public IQCraftSystemAdvancedCraft IQCraftSystemAdvancedCrafts = new IQCraftSystemAdvancedCraft();
-                    [JsonProperty("Увеличивает шанс выпадения предметов в наборе")]
+                    [JsonProperty(LanguageEn ? "Increases the drop rate of items in the set" : "Увеличивает шанс выпадения предметов в наборе")]
                     public IQKitsRareSkill IQKitsRare = new IQKitsRareSkill();
-                    [JsonProperty("Уменьшает перезарядку навыков")]
+                    [JsonProperty(LanguageEn ? "Reduces the cooldown of the skill" : "Уменьшает перезарядку навыков")]
                     public IQKitsCooldownPercenct IQKitsCooldown = new IQKitsCooldownPercenct();
-                    [JsonProperty("Настройка IQHeadReward (Описание и настройка в плагине IQHeadReward)")]
+                    [JsonProperty(LanguageEn ? "Iqheadreward setting (Description and setting in the plugin Iqheadreward)" : "Настройка IQHeadReward (Описание и настройка в плагине IQHeadReward)")]
                     public IQHeadReward SkillIQHeadRewards = new IQHeadReward();
                     internal class IQHeadReward
                     {
-                        [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                        [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                         public bool SkillTurn;
 
-                        [JsonProperty("Общая настройка")]
+                        [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                         public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
                     }
                     internal class IQCraftSystemAdvancedCraft
                     {
-                        [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                        [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                         public bool SkillTurn;
 
-                        [JsonProperty("Общая настройка")]
+                        [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                         public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
                     }
                     internal class IQKitsRareSkill
                     {
-                        [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                        [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                         public bool SkillTurn;
 
-                        [JsonProperty("Общая настройка")]
+                        [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                         public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
-                        [JsonProperty("На сколько % увеличивать шанс выпадения предметов?")]
+                        [JsonProperty(LanguageEn ? "how much % increase the chance of dropping items?" : "На сколько % увеличивать шанс выпадения предметов?")]
                         public int RareUP;
                     }
                     internal class IQKitsCooldownPercenct
                     {
-                        [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                        [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                         public bool SkillTurn;
 
-                        [JsonProperty("Общая настройка")]
+                        [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                         public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
-                        [JsonProperty("На сколько % уменьшать перезарядку набора?")]
+                        [JsonProperty(LanguageEn ? "how much % should I reduce the set's cooldown?" : "На сколько % уменьшать перезарядку набора?")]
                         public int PercentDrop;
                     }
                 }
@@ -431,183 +425,183 @@ namespace Oxide.Plugins
 
                 internal class Miner
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("На сколько умножать рейты(все сразу)")]
+                    [JsonProperty(LanguageEn ? "how much to multiply rates(all at once)" : "На сколько умножать рейты(все сразу)")]
                     public float Rate;
-                    [JsonProperty("Использовать кастомные множители(true - да/false - нет)")]
+                    [JsonProperty(LanguageEn ? "Use custom multipliers (true-Yes/false-no)" : "Использовать кастомные множители(true - да/false - нет)")]
                     public bool UseLists;
-                    [JsonProperty("Использовать кастомные множители([Shortname] = множитель)")]
+                    [JsonProperty(LanguageEn ? "Use custom multipliers([Shortname] = multiplier)" : "Использовать кастомные множители([Shortname] = множитель)")]
                     public Dictionary<string, float> CustomRate = new Dictionary<string, float>();
                 }
                 internal class Regeneration
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("Сколько жизней регенерировать в промежуток времени")]
+                    [JsonProperty(LanguageEn ? "how Many lives to regenerate in a time interval" : "Сколько жизней регенерировать в промежуток времени")]
                     public int HealtRegeneration;
-                    [JsonProperty("Раз в сколько секунд регенерировать игрока")]
+                    [JsonProperty(LanguageEn ? "how many seconds to regenerate a player" : "Раз в сколько секунд регенерировать игрока")]
                     public int RegenerationTimer;
                 }
                 internal class Military
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("На сколько процентов снижать изнашивания оружий(0-100%)")]
+                    [JsonProperty(LanguageEn ? "how many percent to reduce the wear of weapons(0-100%)" : "На сколько процентов снижать изнашивания оружий(0-100%)")]
                     public int PercentNoBroken;
                 }
                 internal class ThickSkin
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;  
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
                 }
                 internal class WoundedShake
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("Шанс встать в момент когда игрока положат")]
+                    [JsonProperty(LanguageEn ? "Chance to get up when the player is put down" : "Шанс встать в момент когда игрока положат")]
                     public int Rare;
-                    [JsonProperty("Через сколько секунд поднимать игрока при падаение,если шанс успешен")]
+                    [JsonProperty(LanguageEn ? "how many seconds to raise the player when falling, if the chance is successful" : "Через сколько секунд поднимать игрока при падаение,если шанс успешен")]
                     public int RareStartTime;
-                    [JsonProperty("После успешного срабатывания - забирать скилл(true - да/false - нет)")]
+                    [JsonProperty(LanguageEn ? "after successful triggering - take the skill(true-Yes/false-no)" : "После успешного срабатывания - забирать скилл(true - да/false - нет)")]
                     public bool DropSkill;
                 }
                 internal class Metabolism
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General configuration" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("Сколько ХП будет при возрождениие")]
+                    [JsonProperty(LanguageEn ? "How many HP will be when reviving" : "Сколько ХП будет при возрождениие")]
                     public int Health;
-                    [JsonProperty("Сколько Сытности будет при возрождении")]
+                    [JsonProperty(LanguageEn ? "how much Satiety will there be when reviving" : "Сколько Сытности будет при возрождении")]
                     public int Calories;
-                    [JsonProperty("Сколько Жажды будет при возрождении")]
+                    [JsonProperty(LanguageEn ? "how much Thirst will there be when reviving" : "Сколько Жажды будет при возрождении")]
                     public int Hydration;
-                    [JsonProperty("Шанс проснуться с данными показателями")]
+                    [JsonProperty(LanguageEn ? "Chance to Wake up with these indicators" : "Шанс проснуться с данными показателями")]
                     public int RareMetabolisme;
-                    [JsonProperty("После успешного срабатывания - забирать скилл(true - да/false - нет)")]
+                    [JsonProperty(LanguageEn ? "after successful triggering - take the skill(true-Yes/false-no)" : "После успешного срабатывания - забирать скилл(true - да/false - нет)")]
                     public bool DropSkill;
                 }
                 internal class PatogenAmrory
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General setting" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
                 }
                 internal class PatogenKill
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General setting" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
                 }
                 internal class GenesisGens
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General setting" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("Сколько % ДНК оставлять в конце вайпа(будет отсчитываться от затраченного количества на скиллы)0 - 100")]
+                    [JsonProperty(LanguageEn ? "How much % of DNA to leave at the end of the wipe(will be counted from the amount spent on skills)0 - 100" : "Сколько % ДНК оставлять в конце вайпа(будет отсчитываться от затраченного количества на скиллы)0 - 100")]
                     public int PercentSave;
                 }
                 internal class AnimalFriends
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General setting" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("Min : Сколько выдавать ДНК")]
+                    [JsonProperty(LanguageEn ? "Min : How much to give out" : "Min : Сколько выдавать ДНК")]
                     public int MinDNKAnimal;
-                    [JsonProperty("Max : Сколько выдавать ДНК")]
+                    [JsonProperty(LanguageEn ? "Max: How much to give out" : "Max : Сколько выдавать ДНК")]
                     public int MaxDNKAnimal;
-                    [JsonProperty("Использовать кастомный лист(true - да/false - нет)")]
+                    [JsonProperty(LanguageEn ? "Use custom sheet(true-Yes/false-no)" : "Использовать кастомный лист(true - да/false - нет)")]
                     public bool UseLists;
-                    [JsonProperty("Кастомный лист ,на сколько увеличивать количество ДНК за убийство животного [Animal] = Настройка")]
+                    [JsonProperty(LanguageEn ? "Custom list, how much to increase the amount of DNA for killing an animal [Animal] = setting" : "Кастомный лист ,на сколько увеличивать количество ДНК за убийство животного [Animal] = Настройка")]
                     public Dictionary<string, CustomSettings> AnimalsList = new Dictionary<string, CustomSettings>();
-                    [JsonProperty("Шанс получения дополнительного ДНК")]
+                    [JsonProperty(LanguageEn ? "Chance of getting additional DNA" : "Шанс получения дополнительного ДНК")]
                     public int RareAll;
-                    [JsonProperty("Животные с которых будет падать ДНК")]
+                    [JsonProperty(LanguageEn ? "Animals from which DNA will fall" : "Животные с которых будет падать ДНК")]
                     public List<string> AnimalDetected = new List<string>();
                     internal class CustomSettings
                     {
-                        [JsonProperty("Шанс получения дополнительного ДНК")]
+                        [JsonProperty(LanguageEn ? "Chance of getting additional DNA" : "Шанс получения дополнительного ДНК")]
                         public int Rare;
-                        [JsonProperty("Min : Сколько выдавать ДНК")]
+                        [JsonProperty(LanguageEn ? "Min : How much to give out?" : "Min : Сколько выдавать ДНК")]
                         public int MinDNKCustom;
-                        [JsonProperty("Max : Сколько выдавать ДНК")]
+                        [JsonProperty(LanguageEn ? "Max: How much to give out?" : "Max : Сколько выдавать ДНК")]
                         public int MaxDNKCustom;
                     }
                 }
                 internal class GatherFriends
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General setting" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("Кастомный лист ,на сколько увеличивать количество ДНК за полную добычу ресурса [Shortname] = Настройка")]
+                    [JsonProperty(LanguageEn ? "Custom list, how much to increase the amount of DNA for full resource extraction [Shortname] = setting" : "Кастомный лист ,на сколько увеличивать количество ДНК за полную добычу ресурса [Shortname] = Настройка")]
                     public Dictionary<string, CustomSettings> GatherList = new Dictionary<string, CustomSettings>();
 
                     internal class CustomSettings
                     {
-                        [JsonProperty("Шанс получения дополнительного ДНК")]
+                        [JsonProperty(LanguageEn ? "Chance of getting additional DNA" : "Шанс получения дополнительного ДНК")]
                         public int Rare;
-                        [JsonProperty("Min : Сколько выдавать ДНК")]
+                        [JsonProperty(LanguageEn ? "Min : How much to give out?" : "Min : Сколько выдавать ДНК")]
                         public int MinDNKCustom;
-                        [JsonProperty("Max : Сколько выдавать ДНК")]
+                        [JsonProperty(LanguageEn ? "Max: How much to give out?" : "Max : Сколько выдавать ДНК")]
                         public int MaxDNKCustom;
                     }
                 }
                 internal class Anabiotics
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General setting" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("На сколько увеличивать количество ХП за использование медицины[Shortname] = Amount")]
+                    [JsonProperty(LanguageEn ? "how much to increase the number of HP for using medicine[Shortname] = Amount" : "На сколько увеличивать количество ХП за использование медицины[Shortname] = Amount")]
                     public Dictionary<string, int> AnabioticsList = new Dictionary<string, int>();
                 }
                 internal class Crafter
                 {
-                    [JsonProperty("Включить умение?(true - включено/false - выключено)")]
+                    [JsonProperty(LanguageEn ? "Enable the ability?(true-enabled/false-disabled)" : "Включить умение?(true - включено/false - выключено)")]
                     public bool SkillTurn;
-                    [JsonProperty("Общая настройка")]
+                    [JsonProperty(LanguageEn ? "General setting" : "Общая настройка")]
                     public GeneralSettingsSkill GeneralSettings = new GeneralSettingsSkill();
 
-                    [JsonProperty("В сколько раз увеличивать скорость крафта? (Пример : изначально 60 секунд, увеличение в 3 раза = 60/3 = 20)")]
+                    [JsonProperty(LanguageEn ? "how many times to increase the crafting speed? (Example: initially 60 seconds, 3x magnification = 60/3 = 20)" : "В сколько раз увеличивать скорость крафта? (Пример : изначально 60 секунд, увеличение в 3 раза = 60/3 = 20)")]
                     public int CraftBoost;
                 }
                 internal class GeneralSettingsSkill
                 {
-                    [JsonProperty("Отображаемое имя")]
+                    [JsonProperty(LanguageEn ? "Display name" : "Отображаемое имя")]
                     public string DisplayName;
-                    [JsonProperty("Описание скилла")]
+                    [JsonProperty(LanguageEn ? "skill Description" : "Описание скилла")]
                     public string Description;
-                    [JsonProperty("Sprite для иконки")]
+                    [JsonProperty(LanguageEn ? "sprite for icon" : "Sprite для иконки")]
                     public string Sprite;
-                    [JsonProperty("PNG-ссылка для иконки(64х64).Если используете это,спрайт будет игнорироваться")]
+                    [JsonProperty(LanguageEn ? "PNG link for the icon(64x64).If you use this,the sprite will be ignored" : "PNG-ссылка для иконки(64х64).Если используете это,спрайт будет игнорироваться")]
                     public string PNG;
-                    [JsonProperty("Цена за изучение")]
+                    [JsonProperty(LanguageEn ? "price per study" : "Цена за изучение")]
                     public int PriceDNK;
                 }
                 
@@ -618,39 +612,39 @@ namespace Oxide.Plugins
             #region Interface
             internal class InterfaceSetting
             {
-                [JsonProperty("Настройка элементов дизайна")]
+                [JsonProperty(LanguageEn ? "configuring design elements" : "Настройка элементов дизайна")]
                 public Icons IconsPNG = new Icons();
-                [JsonProperty("Настройка основных элементов")]
+                [JsonProperty(LanguageEn ? "configuring basic elements" : "Настройка основных элементов")]
                 public General GeneralSettings = new General();
                 internal class Icons
                 {
-                    [JsonProperty("Ссылка PNG на задний фон")]
+                    [JsonProperty(LanguageEn ? "PNG background link" : "Ссылка PNG на задний фон")]
                     public string BackgroundPNG;   
-                    [JsonProperty("Ссылка ссылка на иконку заблокированного навыка PNG")]
+                    [JsonProperty(LanguageEn ? "Link link to the blocked skill icon PNG" : "Ссылка ссылка на иконку заблокированного навыка PNG")]
                     public string BlockSkill; 
-                    [JsonProperty("Ссылка ссылка на иконку доступного навыка PNG")]
+                    [JsonProperty(LanguageEn ? "Link link to available skill icon PNG" : "Ссылка ссылка на иконку доступного навыка PNG")]
                     public string AvailableSkill;
-                    [JsonProperty("Ссылка ссылка на иконку изученного навыка PNG")]
+                    [JsonProperty(LanguageEn ? "Link link to the learned skill icon PNG" : "Ссылка ссылка на иконку изученного навыка PNG")]
                     public string ReceivedSkill;
-                    [JsonProperty("Ссылка на кнопку для получения данного скилла(развить)")]
+                    [JsonProperty(LanguageEn ? "Link to the button to get this skill(develop)" : "Ссылка на кнопку для получения данного скилла(развить)")]
                     public string ButtonTakeSkill;  
-                    [JsonProperty("Ссылка панель для изучения скилла")]
+                    [JsonProperty(LanguageEn ? "Link panel for learning the skill" : "Ссылка панель для изучения скилла")]
                     public string BackgroundTakePanel;
 
-                    [JsonProperty("Ссылка ссылка на иконку НЕЙТРАЛЬНОГО заблокированного навыка PNG")]
+                    [JsonProperty(LanguageEn ? "Link link to the NEUTRAL blocked skill icon PNG" : "Ссылка ссылка на иконку НЕЙТРАЛЬНОГО заблокированного навыка PNG")]
                     public string NeutralBlockSkill;
-                    [JsonProperty("Ссылка ссылка на иконку НЕЙТРАЛЬНОГО доступного навыка PNG")]
+                    [JsonProperty(LanguageEn ? "Link link to the NEUTRAL available skill icon PNG" : "Ссылка ссылка на иконку НЕЙТРАЛЬНОГО доступного навыка PNG")]
                     public string NeutralAvailableSkill;
-                    [JsonProperty("Ссылка ссылка на иконку НЕЙТРАЛЬНОГО изученного навыка PNG")]
+                    [JsonProperty(LanguageEn ? "Link link to the NEUTRAL learned skill icon PNG" : "Ссылка ссылка на иконку НЕЙТРАЛЬНОГО изученного навыка PNG")]
                     public string NeutralReceivedSkill;
                 }
                 internal class General
                 {
-                    [JsonProperty("Цвет текста")]
+                    [JsonProperty(LanguageEn ? "text Color" : "Цвет текста")]
                     public string HexLabels;
-                    [JsonProperty("Цвет текста навыков")]
+                    [JsonProperty(LanguageEn ? "skill text color" : "Цвет текста навыков")]
                     public string HexLabelsSkill;
-                    [JsonProperty("Цвет текста описания навыков")]
+                    [JsonProperty(LanguageEn ? "skill description text Color" : "Цвет текста описания навыков")]
                     public string HexLabelTakePanel;
                 }
             }
@@ -659,26 +653,26 @@ namespace Oxide.Plugins
             #region Generals
             internal class GeneralSetting
             {
-                [JsonProperty("Настройки автоматической очисти даты после вайпа")]
+                [JsonProperty(LanguageEn ? "settings for automatic date clearing after VAPE" : "Настройки автоматической очисти даты после вайпа")]
                 public WipeContoller WipeContollers = new WipeContoller();
-                [JsonProperty("Управление вирусом ПАТОГЕН")]
+                [JsonProperty(LanguageEn ? "managing the PATHOGEN virus" : "Управление вирусом ПАТОГЕН")]
                 public VirusPatogen VirusPatogens = new VirusPatogen();
                 internal class WipeContoller
                 {
-                    [JsonProperty("Включить автоматическую очистку даты после вайпа сервера")]
+                    [JsonProperty(LanguageEn ? "Enable automatic date clearing after server wipe" : "Включить автоматическую очистку даты после вайпа сервера")]
                     public bool WipeDataUse;
-                    [JsonProperty("Очищать скиллы игроков после вайпа")]
+                    [JsonProperty(LanguageEn ? "Cleanse skills of players after a wipe" : "Очищать скиллы игроков после вайпа")]
                     public bool WipeDataSkill;
                 }
                 internal class VirusPatogen
                 {
-                    [JsonProperty("Включить вирус-патоген(Данный вирус будет удалять у игрока 1 случайный навык через N количество времени,у них так же будут навыки на излечение и защиты от заражаения)")]
+                    [JsonProperty(LanguageEn ? "Enable pathogen virus(this virus will remove 1 random skill from the player after N amount of time,they will also have skills for healing and protection from infection)" : "Включить вирус-патоген(Данный вирус будет удалять у игрока 1 случайный навык через N количество времени,у них так же будут навыки на излечение и защиты от заражаения)")]
                     public bool UsePatogen;
-                    [JsonProperty("Шанс заражения вирусом")]
+                    [JsonProperty(LanguageEn ? "Chance of virus infection" : "Шанс заражения вирусом")]
                     public int RareInfected;
-                    [JsonProperty("Раз в сколько времени начинать инфекцию игроков(Секунды)")]
+                    [JsonProperty(LanguageEn ? "time to start player infection(seconds)" : "Раз в сколько времени начинать инфекцию игроков(Секунды)")]
                     public int TimerInfectedVirus;
-                    [JsonProperty("Через сколько удалять 1 случайный навык игроку(секунды)")]
+                    [JsonProperty(LanguageEn ? "How long to delete 1 random skill to the player(seconds)" : "Через сколько удалять 1 случайный навык игроку(секунды)")]
                     public int TimerRemoveSkill;
                 }
             }
@@ -687,36 +681,36 @@ namespace Oxide.Plugins
             #region Reference
             internal class ReferenceSetting
             {
-                [JsonProperty("Настройка IQChat")]
+                [JsonProperty(LanguageEn ? "Setting Up IQChat" : "Настройка IQChat")]
                 public IQChat IQChatSettings = new IQChat(); 
-                [JsonProperty("Включить поддержку IQEconomic(ДНК заменится на валюту экономики)")]
+                [JsonProperty(LanguageEn ? "Enable IQEconomic support (DNA will be replaced with the economy currency)" : "Включить поддержку IQEconomic(ДНК заменится на валюту экономики)")]
                 public bool IQEconomicUse;
-                [JsonProperty("Включить поддержку IQHeadReward")]
+                [JsonProperty(LanguageEn ? "Enable support for IQHeadReward" : "Включить поддержку IQHeadReward")]
                 public bool IQHeadRewardUse;
-                [JsonProperty("Включить поддержку IQCraftSystem")]
+                [JsonProperty(LanguageEn ? "Enable support for IQCraftSystem" : "Включить поддержку IQCraftSystem")]
                 public bool IQCraftSystem;
-                [JsonProperty("Включить поддержку IQKits")]
+                [JsonProperty(LanguageEn ? "Enable support for IQKits" : "Включить поддержку IQKits")]
                 public bool IQKits;
-                [JsonProperty("Настройка XDNotifications")]
+                [JsonProperty(LanguageEn ? "configuring XDNotifications" : "Настройка XDNotifications")]
                 public XDNotifications XDNotificationsSettings = new XDNotifications();
                 internal class XDNotifications
                 {
-                    [JsonProperty("Включить поддержку XDNotifications(Некоторые уведомления будут приходить в XDNotifications)")]
+                    [JsonProperty(LanguageEn ? "Enable XDNotifications support(Some notifications will come in XDNotifications)" : "Включить поддержку XDNotifications(Некоторые уведомления будут приходить в XDNotifications)")]
                     public bool UseXDNotifications;
-                    [JsonProperty("Цвет заднего фона уведомления(HEX)")]
+                    [JsonProperty(LanguageEn ? "notification background Color (HEX)" : "Цвет заднего фона уведомления(HEX)")]
                     public string Color;
-                    [JsonProperty("Через сколько удалиться уведомление")]
+                    [JsonProperty(LanguageEn ? "How long before the notification is deleted" : "Через сколько удалиться уведомление")]
                     public int AlertDelete;
-                    [JsonProperty("Звуковой эффект")]
+                    [JsonProperty(LanguageEn ? "Sound effect" : "Звуковой эффект")]
                     public string SoundEffect;
-                    [JsonProperty("Оглавление")]
+                    [JsonProperty(LanguageEn ? "Table Of Contents" : "Оглавление")]
                     public string Title;
                 }
                 internal class IQChat
                 {
-                    [JsonProperty("IQChat : Кастомный префикс в чате")]
+                    [JsonProperty(LanguageEn ? "IQChat: Custom prefix in chat" : "IQChat : Кастомный префикс в чате")]
                     public string CustomPrefix;
-                    [JsonProperty("IQChat : Кастомный аватар в чате(Если требуется)")]
+                    [JsonProperty(LanguageEn ? "IQChat : Custom avatar in the chat(If you want)" : "IQChat : Кастомный аватар в чате(Если требуется)")]
                     public string CustomAvatar;
                 }
             }
@@ -726,40 +720,40 @@ namespace Oxide.Plugins
 
             internal class FarmingDNK
             {
-                [JsonProperty("Настройка получения ДНК за убийство игроков")]
+                [JsonProperty(LanguageEn ? "setting up getting DNA for killing players" : "Настройка получения ДНК за убийство игроков")]
                 public PlayerKill PlayerKills = new PlayerKill();
-                [JsonProperty("Настройка получения ДНК за убийство NPC")]
+                [JsonProperty(LanguageEn ? "setting up getting DNA for killing NPCs" : "Настройка получения ДНК за убийство NPC")]
                 public NPCKill NPCKills = new NPCKill();
-                [JsonProperty("Настройка получения ДНК за убийство животных")]
+                [JsonProperty(LanguageEn ? "setting up getting DNA for killing animals" : "Настройка получения ДНК за убийство животных")]
                 public AnimalKill AnimalKills = new AnimalKill();
                 internal class PlayerKill
                 {
-                    [JsonProperty("Получение ДНК за убийство игроков")]
+                    [JsonProperty(LanguageEn ? "getting DNA for killing players" : "Получение ДНК за убийство игроков")]
                     public bool DNKKillUser;
-                    [JsonProperty("Параметры")]
+                    [JsonProperty(LanguageEn ? "Parameters" : "Параметры")]
                     public GeneralSettingsFarming GeneralSettingsFarmings = new GeneralSettingsFarming();
                 }
                 internal class NPCKill
                 {
-                    [JsonProperty("Получение валюты за убийство NPC")]
+                    [JsonProperty(LanguageEn ? "Getting currency for killing an NPC" : "Получение валюты за убийство NPC")]
                     public bool DNKKillNPC;
-                    [JsonProperty("Параметры")]
+                    [JsonProperty(LanguageEn ? "Parameters" : "Параметры")]
                     public GeneralSettingsFarming GeneralSettingsFarmings = new GeneralSettingsFarming();
                 }
                 internal class AnimalKill
                 {
-                    [JsonProperty("Получение валюты за убийство животных")]
+                    [JsonProperty(LanguageEn ? "Receiving currency for the killing of animals" : "Получение валюты за убийство животных")]
                     public bool DNKKillAnimal;
-                    [JsonProperty("Параметры")]
+                    [JsonProperty(LanguageEn ? "Parameters" : "Параметры")]
                     public GeneralSettingsFarming GeneralSettingsFarmings = new GeneralSettingsFarming();
                 }
                 internal class GeneralSettingsFarming
                 {
-                    [JsonProperty("Шанс получения ДНК")]
+                    [JsonProperty(LanguageEn ? "chance of getting DNA" : "Шанс получения ДНК")]
                     public int RareGiveDNK;
-                    [JsonProperty("Минимальное количество ДНК")]
+                    [JsonProperty(LanguageEn ? "Minimum amount of DNA" : "Минимальное количество ДНК")]
                     public int MinimumDNK;
-                    [JsonProperty("Максимальное количество ДНК")]
+                    [JsonProperty(LanguageEn ? "Maximum amount of DNA" : "Максимальное количество ДНК")]
                     public int MaximumDNK;
                 }
             }
@@ -781,8 +775,8 @@ namespace Oxide.Plugins
                                 SkillTurn = true,
                                 GeneralSettings = new Skills.GeneralSettingsSkill
                                 {
-                                    DisplayName = "Мастер на все руки",
-                                    Description = "У вас открывается больше возможностей для крафта",
+                                    DisplayName = LanguageEn ? "Jack of all trades" : "Мастер на все руки",
+                                    Description = LanguageEn ? "You have more opportunities for crafting" : "У вас открывается больше возможностей для крафта",
                                     PNG = "",
                                     PriceDNK = 50,
                                     Sprite = "assets/icons/lightbulb.png",
@@ -793,8 +787,8 @@ namespace Oxide.Plugins
                                 SkillTurn = true,
                                 GeneralSettings = new Skills.GeneralSettingsSkill
                                 {
-                                    DisplayName = "Меня не найти",
-                                    Description = "Вы получаете иммунитет к розыску,если на вас подадут в розыск, ваш навык защитит вас и сбросится",
+                                    DisplayName = LanguageEn ? "I can't be found" : "Меня не найти",
+                                    Description = LanguageEn ? "you get immunity to search, if you are put on the wanted list, your skill will protect you and reset" :  "Вы получаете иммунитет к розыску,если на вас подадут в розыск, ваш навык защитит вас и сбросится",
                                     PNG = "",
                                     PriceDNK = 50,
                                     Sprite = "assets/content/ui/hypnotized.png",
@@ -805,8 +799,8 @@ namespace Oxide.Plugins
                                 SkillTurn = true,
                                 GeneralSettings = new Skills.GeneralSettingsSkill
                                 {
-                                    DisplayName = "Самый везучий",
-                                    Description = "Увеличивает шанс выпадения предметов из некоторых наборов! Команда : /kit",
+                                    DisplayName = LanguageEn ? "luckiest" : "Самый везучий",
+                                    Description = LanguageEn ? " Increases the chance of dropping items from some sets! Command : /kit" :  "Увеличивает шанс выпадения предметов из некоторых наборов! Команда : /kit",
                                     PNG = "",
                                     PriceDNK = 50,
                                     Sprite = "assets/icons/resource.png",
@@ -818,8 +812,8 @@ namespace Oxide.Plugins
                                 SkillTurn = true,
                                 GeneralSettings = new Skills.GeneralSettingsSkill
                                 {
-                                    DisplayName = "Ускоренная перезарядка",
-                                    Description = "Уменьшает время перезарядки ваших наборово! Команда : /kit",
+                                    DisplayName = LanguageEn ? "Accelerated recharge" : "Ускоренная перезарядка",
+                                    Description = LanguageEn ? " Reduces the recharge time of your sets! Command : /kit" : "Уменьшает время перезарядки ваших наборово! Команда : /kit",
                                     PNG = "",
                                     PriceDNK = 50,
                                     Sprite = "assets/icons/loading.png",
@@ -832,8 +826,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Восприятие анабиотиков",
-                                Description = "Во время принятия медицины вы получаете еще больше лечения,чем обычно",
+                                DisplayName = LanguageEn ? "perception of anabiotics" : "Восприятие анабиотиков",
+                                Description = LanguageEn ? "In the time of taking the medicine you receive more treatment than usual" :  "Во время принятия медицины вы получаете еще больше лечения,чем обычно",
                                 PNG = "",
                                 PriceDNK = 10,
                                 Sprite = "assets/icons/pills.png",
@@ -849,8 +843,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Мастерство шахтера",
-                                Description = "Данный навык позволяет добывать еще больше ресурсов чем обычно",
+                                DisplayName = LanguageEn ? "miner Skill" :  "Мастерство шахтера",
+                                Description = LanguageEn ? " This skill allows you to extract even more resources than usual" : "Данный навык позволяет добывать еще больше ресурсов чем обычно",
                                 PNG = "",
                                 PriceDNK = 15,
                                 Sprite = "assets/icons/level_wood.png",
@@ -868,8 +862,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Единство с землей",
-                                Description = "Вы едины с землей и изучили ее генетический уровень, при полной добычи ресурса вы получите дополнительные очки ДНК",
+                                DisplayName = LanguageEn ? "Unity with the earth" : "Единство с землей",
+                                Description = LanguageEn ? "You are one with the earth and have studied its genetic level, when the resource is fully extracted, you will receive additional DNA points" : "Вы едины с землей и изучили ее генетический уровень, при полной добычи ресурса вы получите дополнительные очки ДНК",
                                 PNG = "",
                                 PriceDNK = 50,
                                 Sprite = "assets/icons/study.png",
@@ -889,8 +883,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Единство с природой",
-                                Description = "Вы едины с природой и изучили ее генетическое строение животных, при убийстве животных вы будете получать дополнительные очки ДНК",
+                                DisplayName = LanguageEn ? "Unity with nature" : "Единство с природой",
+                                Description = LanguageEn ? "You are one with nature and have studied its genetic structure of animals, when you kill animals, you will receive additional DNA points" :  "Вы едины с природой и изучили ее генетическое строение животных, при убийстве животных вы будете получать дополнительные очки ДНК",
                                 PNG = "",
                                 PriceDNK = 50,
                                 Sprite = "assets/icons/bite.png",
@@ -923,8 +917,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Мастерство рукоделия",
-                                Description = "Вы получаете большой навык создания предметов, вы нашли отличные генетические связки для ускоренного крафта",
+                                DisplayName = LanguageEn ? "craft Skill":  "Мастерство рукоделия",
+                                Description = LanguageEn ? " you get a great skill in creating items, you found great genetic bundles for accelerated crafting" : "Вы получаете большой навык создания предметов, вы нашли отличные генетические связки для ускоренного крафта",
                                 PNG = "",
                                 PriceDNK = 30,
                                 Sprite = "assets/icons/tools.png",
@@ -936,8 +930,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Бодрый дух",
-                                Description = "Вы улучшаете свой генетический уровень и получаете дополнительные параметры при возрождении",
+                                DisplayName = LanguageEn ? "Cheerful spirit" : "Бодрый дух",
+                                Description = LanguageEn ? " you improve your genetic level and get additional parameters when reviving" : "Вы улучшаете свой генетический уровень и получаете дополнительные параметры при возрождении",
                                 PNG = "",
                                 PriceDNK = 20,
                                 Sprite = "assets/icons/upgrade.png",
@@ -953,8 +947,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Мастерство владения оружием",
-                                Description = "Вы понимаете состав сплава из которого сделаны ваши предметы, их изнашивание уменьшается",
+                                DisplayName = LanguageEn ? "weapon Proficiency" :  "Мастерство владения оружием",
+                                Description = LanguageEn ? " you understand the composition of the alloy that your items are made of, their wear is reduced" : "Вы понимаете состав сплава из которого сделаны ваши предметы, их изнашивание уменьшается",
                                 PNG = "",
                                 PriceDNK = 25,
                                 Sprite = "assets/icons/stopwatch.png",
@@ -966,8 +960,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Регенерация",
-                                Description = "Вы улучшааете свой генетический уровень и ваши раны будут гораздо быстрее заживать",
+                                DisplayName = LanguageEn ? "Regeneration" : "Регенерация",
+                                Description = LanguageEn ? " you improve your genetic level and your wounds will heal much faster" : "Вы улучшааете свой генетический уровень и ваши раны будут гораздо быстрее заживать",
                                 PNG = "",
                                 PriceDNK = 40,
                                 Sprite = "assets/icons/bleeding.png",
@@ -980,8 +974,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Твердая кожа",
-                                Description = "Вы удалили свой ген отвечающий за потребность в тепле, больше вы не будете чувствовать холода",
+                                DisplayName = LanguageEn ? "Hard skin" : "Твердая кожа",
+                                Description = LanguageEn ? " you have removed your gene responsible for the need for heat, you will no longer feel cold" :  "Вы удалили свой ген отвечающий за потребность в тепле, больше вы не будете чувствовать холода",
                                 PNG = "",
                                 PriceDNK = 35,
                                 Sprite = "assets/icons/freezing.png",
@@ -992,8 +986,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Сила воли",
-                                Description = "После падения у вас появляетсяя сила воли и вы перебариваете боль и снова рветесь в бой!",
+                                DisplayName = LanguageEn ? "willpower" : "Сила воли",
+                                Description = LanguageEn ? " After a fall, you willpower appears and you overcome the pain and rush into battle again!" : "После падения у вас появляетсяя сила воли и вы перебариваете боль и снова рветесь в бой!",
                                 PNG = "",
                                 PriceDNK = 35,
                                 Sprite = "assets/icons/fall.png",
@@ -1007,8 +1001,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Защита от патогена",
-                                Description = "Добавляет единоразовую защиту от вируса Патоген, который разрушает уже изученные гены",
+                                DisplayName = LanguageEn ? "pathogen Protection" : "Защита от патогена",
+                                Description = LanguageEn ? "Adds one-time protection against a virus Pathogen that destroys already studied genes" : "Добавляет единоразовую защиту от вируса Патоген, который разрушает уже изученные гены",
                                 PNG = "",
                                 PriceDNK = 100,
                                 Sprite = "assets/prefabs/misc/chippy arcade/chippyart/bossform0.png",
@@ -1019,8 +1013,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Убийство патогена",
-                                Description = "Если вы заразились вирусом Патоген, данный навык полностью излечит вас",
+                                DisplayName = LanguageEn ? "killing the pathogen" : "Убийство патогена",
+                                Description = LanguageEn ? "If you are infected with a Pathogen virus, this skill will completely cure you" : "Если вы заразились вирусом Патоген, данный навык полностью излечит вас",
                                 PNG = "",
                                 PriceDNK = 35,
                                 Sprite = "assets/icons/demolish.png",
@@ -1031,8 +1025,8 @@ namespace Oxide.Plugins
                             SkillTurn = true,
                             GeneralSettings = new Skills.GeneralSettingsSkill
                             {
-                                DisplayName = "Сохранение ДНК",
-                                Description = "После вайпа чать ваших ДНК потраченных на изучение навыков сохранится",
+                                DisplayName = LanguageEn ? "saving DNA" : "Сохранение ДНК",
+                                Description = LanguageEn ? " after VAPE chat your DNA spent on learning skills will be saved" : "После вайпа чать ваших ДНК потраченных на изучение навыков сохранится",
                                 PNG = "",
                                 PriceDNK = 150,
                                 Sprite = "assets/icons/player_carry.png",
@@ -1156,7 +1150,7 @@ namespace Oxide.Plugins
             }
             catch
             {
-                PrintWarning("Ошибка #87" + $"чтения конфигурации 'oxide/config/{Name}', создаём новую конфигурацию! #45");
+                PrintWarning(LanguageEn ? "Mistake #87" + $"read configuration 'oxide/config/{Name}', create a new configuration! #45" : "Ошибка #87" + $"чтения конфигурации 'oxide/config/{Name}', создаём новую конфигурацию! #45");
                 LoadDefaultConfig();
             }
             NextTick(SaveConfig);
@@ -1211,12 +1205,12 @@ namespace Oxide.Plugins
                 || player.IsNpc
                 || player.GetComponent<NPCPlayer>() != null
                 || player.GetComponent<Zombie>() != null
-                || player.GetComponent<NPCMurderer>() != null)
+                || player.GetComponent<HumanNPC>() != null)
                 return;
             var FarmingDNK = config.FarmingDNKS;
 
             if (FarmingDNK.NPCKills.DNKKillNPC)
-                if ((bool)(entity as NPCPlayer) || (bool)(entity as NPCMurderer))
+                if ((bool)(entity as NPCPlayer) || (bool)(entity as HumanNPC))
                 {
                     var FarmingNPC = FarmingDNK.NPCKills.GeneralSettingsFarmings;
                     if (!IsRare(FarmingNPC.RareGiveDNK)) return;
@@ -1227,7 +1221,7 @@ namespace Oxide.Plugins
             if (FarmingDNK.PlayerKills.DNKKillUser)
                 if ((bool)(entity as BasePlayer))
                 {
-                    if ((bool)(entity as NPCPlayer) || (bool)(entity as NPCMurderer)) return;
+                    if ((bool)(entity as NPCPlayer) || (bool)(entity as HumanNPC)) return;
 
                     BasePlayer targetPlayer = entity.ToPlayer();
                     if (targetPlayer == null) return;
@@ -1235,7 +1229,7 @@ namespace Oxide.Plugins
                     if (targetPlayer.userID != player.userID)
                     {
                         if (IsFriends(player.userID, targetPlayer.userID)) return;
-                        if (IsClans(player.userID, targetPlayer.userID)) return;
+                        if (IsClans(player.UserIDString, targetPlayer.UserIDString)) return;
                         if (IsDuel(player.userID)) return;
 
                         var FarmingPlayer = FarmingDNK.PlayerKills.GeneralSettingsFarmings;
@@ -1330,7 +1324,7 @@ namespace Oxide.Plugins
                 || player.IsNpc 
                 || player.GetComponent<NPCPlayer>() != null 
                 || player.GetComponent<Zombie>() != null 
-                || player.GetComponent<NPCMurderer>() != null)
+                || player.GetComponent<HumanNPC>() != null)
                 return;
             if (IsDuel(player.userID))
                 return;
@@ -1429,17 +1423,17 @@ namespace Oxide.Plugins
                         ulong userID = ulong.Parse(arg.Args[1]);
                         if(!userID.IsSteamId())
                         {
-                            PrintWarning("Вы неверно указали SteamID");
+                            PrintWarning(LanguageEn ? "You entered the wrong Steam ID" : "Вы неверно указали SteamID");
                             return;
                         }
                         int Amount = Convert.ToInt32(arg.Args[2]);
                         if(!DataInformation.ContainsKey(userID))
                         {
-                            PrintWarning("Такого игрока нет");
+                            PrintWarning(LanguageEn ? "There is no such player" : "Такого игрока нет");
                             return;
                         }
                         DataInformation[userID] += Amount;
-                        PrintWarning("Успешно");
+                        PrintWarning(LanguageEn ? "Successfully" : "Успешно");
                         break;
                     }
                 case "study_all":
@@ -1447,12 +1441,12 @@ namespace Oxide.Plugins
                         ulong UserID = ulong.Parse(arg.Args[1]);
                         if (!UserID.IsSteamId())
                         {
-                            PrintError("Неверно указан SteamID");
+                            PrintError(LanguageEn ? "Invalid Steam ID" : "Неверно указан SteamID");
                             return;
                         }
                         if(!DataSkills.ContainsKey(UserID))
                         {
-                            PrintError("Такого игрока нет в датафайле");
+                            PrintError(LanguageEn ? "This player is not in the datafile" : "Такого игрока нет в датафайле");
                             return;
                         }
                         var UserSkills = DataSkills[UserID];
@@ -1490,6 +1484,7 @@ namespace Oxide.Plugins
                     }
                 case "debug":
                     {
+                        if (arg.Player() != null && !arg.Player().IsAdmin) return;
                         GenesisGens();
                         WipeController();
                         foreach (BasePlayer player in BasePlayer.allPlayerList)
@@ -1682,7 +1677,7 @@ namespace Oxide.Plugins
 
                 SaveDNK = SpentDNK / 100 * SkillSettings.GenesisGensSettings.PercentSave;
                 DataInformation[userID] = SaveDNK;
-                PrintWarning($"Игроку {userID} по навыку Генезиз ген было сохранено {SaveDNK} ДНК");
+                PrintWarning(LanguageEn ? $"Player {userID} by skill Genesis gene was saved {SaveDNK} DNA" : $"Игроку {userID} по навыку Генезиз ген было сохранено {SaveDNK} ДНК");
             }
         }
 
@@ -1781,13 +1776,13 @@ namespace Oxide.Plugins
         {
             var Controller = config.GeneralSettings.WipeContollers;
             if (!Controller.WipeDataUse) return;
-            PrintWarning("Обнаружен вайп сервера!");
+            PrintWarning(LanguageEn ? "Server wipe detected!" : "Обнаружен вайп сервера!");
             if (Controller.WipeDataSkill)
             {
                 DataSkills.Clear();
-                PrintWarning("Скиллы игроков успешно сброшены");
+                PrintWarning(LanguageEn ? "Player skills successfully reset" : "Скиллы игроков успешно сброшены");
             }
-            PrintWarning("Плагин успешно закончил автоматическую очистку");
+            PrintWarning(LanguageEn ? "The plugin has successfully completed automatic cleanup" : "Плагин успешно закончил автоматическую очистку");
             Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQPlagueSkill/InformationUser", DataInformation);
             Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQPlagueSkill/InformationSkills", DataSkills);
         }
@@ -2076,7 +2071,7 @@ namespace Oxide.Plugins
                         else SendChat(player, lang.GetMessage("CHAT_VIRUS_PATOGEN_INFECTED", this, player.UserIDString));
                     }
                 }
-                PrintWarning($"Прошла волна заражений вирусом ПАТОГЕН");
+                PrintWarning(LanguageEn ? $"The wave of infections with the PATHOGEN virus has passed" : $"Прошла волна заражений вирусом ПАТОГЕН");
             });
             PatogenAttack();
         }
@@ -2200,7 +2195,7 @@ namespace Oxide.Plugins
             CuiHelper.DestroyUi(player, "PATOGEN_TITLE");
             CuiHelper.DestroyUi(player, "PATOGEN_DESCRIPTION");
 
-            PrintWarning($"Игрок {player.displayName} излечился от ПАТОГЕНА");
+            PrintWarning(LanguageEn ? $"Player {player.displayName} cured of the pathogen" : $"Игрок {player.displayName} излечился от ПАТОГЕНА");
         }
 
         #endregion
@@ -2234,7 +2229,13 @@ namespace Oxide.Plugins
 
         public void GiveDNK(BasePlayer player,int Min, int Max)
         {
+            if (player == null) return;
             int DNK = UnityEngine.Random.Range(Min, Max);
+            if (!DataInformation.ContainsKey(player.userID))
+            {
+                RegisteredDataUser(player);
+                return;
+            }
             DataInformation[player.userID] += DNK;
 
             var Notification = config.ReferenceSettings.XDNotificationsSettings;
@@ -2387,8 +2388,8 @@ namespace Oxide.Plugins
 
             if (Reference.IQHeadRewardUse)
                 if (IQHeadReward)
-                    if(config.SkillSettings.NeutralSkills.SkillIQHeadRewards.SkillTurn)
-                    Interface_Skill_IQHeadReward(player);
+                    if (config.SkillSettings.NeutralSkills.SkillIQHeadRewards.SkillTurn)
+                        Interface_Skill_IQHeadReward(player);
 
             if(Reference.IQCraftSystem)
                 if (IQCraftSystem)
@@ -2787,7 +2788,7 @@ namespace Oxide.Plugins
                 Components =
                     {
                         new CuiRawImageComponent {  Png = GetImage(SkillIcon) },
-                        new CuiRectTransformComponent{ AnchorMin = "0.3359377 0.8611", AnchorMax = "0.4239583 0.9953704"}, //skykey
+                        new CuiRectTransformComponent{ AnchorMin = "0.3359377 0.8611", AnchorMax = "0.423951432 0.9955704"}, 
                     }
             });
 
@@ -2797,7 +2798,7 @@ namespace Oxide.Plugins
                 Components =
                     {
                         Comp,
-                        new CuiRectTransformComponent{ AnchorMin = "0.2499933 0.2260868", AnchorMax = "0.749979 0.78260"},  //skykey
+                        new CuiRectTransformComponent{ AnchorMin = "0.2499953 0.2260848", AnchorMax = "0.749939 0.78201432"},  
                     }
             });
 
@@ -2889,7 +2890,7 @@ namespace Oxide.Plugins
                     Components =
                     {
                         new CuiRawImageComponent {  Png = GetImage(SkillIcon) },
-                        new CuiRectTransformComponent{ AnchorMin = "0.6380165 0.6805555", AnchorMax = "0.7234375 0.8166"}, //skykey
+                        new CuiRectTransformComponent{ AnchorMin = "0.6380165 0.6805555", AnchorMax = "0.7234375 0.81661432"}, 
                     }
                 });
 
@@ -3389,7 +3390,7 @@ namespace Oxide.Plugins
         #region Lang
         private new void LoadDefaultMessages()
         {
-            PrintWarning("Языковой файл загружается...");
+            PrintWarning(LanguageEn ? "Language file is loading..." : "Языковой файл загружается...");
             lang.RegisterMessages(new Dictionary<string, string>
             {
                 ["EXIT_BTN"] = "<size=30><b>LEAVE GENESISE</b></size>",
@@ -3441,7 +3442,7 @@ namespace Oxide.Plugins
                 ["ACTIVE_HELP_INFO"] = "Данная метка означает,что навык относится к активному навыку",
             }, this, "ru");
 
-            PrintWarning("Языковой файл загружен успешно");
+            PrintWarning(LanguageEn ? "Language file uploaded successfully" : "Языковой файл загружен успешно");
         }
         #endregion
 
@@ -3464,9 +3465,132 @@ namespace Oxide.Plugins
             }
             else
             {
-                PrintWarning("Не найден плагин IQHEADREWARD");
+                PrintWarning(LanguageEn ? "Plugin not found IQHEADREWARD" : "Не найден плагин IQHEADREWARD");
                 return false;
             }
+        }
+        bool API_IS_ALL_STUDY(ulong player)
+        {
+            if (!DataSkills.ContainsKey(player)) return false;
+            Int32 SkillStudy = 0;
+            Int32 SkillNotStudy = 0;
+
+            var Skill = config.SkillSettings;
+            var Data = DataSkills[player];
+            if (config.ReferenceSettings.IQKits && IQKits)
+            {
+                if (Skill.NeutralSkills.IQKitsRare.SkillTurn)
+                    if (Data.IQKitsRareup)
+                        SkillStudy++;
+                    else SkillNotStudy++;
+
+                if (Skill.NeutralSkills.IQKitsCooldown.SkillTurn)
+                    if (Data.IQKitsCooldownPercent)
+                        SkillStudy++;
+                    else SkillNotStudy++;
+            }
+
+            if (config.ReferenceSettings.IQCraftSystem && IQCraftSystem)
+            {
+                if (Skill.NeutralSkills.IQCraftSystemAdvancedCrafts.SkillTurn)
+                    if (Data.IQCraftSystemAdvanced)
+                        SkillStudy++;
+                    else SkillNotStudy++;
+            }
+
+            if (config.ReferenceSettings.IQHeadRewardUse && IQHeadReward)
+            {
+                if (Skill.NeutralSkills.SkillIQHeadRewards.SkillTurn)
+                    if (Data.IQHeadReward)
+                        SkillStudy++;
+                    else SkillNotStudy++;
+            }
+
+            if(Skill.AnabioticsSettings.SkillTurn)
+            {
+                if(Data.Anabiotics)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.AnimalFriendsSettings.SkillTurn)
+            {
+                if (Data.AnimalFriends)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.CrafterSettings.SkillTurn)
+            {
+                if (Data.Crafter)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.GatherFriendsSettings.SkillTurn)
+            {
+                if (Data.GatherFriends)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.GenesisGensSettings.SkillTurn)
+            {
+                if (Data.GenesisGens)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.MetabolismSettings.SkillTurn)
+            {
+                if (Data.Metabolism)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.MilitarySettings.SkillTurn)
+            {
+                if (Data.Military)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.MinerSettings.SkillTurn)
+            {
+                if (Data.Miner)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.PatogenAmrorySettings.SkillTurn)
+            {
+                if (Data.PatogenAmrory)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.RegenerationSettings.SkillTurn)
+            {
+                if (Data.Regeneration)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.ThickSkinSettings.SkillTurn)
+            {
+                if (Data.ThickSkin)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            if (Skill.WoundedShakeSettings.SkillTurn)
+            {
+                if (Data.WoundedShake)
+                    SkillStudy++;
+                else SkillNotStudy++;
+            }
+
+            return SkillStudy >= SkillNotStudy;
         }
         bool API_IS_RARE_SKILL_KITS(BasePlayer player)
         {

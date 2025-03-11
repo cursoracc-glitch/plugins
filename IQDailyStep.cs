@@ -1,4 +1,4 @@
-﻿using ConVar;
+using ConVar;
 using Newtonsoft.Json;
 using Oxide.Core.Plugins;
 using System;
@@ -10,16 +10,12 @@ using System.Collections;
 
 namespace Oxide.Plugins
 {
-    [Info("IQDailyStep", "TopPlugin.ru", "0.0.5")]
+    [Info("IQDailyStep", "SkuliDropek", "0.0.5")]
     [Description("Ежедневные награды")]
     class IQDailyStep : RustPlugin
     {
-        #region Reference		
+        #region Reference
         [PluginReference] Plugin IQChat, IQEconomic, IQCases, ImageLibrary, RustStore;
-		
-		
-		private static System.Random Rnd = new System.Random();
-		
         public void SendChat(string Message, BasePlayer player, Chat.ChatChannel channel = Chat.ChatChannel.Global)
         {
             var Chat = config.GeneralSetting.ChatSettings;
@@ -29,7 +25,6 @@ namespace Oxide.Plugins
                 else IQChat?.Call("API_ALERT_PLAYER", player, Message, Chat.CustomPrefix, Chat.CustomAvatar);
             else player.SendConsoleCommand("chat.add", channel, 0, Message);
         }
-		
         private string GetImage(string fileName, ulong skin = 0)
         {
             var imageId = (string)plugins.Find("ImageLibrary").CallHook("GetImage", fileName, skin);
@@ -86,14 +81,14 @@ namespace Oxide.Plugins
             return (string)IQEconomic?.Call("API_GET_MONEY_IL"); }
         void IQCasesGiveCase(ulong userID, string CaseKey, int Amount)
         {
-            if(!IQCASE_EXIST(CaseKey))
-            {
-                PrintError($"{CaseKey} - данного кейса не найдено в IQCases.Проверьте введенные вами данные в плагине!");
-                return;
-            }
             if (!IQCases)
             {
                 PrintError("У вас установлена выдача кейса IQCases,но не установлен плагин!\nВыдача награды будетн неккоректна!");
+                return;
+            }
+            if (!IQCASE_EXIST(CaseKey))
+            {
+                PrintError($"{CaseKey} - данного кейса не найдено в IQCases.Проверьте введенные вами данные в плагине!");
                 return;
             }
             IQCases?.Call("API_GIVE_CASE", userID, CaseKey, Amount);
@@ -198,8 +193,6 @@ namespace Oxide.Plugins
             #region DaysSettings
             internal class DaySetting
             {
-                [JsonProperty("Сколько предметов выдавать")]
-                public int GiveCount;
                 [JsonProperty("Настройка награды")]
                 public List<RewardSetting> Rewards = new List<RewardSetting>();
                 [JsonProperty("Ссылка на картинку")]
@@ -208,7 +201,6 @@ namespace Oxide.Plugins
                 public string ImageLinkAccess;
                 [JsonProperty("День")]
                 public string Day;
-				
                 internal class RewardSetting
                 {
                     [JsonProperty("Использовать предметы RUST'a")]
@@ -222,7 +214,7 @@ namespace Oxide.Plugins
                     [JsonProperty("Использовать кейсы с IQCases.Картинка будет подставляться с плагина сама(Если есть)")]
                     public bool UseIQCases;
                     [JsonProperty("Настройка предметов RUST'a")]
-                    public ItemSetting ItemSettings = new ItemSetting();
+                    public List<ItemSetting> ItemSettings = new List<ItemSetting>();
                     [JsonProperty("Ссылка на картинку для набора предметов RUST'a")]
                     public string PNGItemRust;
                     [JsonProperty("Сколько баланса выдавать в магазин")]
@@ -235,7 +227,6 @@ namespace Oxide.Plugins
                     public int AmountEconomic;
                     [JsonProperty("Настройка команды")]
                     public CommandSetting CommandSettings = new CommandSetting();
-					
                     internal class ItemSetting
                     {
                         [JsonProperty("DisplayName (Если требуется для кастомного предмета,в ином случае оставляйте пустым)")]
@@ -273,7 +264,6 @@ namespace Oxide.Plugins
                 [JsonProperty("Включить задний фон")]
                 public bool UseBackground;
             }
-			
             #endregion
 
             public static Configuration GetNewConfiguration()
@@ -284,7 +274,7 @@ namespace Oxide.Plugins
                     GeneralSetting = new GeneraldSettings
                     {
                         GameStoreshUse = false,
-                        MoscovOvhUse = false,
+                        MoscovOvhUse = true,
                         GameStoresSettings = new GeneraldSettings.GameStores
                         {
                             GameStoresAPIStore = "",
@@ -307,15 +297,14 @@ namespace Oxide.Plugins
                         new DaySetting
                         {
                             Day = "1 ДЕНЬ",
-							GiveCount = 1,
                             ImageLinkAccess = "https://i.imgur.com/8A7OQ4X.png",
                             ImageLink = "https://i.imgur.com/6zWWX2N.png",
                             Rewards = new List<DaySetting.RewardSetting>
                             {
                                 new DaySetting.RewardSetting
                                 {
-                                    UseCommand = false,
-                                    UseItem = true,
+                                    UseCommand = true,
+                                    UseItem = false,
                                     PNGItemRust = "https://i.imgur.com/4valKsh.png",
                                     PNGStoreBalance = "https://i.imgur.com/Pe2VmPZ.png",
                                     UseIQEconomic = false,
@@ -333,12 +322,9 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
                                     {
-										DisplayName = "",
-									    Shortname = "rifle.ak",
-									    Amount = 1,
-									    SkinID = 0,	
+
                                     }
                                 },
                                 new DaySetting.RewardSetting
@@ -362,21 +348,38 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
-                                    {                                       
-									   DisplayName = "",
-									   Shortname = "scrap",
-									   Amount = 100,
-									   SkinID = 0,								   
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
+                                    {
+                                       new DaySetting.RewardSetting.ItemSetting
+                                       {
+                                           DisplayName = "",
+                                           Shortname = "rifle.ak",
+                                           Amount = 1,
+                                           SkinID = 0,
+                                       },
+                                        new DaySetting.RewardSetting.ItemSetting
+                                        {
+                                            DisplayName = "",
+                                            Shortname = "scrap",
+                                            Amount = 100,
+                                            SkinID = 0,
+                                        },
+                                         new DaySetting.RewardSetting.ItemSetting
+                                         {
+                                             DisplayName = "Калаш убийца",
+                                             Shortname = "rifle.ak",
+                                             Amount = 1,
+                                             SkinID = 1337,
+                                         },
                                     }
                                 },
                                 new DaySetting.RewardSetting
                                 {
                                     UseCommand = false,
-                                    UseItem = true,
+                                    UseItem = false,
                                     PNGItemRust = "https://i.imgur.com/4valKsh.png",
                                     PNGStoreBalance = "https://i.imgur.com/Pe2VmPZ.png",
-                                    UseIQEconomic = false,
+                                    UseIQEconomic = true,
                                     UseStores = false,
                                     UseIQCases = false,
                                     AmountEconomic = 10,
@@ -391,23 +394,20 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
                                     {
-										DisplayName = "",
-									    Shortname = "jackhammer",
-									    Amount = 1,
-									    SkinID = 0,	
+
                                     }
                                 },
                                 new DaySetting.RewardSetting
                                 {
                                     UseCommand = false,
-                                    UseItem = true,
+                                    UseItem = false,
                                     PNGItemRust = "https://i.imgur.com/4valKsh.png",
                                     PNGStoreBalance = "https://i.imgur.com/Pe2VmPZ.png",
                                     UseIQEconomic = false,
                                     UseStores = false,
-                                    UseIQCases = false,
+                                    UseIQCases = true,
                                     AmountEconomic = 10,
                                     CountMoneyStore = 10,
                                     CommandSettings = new DaySetting.RewardSetting.CommandSetting
@@ -420,12 +420,9 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
                                     {
-										DisplayName = "",
-									    Shortname = "supply.signal",
-									    Amount = 1,
-									    SkinID = 0,	
+
                                     }
                                 }
                             }
@@ -433,19 +430,18 @@ namespace Oxide.Plugins
                         new DaySetting
                         {
                             Day = "2 ДЕНЬ",
-							GiveCount = 1,
                             ImageLink = "https://i.imgur.com/OqPXvRh.png",
                             ImageLinkAccess = "https://i.imgur.com/66fsczj.png",
                             Rewards = new List<DaySetting.RewardSetting>
                             {
                                 new DaySetting.RewardSetting
                                 {
-                                    UseCommand = false,
-                                    UseItem = true,
+                                    UseCommand = true,
+                                    UseItem = false,
                                     PNGItemRust = "https://i.imgur.com/4valKsh.png",
                                     PNGStoreBalance = "https://i.imgur.com/Pe2VmPZ.png",
                                     UseIQEconomic = false,
-                                    UseStores = false,
+                                    UseStores = true,
                                     UseIQCases = false,
                                     AmountEconomic = 10,
                                     CountMoneyStore = 10,
@@ -459,12 +455,29 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
                                     {
-										 DisplayName = "Калаш убийца",
-										 Shortname = "rifle.ak",
-										 Amount = 1,
-										 SkinID = 1337,
+                                       new DaySetting.RewardSetting.ItemSetting
+                                       {
+                                           DisplayName = "",
+                                           Shortname = "rifle.ak",
+                                           Amount = 1,
+                                           SkinID = 0,
+                                       },
+                                        new DaySetting.RewardSetting.ItemSetting
+                                        {
+                                            DisplayName = "",
+                                            Shortname = "scrap",
+                                            Amount = 100,
+                                            SkinID = 0,
+                                        },
+                                         new DaySetting.RewardSetting.ItemSetting
+                                         {
+                                             DisplayName = "Калаш убийца",
+                                             Shortname = "rifle.ak",
+                                             Amount = 1,
+                                             SkinID = 1337,
+                                         },
                                     }
                                 }
                             }
@@ -472,20 +485,19 @@ namespace Oxide.Plugins
                         new DaySetting
                         {
                             Day = "3 ДЕНЬ",
-							GiveCount = 1,
                             ImageLink = "https://i.imgur.com/DJR1xPh.png",
                             ImageLinkAccess = "https://i.imgur.com/mCXhiap.png",
                             Rewards = new List<DaySetting.RewardSetting>
                             {
                                 new DaySetting.RewardSetting
                                 {
-                                    UseCommand = false,
+                                    UseCommand = true,
                                     UseItem = true,
                                     PNGItemRust = "https://i.imgur.com/4valKsh.png",
                                     PNGStoreBalance = "https://i.imgur.com/Pe2VmPZ.png",
-                                    UseIQEconomic = false,
-                                    UseStores = false,
-                                    UseIQCases = false,
+                                    UseIQEconomic = true,
+                                    UseStores = true,
+                                    UseIQCases = true,
                                     AmountEconomic = 10,
                                     CountMoneyStore = 10,
                                     CommandSettings = new DaySetting.RewardSetting.CommandSetting
@@ -498,12 +510,29 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
                                     {
-										DisplayName = "",
-										Shortname = "scrap",
-										Amount = 300,
-										SkinID = 0,                                        
+                                       new DaySetting.RewardSetting.ItemSetting
+                                       {
+                                           DisplayName = "",
+                                           Shortname = "rifle.ak",
+                                           Amount = 1,
+                                           SkinID = 0,
+                                       },
+                                        new DaySetting.RewardSetting.ItemSetting
+                                        {
+                                            DisplayName = "",
+                                            Shortname = "scrap",
+                                            Amount = 100,
+                                            SkinID = 0,
+                                        },
+                                         new DaySetting.RewardSetting.ItemSetting
+                                         {
+                                             DisplayName = "Калаш убийца",
+                                             Shortname = "rifle.ak",
+                                             Amount = 1,
+                                             SkinID = 1337,
+                                         },
                                     }
                                 }
                             }
@@ -511,20 +540,19 @@ namespace Oxide.Plugins
                         new DaySetting
                         {
                             Day = "4 ДЕНЬ",
-							GiveCount = 1,
                             ImageLink = "https://i.imgur.com/p2Xgdog.png",
                             ImageLinkAccess = "https://i.imgur.com/ffdLwcr.png",
                             Rewards = new List<DaySetting.RewardSetting>
                             {
                                 new DaySetting.RewardSetting
                                 {
-                                    UseCommand = false,
+                                    UseCommand = true,
                                     UseItem = true,
                                     PNGItemRust = "https://i.imgur.com/4valKsh.png",
                                     PNGStoreBalance = "https://i.imgur.com/Pe2VmPZ.png",
-                                    UseIQEconomic = false,
-                                    UseStores = false,
-                                    UseIQCases = false,
+                                    UseIQEconomic = true,
+                                    UseStores = true,
+                                    UseIQCases = true,
                                     AmountEconomic = 10,
                                     CountMoneyStore = 10,
                                     CommandSettings = new DaySetting.RewardSetting.CommandSetting
@@ -537,12 +565,29 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
                                     {
-									   DisplayName = "",
-									   Shortname = "rifle.ak",
-									   Amount = 1,
-									   SkinID = 0,                                       
+                                       new DaySetting.RewardSetting.ItemSetting
+                                       {
+                                           DisplayName = "",
+                                           Shortname = "rifle.ak",
+                                           Amount = 1,
+                                           SkinID = 0,
+                                       },
+                                        new DaySetting.RewardSetting.ItemSetting
+                                        {
+                                            DisplayName = "",
+                                            Shortname = "scrap",
+                                            Amount = 100,
+                                            SkinID = 0,
+                                        },
+                                         new DaySetting.RewardSetting.ItemSetting
+                                         {
+                                             DisplayName = "Калаш убийца",
+                                             Shortname = "rifle.ak",
+                                             Amount = 1,
+                                             SkinID = 1337,
+                                         },
                                     }
                                 }
                             }
@@ -550,20 +595,19 @@ namespace Oxide.Plugins
                         new DaySetting
                         {
                             Day = "5 ДЕНЬ",
-							GiveCount = 1,
                             ImageLink = "https://i.imgur.com/XO3xVoZ.png",
                             ImageLinkAccess = "https://i.imgur.com/Kp90WoJ.png",
                             Rewards = new List<DaySetting.RewardSetting>
                             {
                                 new DaySetting.RewardSetting
                                 {
-                                    UseCommand = false,
+                                    UseCommand = true,
                                     UseItem = true,
                                     PNGItemRust = "https://i.imgur.com/4valKsh.png",
                                     PNGStoreBalance = "https://i.imgur.com/Pe2VmPZ.png",
-                                    UseIQEconomic = false,
-                                    UseStores = false,
-                                    UseIQCases = false,
+                                    UseIQEconomic = true,
+                                    UseStores = true,
+                                    UseIQCases = true,
                                     AmountEconomic = 10,
                                     CountMoneyStore = 10,
                                     CommandSettings = new DaySetting.RewardSetting.CommandSetting
@@ -576,12 +620,29 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
                                     {
-										 DisplayName = "Калаш убийца",
-										 Shortname = "rifle.ak",
-										 Amount = 1,
-										 SkinID = 1337,
+                                       new DaySetting.RewardSetting.ItemSetting
+                                       {
+                                           DisplayName = "",
+                                           Shortname = "rifle.ak",
+                                           Amount = 1,
+                                           SkinID = 0,
+                                       },
+                                        new DaySetting.RewardSetting.ItemSetting
+                                        {
+                                            DisplayName = "",
+                                            Shortname = "scrap",
+                                            Amount = 100,
+                                            SkinID = 0,
+                                        },
+                                         new DaySetting.RewardSetting.ItemSetting
+                                         {
+                                             DisplayName = "Калаш убийца",
+                                             Shortname = "rifle.ak",
+                                             Amount = 1,
+                                             SkinID = 1337,
+                                         },
                                     }
                                 }
                             }
@@ -589,20 +650,19 @@ namespace Oxide.Plugins
                         new DaySetting
                         {
                             Day = "6 ДЕНЬ",
-							GiveCount = 1,
                             ImageLink = "https://i.imgur.com/L9GrCmr.png",
                             ImageLinkAccess = "https://i.imgur.com/t9kh9No.png",
                             Rewards = new List<DaySetting.RewardSetting>
                             {
                                 new DaySetting.RewardSetting
                                 {
-                                    UseCommand = false,
+                                    UseCommand = true,
                                     UseItem = true,
                                     PNGItemRust = "https://i.imgur.com/4valKsh.png",
                                     PNGStoreBalance = "https://i.imgur.com/Pe2VmPZ.png",
-                                    UseIQEconomic = false,
-                                    UseStores = false,
-                                    UseIQCases = false,
+                                    UseIQEconomic = true,
+                                    UseStores = true,
+                                    UseIQCases = true,
                                     AmountEconomic = 10,
                                     CountMoneyStore = 10,
                                     CommandSettings = new DaySetting.RewardSetting.CommandSetting
@@ -615,12 +675,29 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
                                     {
-										 DisplayName = "Калаш убийца",
-										 Shortname = "rifle.ak",
-										 Amount = 1,
-										 SkinID = 1337,
+                                       new DaySetting.RewardSetting.ItemSetting
+                                       {
+                                           DisplayName = "",
+                                           Shortname = "rifle.ak",
+                                           Amount = 1,
+                                           SkinID = 0,
+                                       },
+                                        new DaySetting.RewardSetting.ItemSetting
+                                        {
+                                            DisplayName = "",
+                                            Shortname = "scrap",
+                                            Amount = 100,
+                                            SkinID = 0,
+                                        },
+                                         new DaySetting.RewardSetting.ItemSetting
+                                         {
+                                             DisplayName = "Калаш убийца",
+                                             Shortname = "rifle.ak",
+                                             Amount = 1,
+                                             SkinID = 1337,
+                                         },
                                     }
                                 }
                             }
@@ -628,15 +705,14 @@ namespace Oxide.Plugins
                         new DaySetting
                         {
                             Day = "7 ДЕНЬ",
-							GiveCount = 1,
                             ImageLink = "https://i.imgur.com/iehQzIo.png",
                             ImageLinkAccess = "https://i.imgur.com/LoV71NL.png",
                             Rewards = new List<DaySetting.RewardSetting>
                             {
                                 new DaySetting.RewardSetting
                                 {
-                                    UseCommand = false,
-                                    UseItem = true,
+                                    UseCommand = true,
+                                    UseItem = false,
                                     PNGItemRust = "https://i.imgur.com/4valKsh.png",
                                     PNGStoreBalance = "https://i.imgur.com/Pe2VmPZ.png",
                                     UseIQEconomic = false,
@@ -654,12 +730,29 @@ namespace Oxide.Plugins
                                         KeyCase = "freecase",
                                         Amount = 1,
                                     },
-                                    ItemSettings = new DaySetting.RewardSetting.ItemSetting
+                                    ItemSettings = new List<DaySetting.RewardSetting.ItemSetting>
                                     {
-										DisplayName = "",
-										Shortname = "scrap",
-										Amount = 100,
-										SkinID = 0,                                        
+                                       new DaySetting.RewardSetting.ItemSetting
+                                       {
+                                           DisplayName = "",
+                                           Shortname = "rifle.ak",
+                                           Amount = 1,
+                                           SkinID = 0,
+                                       },
+                                        new DaySetting.RewardSetting.ItemSetting
+                                        {
+                                            DisplayName = "",
+                                            Shortname = "scrap",
+                                            Amount = 100,
+                                            SkinID = 0,
+                                        },
+                                         new DaySetting.RewardSetting.ItemSetting
+                                         {
+                                             DisplayName = "Калаш убийца",
+                                             Shortname = "rifle.ak",
+                                             Amount = 1,
+                                             SkinID = 1337,
+                                         },
                                     }
                                 }
                             }
@@ -689,7 +782,7 @@ namespace Oxide.Plugins
             }
             catch
             {
-                PrintWarning($"Ошибка чтения #13 конфигурации 'oxide/config/{Name}', создаём новую конфигурацию!!");
+                PrintWarning($"Ошибка чтения #57 конфигурации 'oxide/config/{Name}', создаём новую конфигурацию!!");
                 LoadDefaultConfig();
             }
 
@@ -708,11 +801,9 @@ namespace Oxide.Plugins
         {
             DataPlayer = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, Dictionary<int, bool>>>("IQDailyStep/IQUser");
         }
-		
-        void WriteData() => timer.Every(60f, () => {
-           Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQDailyStep/IQUser", DataPlayer);
-        });
-		
+        void WriteData() {
+            Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQDailyStep/IQUser", DataPlayer);
+        }
         void RegisteredDataUser(BasePlayer player)
         {
             if (!DataPlayer.ContainsKey(player.userID))
@@ -728,11 +819,9 @@ namespace Oxide.Plugins
                 });
             else
             {
-				
                 if (!DataPlayer[player.userID].ContainsKey(DateTime.Now.Day))
-                {					
+                {
                     DataPlayer.Remove(player.userID);
-                    PrintWarning("REMOVE");
                     DataPlayer.Add(player.userID, new Dictionary<int, bool>
                     {
                         [DateTime.Now.Day] = false,
@@ -747,24 +836,14 @@ namespace Oxide.Plugins
 
                     return;
                 }
-                if (DataPlayer[player.userID].Where(x => x.Value == true).Count() >= 1)
+
+                if (DataPlayer[player.userID].Count(x => x.Value == true) >= 1)
                 {
                     int BackDay = DateTime.Now.Day - 1;
                     if (DataPlayer[player.userID].ContainsKey(BackDay))// ?????????????????
                         if (DataPlayer[player.userID][BackDay] == false)
                         {
                             DataPlayer.Remove(player.userID);
-							DataPlayer.Add(player.userID, new Dictionary<int, bool>
-							{
-								[DateTime.Now.Day] = false,
-								[DateTime.Now.AddDays(1).Day] = false,
-								[DateTime.Now.AddDays(2).Day] = false,
-								[DateTime.Now.AddDays(3).Day] = false,
-								[DateTime.Now.AddDays(4).Day] = false,
-								[DateTime.Now.AddDays(5).Day] = false,
-								[DateTime.Now.AddDays(6).Day] = false,
-							});
-							Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQDailyStep/IQUser", DataPlayer);
                             return;
                         }
                 }
@@ -815,8 +894,8 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             ReadData();
-            foreach (var p in BasePlayer.activePlayerList)
-                OnPlayerConnected(p);
+            //foreach (var p in BasePlayer.activePlayerList)
+            //    OnPlayerConnected(p);
             WriteData();
             AddAllImage();
         }
@@ -825,6 +904,9 @@ namespace Oxide.Plugins
         {
             foreach (var p in BasePlayer.activePlayerList)
                 CuiHelper.DestroyUi(p, UI_MAIN_UI_STEP);
+
+            UI_MAIN_UI_STEP = null;
+            UI_MAIN_UI_STEP_TAKE = null;
             WriteData();
         }
         #endregion
@@ -833,26 +915,23 @@ namespace Oxide.Plugins
 
         void GiveReward(BasePlayer player,int Day)
         {
-			if (config.Days.Count<(Day+1)) return;
-			
             var DaysReward = config.Days[Day].Rewards;
-			int rewardCounter=0;
-			
-			foreach (var Reward in DaysReward.OrderBy(x=> Rnd.Next()))
-			{				
-				rewardCounter++;
-				if (rewardCounter>config.Days[Day].GiveCount) return;
-				
+            for(int i = 0; i < DaysReward.Count; i++)
+            {
+                var Reward = DaysReward[i];
+
                 if(Reward.UseCommand)
                     rust.RunServerCommand(Reward.CommandSettings.Command.Replace("%STEAMID%", player.UserIDString));
                 if(Reward.UseItem)
                 {
-					var RewardItem = Reward.ItemSettings;
-					var ItemReward = ItemManager.CreateByName(RewardItem.Shortname, RewardItem.Amount, RewardItem.SkinID);
-					if (!string.IsNullOrEmpty(RewardItem.DisplayName))
-						ItemReward.name = RewardItem.DisplayName;
-					player.GiveItem(ItemReward);
-                    
+                    for(int j = 0; j < Reward.ItemSettings.Count; j++)
+                    {
+                        var RewardItem = Reward.ItemSettings[j];
+                        var ItemReward = ItemManager.CreateByName(RewardItem.Shortname, RewardItem.Amount, RewardItem.SkinID);
+                        if (!string.IsNullOrEmpty(RewardItem.DisplayName))
+                            ItemReward.name = RewardItem.DisplayName;
+                        player.GiveItem(ItemReward);
+                    }
                 }
                 if (Reward.UseIQEconomic)
                     IQEconomicBalanceSet(player.userID, Reward.AmountEconomic);
@@ -869,8 +948,7 @@ namespace Oxide.Plugins
                     if(General.MoscovOvhUse)
                         MoscovOVHBalanceSet(player.userID, Reward.CountMoneyStore);
                 }
-				
-			}
+            }
         }
         #endregion
 
@@ -883,6 +961,11 @@ namespace Oxide.Plugins
         {
             CuiElementContainer container = new CuiElementContainer();
             CuiHelper.DestroyUi(player, UI_MAIN_UI_STEP);
+            if(!DataPlayer.ContainsKey(player.userID))
+            {
+                RegisteredDataUser(player);
+                return;
+            }
 
             container.Add(new CuiPanel
             {
@@ -914,13 +997,13 @@ namespace Oxide.Plugins
 
             container.Add(new CuiLabel
             {
-                RectTransform = { AnchorMin = "0 0.9037497", AnchorMax = "1 1" }, 
+                RectTransform = { AnchorMin = "0 0.90371398", AnchorMax = "1 1" }, //
                 Text = { Text = lang.GetMessage("UI_TITLE", this, player.UserIDString), Color = HexToRustFormat("#FFFFFF99"), Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
             }, UI_MAIN_UI_STEP);
 
             container.Add(new CuiLabel  
             {
-                RectTransform = { AnchorMin = "0 0.8824", AnchorMax = "1 0.925497" },
+                RectTransform = { AnchorMin = "0 0.8824", AnchorMax = "1 0.9251398" },//
                 Text = { Text = lang.GetMessage("UI_DESCRIPTION", this, player.UserIDString), Color = HexToRustFormat("#FFFFFF99"), Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
             }, UI_MAIN_UI_STEP);
 
@@ -1029,17 +1112,110 @@ namespace Oxide.Plugins
         #region InterfaceDaysTake
         void Interface_Days_Take(BasePlayer player,int Day, int ThisDay)
         {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, UI_MAIN_UI_STEP_TAKE);
+
+            container.Add(new CuiPanel
+            {
+                CursorEnabled = true,
+                FadeOut = 0.15f,
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                Image = { FadeIn = 0.15f, Color = HexToRustFormat("#282721E6"), Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+            },  UI_MAIN_UI_STEP, UI_MAIN_UI_STEP_TAKE);
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0 0.9037037", AnchorMax = "1 1" },
+                Text = { Text = String.Format(lang.GetMessage("UI_PRIZES", this, player.UserIDString), config.Days[Day].Day), Color = HexToRustFormat("#FFFFFF99"), Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
+            },  UI_MAIN_UI_STEP_TAKE);
+
+            CuiHelper.AddUi(player, container);
+
             GiveReward(player, Day);
             DataPlayer[player.userID][ThisDay] = true;
             RunEffect(player, "assets/bundled/prefabs/fx/impacts/blunt/cloth/cloth1.prefab");
-			Interface_Daily(player);
-			timer.Once(0.6f, ()=> CuiHelper.DestroyUi(player, UI_MAIN_UI_STEP));
+            ServerMgr.Instance.StartCoroutine(AnimationItems(player, Day));
             if (StopSpam.Contains(player.userID))
                 StopSpam.Remove(player.userID);
         }
 
         #endregion
 
+        #region AnimationItems
+
+        public IEnumerator AnimationItems(BasePlayer player, int Day)
+        {
+            var Items = config.Days[Day].Rewards;
+
+            #region CenterFunc
+
+            int ItemCount = 0;
+            float itemMinPosition = 219f;
+            float itemWidth = 0.413646f - 0.18f; /// Ширина
+            float itemMargin = 0.409895f - 0.38f; /// Расстояние между 
+            int itemCount = Items.Count;
+            float itemMinHeight = 0.5f; // Сдвиг по вертикали
+            float itemHeight = 0.4f; /// Высота
+            int ItemTarget = 3;
+
+            if (itemCount > ItemTarget)
+            {
+                itemMinPosition = 0.5f - ItemTarget / 2f * itemWidth - (ItemTarget - 1) / 2f * itemMargin;
+                itemCount -= ItemTarget;
+            }
+            else itemMinPosition = 0.5f - itemCount / 2f * itemWidth - (itemCount - 1) / 2f * itemMargin;
+
+            #endregion
+
+            for (int i = 0; i < Items.Count; i++)
+            {
+                CuiElementContainer container = new CuiElementContainer();
+
+                container.Add(new CuiPanel
+                {
+                    CursorEnabled = true,
+                    FadeOut = 0.15f,
+                    RectTransform = { AnchorMin = $"{itemMinPosition} {itemMinHeight}", AnchorMax = $"{itemMinPosition + itemWidth} {itemMinHeight + itemHeight}" },
+                    Image = { FadeIn = 0.15f, Color = HexToRustFormat("#282721E6"), Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+                }, UI_MAIN_UI_STEP_TAKE, $"ITEM_{i}");
+
+                container.Add(new CuiElement
+                {
+                    Parent = $"ITEM_{i}",
+                    Components =
+                        {
+                        new CuiRawImageComponent { Png = GetImage(GetImageReward(Day, i))},
+                        new CuiRectTransformComponent{  AnchorMin = "0.05263162 0.03859329", AnchorMax = "0.9473684 0.9333" }, //1398
+                        }
+                });
+
+                #region CenterFunc
+
+                ItemCount++;
+                itemMinPosition += (itemWidth + itemMargin);
+                if (ItemCount % ItemTarget == 0)
+                {
+                    itemMinHeight -= (itemHeight + (itemMargin * 2f));
+                    if (itemCount > ItemTarget)
+                    {
+                        itemMinPosition = 0.5f - ItemTarget / 2f * itemWidth - (ItemTarget - 1) / 2f * itemMargin;
+                        itemCount -= ItemTarget;
+                    }
+                    else itemMinPosition = 0.5f - itemCount / 2f * itemWidth - (itemCount - 1) / 2f * itemMargin;
+                }
+
+                #endregion
+
+                CuiHelper.AddUi(player, container);
+                yield return new WaitForSeconds(0.5f);
+            }
+
+            timer.Once(3f, () => { 
+                Interface_Daily(player);
+            });
+        }
+
+        #endregion
 
         #endregion
 
@@ -1078,6 +1254,30 @@ namespace Oxide.Plugins
             effect.Init(Effect.Type.Generic, player.transform.position, player.transform.forward, (Network.Connection)null);
             effect.pooledString = path; EffectNetwork.Send(effect, player.net.connection);
         }
+        #endregion
+
+        #region API
+
+        public bool IsDay(ulong userID, int Day)
+        {
+            if (DataPlayer.ContainsKey(userID))
+                if (DataPlayer[userID].ContainsKey(Day))
+                    if (DataPlayer[userID][Day])
+                        return true;
+                    else return false;
+                else return false;
+            else return false;
+        }
+
+        Int32 GetPlayerDays(UInt64 userID)
+        {
+            Int32 Days = 0;
+            if (!DataPlayer.ContainsKey(userID))
+                return Days;
+            Days = DataPlayer[userID].Count(x => x.Value);
+            return Days;
+        }
+
         #endregion
     }
 }
