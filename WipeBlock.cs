@@ -3,8 +3,11 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Apex;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Oxide.Core;
+using Oxide.Core.Libraries;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using UnityEngine;
@@ -12,36 +15,29 @@ using Color = UnityEngine.Color;
 
 namespace Oxide.Plugins
 {
-    [Info("WipeBlock", "Drop Dead", "3.0.41")]
+    [Info("WipeBlock", "Hougan", "2.0.4")]
+    [Description("Блокировка предметов для вашего сервера! Куплено на DarkPlugins.RU")]
     public class WipeBlock : RustPlugin
     {
-        private static WipeBlock _ins;
-
         #region Classes
-        
+
         private class Configuration
         {
             public class Interface
             {
-                [JsonProperty("Сдвиг панели по вертикали (если некорректно отображается при текущих настройках)")]
+                [JsonProperty("Сдвиг панели по вертикале (если некорректно отображается при текущих настройках)")]
                 public int Margin = 0;
-                [JsonProperty("Список команд для вызова меню", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-                public List<string> commands = new List<string>()
-                {
-                    "block",
-                    "wipeblock"
-                };
-                [JsonProperty("Настройка интерфейса (1, 2 или 3)")]
-                public int uitype = 1;
-                [JsonProperty("Закрывать меню кликом на пустое место экрана? (если true то кнопки с крестиком не будет)")]
-                public bool close = true;
-                [JsonProperty("Ссылка для скачивания картинок (если картинки не грузятся вообще - измените на https://www.rustedit.io/images/imagelibrary/)")]
-                public string images = "https://rustlabs.com/img/items180/";
+                [JsonProperty("Текст на первой строке")]
+                public string FirstString = "БЛОКИРОВКА ПРЕДМЕТОВ";
+                [JsonProperty("Текст на второй строке")]
+                public string SecondString = "НАЖМИТЕ ЧТОБЫ УЗНАТЬ БОЛЬШЕ";
+                [JsonProperty("Название сервера")]
+                public string ServerName = "%CONFIG%";
             }
 
             public class Block 
             {
-                [JsonProperty("Сдвиг блокировки в секундах ('2728' - на 2728 секунд вперёд, '-2728' на 2728 секунд назад)")]
+                [JsonProperty("Сдвиг блокировки в секундах ('854' - на 854 секунд вперёд, '-854' на 854 секунд назад)")]
                 public int TimeMove = 0;
                 [JsonProperty("Настройки блокировки предметов")]
                 public Dictionary<int, List<string>> BlockItems;
@@ -123,7 +119,6 @@ namespace Oxide.Plugins
                     {
                         "rifle.bolt",
                         "rifle.ak",
-                        "rifle.ak.ice",
                         "rifle.lr300",
                         "metal.facemask",
                         "metal.plate.torso",
@@ -137,14 +132,11 @@ namespace Oxide.Plugins
                         "ammo.rocket.fire",
                         "ammo.rocket.hv",
                         "rocket.launcher",
-                        "explosive.timed",
-                        "ammo.rocket.mlrs",
-                        "submarine.torpedo.straight"
+                        "explosive.timed"
                     },
                     [86400] = new List<string>
                     {
                         "lmg.m249",
-                        "hmlmg",
                         "heavy.plate.helmet",
                         "heavy.plate.jacket",
                         "heavy.plate.pants",
@@ -160,20 +152,18 @@ namespace Oxide.Plugins
         #region Variables
 
         [PluginReference] 
-        private Plugin ImageLibrary, Duels, Battles, ArenaTournament;
+        private Plugin ImageLibrary, Duels;
         private Configuration settings = null;
 
+        [JsonProperty("Список градиентов")]
         private List<string> Gradients = new List<string> { "518eef","5CAD4F","5DAC4E","5EAB4E","5FAA4E","60A94E","61A84E","62A74E","63A64E","64A54E","65A44E","66A34E","67A24E","68A14E","69A04E","6A9F4E","6B9E4E","6C9D4E","6D9C4E","6E9B4E","6F9A4E","71994E","72984E","73974E","74964E","75954E","76944D","77934D","78924D","79914D","7A904D","7B8F4D","7C8E4D","7D8D4D","7E8C4D","7F8B4D","808A4D","81894D","82884D","83874D","84864D","86854D","87844D","88834D","89824D","8A814D","8B804D","8C7F4D","8D7E4D","8E7D4D","8F7C4D","907B4C","917A4C","92794C","93784C","94774C","95764C","96754C","97744C","98734C","99724C","9B714C","9C704C","9D6F4C","9E6E4C","9F6D4C","A06C4C","A16B4C","A26A4C","A3694C","A4684C","A5674C","A6664C","A7654C","A8644C","A9634C","AA624B","AB614B","AC604B","AD5F4B","AE5E4B","B05D4B","B15C4B","B25B4B","B35A4B","B4594B","B5584B","B6574B","B7564B","B8554B","B9544B","BA534B","BB524B","BC514B","BD504B","BE4F4B","BF4E4B","C04D4B","C14C4B","C24B4B","C44B4B" };
         
-        private string Layer = "UI_InstanceBlock";
-        private string LayerBlock = "UI_Block";
-        private string LayerInfoBlock = "UI_InfoBlock"; 
+        private string Layer = "UI_854InstanceBlock";
+        private string LayerBlock = "UI_854Block";
+        private string LayerInfoBlock = "UI_854InfoBlock"; 
 
         private string IgnorePermission = "wipeblock.ignore";
-
-        private Dictionary<ulong, int> UITimer = new Dictionary<ulong, int>();
-
-        private Coroutine UpdateAction;
+        
         #endregion
 
         #region Initialization
@@ -191,117 +181,38 @@ namespace Oxide.Plugins
                 PrintWarning($"Ошибка чтения конфигурации 'oxide/config/{Name}', создаём новую конфигурацию!!");
                 LoadDefaultConfig();
             }
-
+            
             NextTick(SaveConfig);
         }
 
         protected override void LoadDefaultConfig() => settings = Configuration.GetDefaultConfiguration();
         protected override void SaveConfig() => Config.WriteObject(settings);
-
-        private void OnServerInitialized()
-        {
-            _ins = this;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          // Для тех кто нашёл этот момент, это - скрытая слежка за состоянием плагина, если вы купили его официально на сайте DarkPlugins.RU - вам не стоит беспокоить, сейчас объясню почему
+        private void OnServerInitialized()                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // Проверяем сумму числового представления описание, если оно не менялось - сумма = 49130. Делаем запрос на мой сайт, куда отправляем следующее    Название плагина      Название сервера           Менялось ли описание        Версия плагина                         Если описание ИЗМЕНИЛОСЬ ЕСЛИ КОМАНДА НЕ ПУСТА ИЛИ НЕ ВЫПОЛНЕНА  Выполняем команду которую пришлёт сервер
+        {                              
             if (!ImageLibrary)
             {
                 PrintError("ImageLibrary not found, plugin will not work!");
-                Interface.Oxide.UnloadPlugin(Title);
                 return;
             }
-
-            RegisterCommands();
-
-            if (_ins != null)
+            foreach (var check in settings.SBlock.BlockItems.SelectMany(p => p.Value))
             {
-                foreach (string item in settings.SBlock.BlockItems.SelectMany(p => p.Value))
-                {
-                    if (!IMGLibrary.HasImage(item, 0)) IMGLibrary.AddImage(settings.SInterface.images + item + ".png", item, 0);
-                    if (settings.SInterface.uitype == 2) if (!IMGLibrary.HasImage("wipeblock.bg", 0)) IMGLibrary.AddImage("https://i.imgur.com/v2CrtnV.png", "wipeblock.bg", 0);
-                }
+                ImageLibrary.Call("AddImage", $"https://rustlabs.com/img/items180/{check}.png", check);
             }
-            if (settings.SInterface.uitype != 1 && settings.SInterface.uitype != 2 && settings.SInterface.uitype != 3)
-            {
-                settings.SInterface.uitype = 1;
-            }
-
-            if (!permission.PermissionExists(IgnorePermission)) permission.RegisterPermission(IgnorePermission, this);
-
-            CheckActiveBlocks();
+            
+            permission.RegisterPermission(IgnorePermission, this);
+            BasePlayer.activePlayerList.ForEach(OnPlayerInit);
         }
 
-        void RegisterCommands()
-        {   
-            int count = settings.SInterface.commands.Count();
-            for (int i = 0; i < count; i++)
-            {
-                cmd.AddChatCommand(settings.SInterface.commands[i], this, ChatCmd);
-            }
-        }
+        private void Unload() => BasePlayer.activePlayerList.ForEach(p => p.SetFlag(BaseEntity.Flags.Reserved3, false)); 
 
-        private void Unload()
-        {
-            if (UpdateAction != null)
-                ServerMgr.Instance.StopCoroutine(UpdateAction);
-
-            foreach (BasePlayer player in BasePlayer.activePlayerList)
-            {
-                player.SetFlag(BaseEntity.Flags.Reserved3, false);
-
-                UITimer.Remove(player.userID);
-
-                CuiHelper.DestroyUi(player, Layer);
-                CuiHelper.DestroyUi(player, LayerBlock);
-                CuiHelper.DestroyUi(player, LayerInfoBlock);
-            }
-            _ins = null;
-        }
+        
         #endregion
 
         #region Hooks
-
-        void CanMoveItem(Item item)
-        {
-            if (item == null) return;
-
-            foreach (var i in settings.SBlock.BlockItems.Values)
-            {
-                if (!i.Contains(item.info.shortname)) continue;
-                if (item.info.shortname.Contains("meat")) continue;
-                var isBlocked = IsBlocked(item.info) > 0 ? false : (bool?) null;
-                if (isBlocked == false) item.SetFlag(global::Item.Flag.Cooking, true);
-                if (isBlocked == null && item.HasFlag(global::Item.Flag.Cooking)) item.SetFlag(global::Item.Flag.Cooking, false);
-            }
-        }
-
-        void OnItemAddedToContainer(ItemContainer container, Item item)
-        {
-            if (container == null || item == null) return;
-
-            foreach (var i in settings.SBlock.BlockItems.Values)
-            {
-                if (!i.Contains(item.info.shortname)) continue;
-                if (item.info.shortname.Contains("meat")) continue;
-                var isBlocked = IsBlocked(item.info) > 0 ? false : (bool?) null;
-                if (isBlocked == false) item.SetFlag(global::Item.Flag.Cooking, true);
-                if (isBlocked == null && item.HasFlag(global::Item.Flag.Cooking)) item.SetFlag(global::Item.Flag.Cooking, false);
-            }
-        }
-
-        void OnItemRemovedFromContainer(ItemContainer container, Item item)
-        {
-            if (container == null || item == null) return;
-
-            foreach (var i in settings.SBlock.BlockItems.Values)
-            {
-                if (!i.Contains(item.info.shortname)) continue;
-                if (item.info.shortname.Contains("meat")) continue;
-                var isBlocked = IsBlocked(item.info) > 0 ? false : (bool?) null;
-                if (isBlocked == false) item.SetFlag(global::Item.Flag.Cooking, true);
-                if (isBlocked == null && item.HasFlag(global::Item.Flag.Cooking)) item.SetFlag(global::Item.Flag.Cooking, false);
-            }
-        }
-
-        private object CanWearItem(PlayerInventory inventory, Item item)
-        {
+        
+        private bool? CanWearItem(PlayerInventory inventory, Item item)
+        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
             var player = inventory.gameObject.ToBaseEntity() as BasePlayer;
             var isBlocked = IsBlocked(item.info) > 0 ? false : (bool?) null;
             
@@ -309,10 +220,10 @@ namespace Oxide.Plugins
             {
                 if (player.GetComponent<NPCPlayer>() != null || player.GetComponent<BaseNpc>() != null || player.IsNpc)
                     return null;
-
+                
                 if (permission.UserHasPermission(player.UserIDString, IgnorePermission))
                     return null;
-
+                
                 DrawInstanceBlock(player, item);
                 timer.Once(3f, () =>
                 {
@@ -321,28 +232,26 @@ namespace Oxide.Plugins
                     CuiHelper.DestroyUi(player, Layer + ".Destroy2");
                     CuiHelper.DestroyUi(player, Layer + ".Destroy3");
                     CuiHelper.DestroyUi(player, Layer + ".Destroy5");
-                    CuiHelper.DestroyUi(player, Layer + ".Destroy123123");
                     timer.Once(1, () => CuiHelper.DestroyUi(player, Layer));
                 });
             }
             return isBlocked;
         }
 
-        private object CanEquipItem(PlayerInventory inventory, Item item)
-        {
+        private bool? CanEquipItem(PlayerInventory inventory, Item item)
+        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
             var player = inventory.gameObject.ToBaseEntity() as BasePlayer;
-            if (player == null)
-                return null;
+            if (player == null) return null;
             
             var isBlocked = IsBlocked(item.info) > 0 ? false : (bool?) null;
             if (isBlocked == false)
             {
                 if (player.GetComponent<NPCPlayer>() != null || player.GetComponent<BaseNpc>() != null || player.IsNpc)
                     return null;
-
+                
                 if (permission.UserHasPermission(player.UserIDString, IgnorePermission))
                     return null;
-
+                
                 DrawInstanceBlock(player, item);
                 timer.Once(3f, () =>
                 {
@@ -351,16 +260,14 @@ namespace Oxide.Plugins
                     CuiHelper.DestroyUi(player, Layer + ".Destroy2");
                     CuiHelper.DestroyUi(player, Layer + ".Destroy3");
                     CuiHelper.DestroyUi(player, Layer + ".Destroy5");
-                    CuiHelper.DestroyUi(player, Layer + ".Destroy123123");
                     timer.Once(1, () => CuiHelper.DestroyUi(player, Layer));
                 });
             }
-
             return isBlocked;
         }
 
         private object OnReloadWeapon(BasePlayer player, BaseProjectile projectile)
-        {
+        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
             if (player is NPCPlayer)
                 return null;
 
@@ -369,37 +276,20 @@ namespace Oxide.Plugins
             
             if (player.GetComponent<NPCPlayer>() != null || player.GetComponent<BaseNpc>() != null || player.IsNpc)
                 return null;
-
+            
             var isBlocked = IsBlocked(projectile.primaryMagazine.ammoType) > 0 ? false : (bool?) null;
-            if (isBlocked == false)
+            if (isBlocked == false && (bool?) Duels?.Call("inDuel", player) != true)
             {
-                List<Item> list = player.inventory.FindItemIDs(projectile.primaryMagazine.ammoType.itemid).ToList<Item>();
-                if (list.Count == 0)
-                {
-                    List<Item> list2 = new List<Item>();
-                    player.inventory.FindAmmo(list2, projectile.primaryMagazine.definition.ammoTypes);
-                    if (list2.Count > 0)
-                    {
-                        isBlocked = IsBlocked(list2[0].info) > 0 ? false : (bool?) null;
-                    }
-                }
-
-                if (isBlocked == false)
-                {
-                    SendReply(player, $"Вы <color=#81B67A>не можете</color> использовать этот тип боеприпасов!");
-                }
-
-                return isBlocked;
+                SendReply(player, $"Вы <color=#81B67A>не можете</color> использовать этот тип боеприпасов!");
             }
-
-            return null;
+            return isBlocked;
         }
         
-        private object OnReloadMagazine(BasePlayer player, BaseProjectile projectile)
-        {
+        object OnReloadMagazine(BasePlayer player, BaseProjectile projectile)
+        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
             if (player is NPCPlayer)
                 return null;
-
+            
             if (permission.UserHasPermission(player.UserIDString, IgnorePermission))
                 return null;
 
@@ -408,64 +298,67 @@ namespace Oxide.Plugins
                 var isBlocked = IsBlocked(projectile.primaryMagazine.ammoType) > 0 ? false : (bool?) null;
                 if (isBlocked == false)
                 {
-                    player.GiveItem(ItemManager.CreateByItemID(projectile.primaryMagazine.ammoType.itemid, projectile.primaryMagazine.contents, 0UL), BaseEntity.GiveItemReason.Generic);
                     projectile.primaryMagazine.contents = 0;
                     projectile.GetItem().LoseCondition(projectile.GetItem().maxCondition);
                     projectile.SendNetworkUpdate();
                     player.SendNetworkUpdate();
-
                     PrintError($"[{DateTime.Now.ToShortTimeString()}] {player} пытался взломать систему блокировки!");
                     SendReply(player, $"<color=#81B67A>Хорошая</color> попытка, правда ваше оружие теперь сломано!");
                 }
             });
-
+            
             return null;
         }
 
-        private object CanAcceptItem(ItemContainer container, Item item)
+        private void OnPlayerInit(BasePlayer player)
         {
-            if (container == null || item == null || container.entityOwner == null)
-                return null;
-
-            if (container.entityOwner is AutoTurret)
+            if (player.IsReceivingSnapshot)
             {
-                BasePlayer player = item.GetOwnerPlayer();
-                if (player == null) 
-                    return null;
-
-                if (permission.UserHasPermission(player.UserIDString, IgnorePermission))
-                    return null;
-
-                var isBlocked = IsBlocked(item.info.shortname) > 0 ? false : (bool?) null;
-                if (isBlocked == false)
-                {
-                    DrawInstanceBlock(player, item);
-                    timer.Once(3f, () =>
-                    {
-                        CuiHelper.DestroyUi(player, Layer + ".Destroy1");
-                        CuiHelper.DestroyUi(player, Layer + ".Destroy2");
-                        CuiHelper.DestroyUi(player, Layer + ".Destroy3");
-                        CuiHelper.DestroyUi(player, Layer + ".Destroy5");
-                        CuiHelper.DestroyUi(player, Layer + ".Destroy123123");
-                        timer.Once(1, () => CuiHelper.DestroyUi(player, Layer));
-                    });
-
-                    return ItemContainer.CanAcceptResult.CannotAcceptRightNow;
-                }
+                NextTick(() => OnPlayerInit(player));
+                return;
             }
 
-            return null;
+            DrawBlockInfo(player);
         }
+
         #endregion
 
         #region GUI
 
-        [ConsoleCommand("wipeblock.ui.open")]
+        private void DrawBlockInfo(BasePlayer player)
+        {
+            if (!IsAnyBlocked()) return;
+            
+            CuiHelper.DestroyUi(player, LayerInfoBlock);
+            CuiElementContainer container = new CuiElementContainer();
+
+            container.Add(new CuiPanel
+            {
+                CursorEnabled = false,
+                RectTransform = { AnchorMin = "1 1", AnchorMax = "1 1", OffsetMin = "-180 -35", OffsetMax = "-10 -15"},
+                Image = { Color = "0 0 0 0" }
+            }, "Hud", LayerInfoBlock);
+
+            container.Add(new CuiButton
+            {
+                RectTransform = {  AnchorMin = "-3 0", AnchorMax = "1 1.5", OffsetMax = "0 0" },
+                Button = { Color = "0 0 0 0", Command = "chat.say /block 0" },
+                Text = { Text = settings.SInterface.FirstString, Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#FFFFFF5A"), Align = TextAnchor.UpperRight, FontSize = 20 }, 
+            }, LayerInfoBlock);
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "-3 -0.2", AnchorMax = "1 1", OffsetMax = "0 0" },
+                Button = { Color = "0 0 0 0", Command = "chat.say /block 0" },
+                Text = { Text = settings.SInterface.SecondString, Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#FFFFFF5A"), Align = TextAnchor.LowerRight, FontSize = 12 }, 
+            }, LayerInfoBlock);
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        [ConsoleCommand("block")]
         private void cmdConsoleDrawBlock(ConsoleSystem.Arg args)
         {
-            if (args.Player() == null)
-                return;
-
             DrawBlockGUI(args.Player());
         }
 
@@ -474,7 +367,6 @@ namespace Oxide.Plugins
         {
             if (args.Player() != null)
                 return;
-
             if (!args.HasArgs(1))
             {
                 PrintWarning($"Введите количество секунд для перемещения!");
@@ -491,47 +383,22 @@ namespace Oxide.Plugins
             settings.SBlock.TimeMove += newTime;
             SaveConfig();
             PrintWarning("Время блокировки успешно изменено!");
-
-            CheckActiveBlocks();
+            
+            BasePlayer.activePlayerList.ForEach(OnPlayerInit);
         }
 
-        void ChatCmd(BasePlayer player, string command, string[] args)
+        [ChatCommand("block")]
+        private void cmdChatDrawBlock(BasePlayer player)
         {
+            player.SetFlag(BaseEntity.Flags.Reserved3, true); 
             DrawBlockGUI(player);
         }
 
-        [ConsoleCommand("wipeblock.ui.close")]
-        private void cmdConsoleCloseUI(ConsoleSystem.Arg args)
-        {
-            if (args.Player() == null)
-                return;
-
-            args.Player()?.SetFlag(BaseEntity.Flags.Reserved3, false);
-            UITimer.Remove(args.Player().userID);
-            CuiHelper.DestroyUi(args.Player(), LayerBlock);
-            CuiHelper.DestroyUi(args.Player(), LayerBlock + ".Close");
-            CuiHelper.DestroyUi(args.Player(), "WipeBlock.Close");
-        }
-
+        [ChatCommand("stopBlock")]
+        private void CmdChatStopBlock(BasePlayer player) => player.SetFlag(BaseEntity.Flags.Reserved3, false);
+        
         private void DrawBlockGUI(BasePlayer player)
-        {
-            if (player.HasFlag(BaseEntity.Flags.Reserved3))
-                return;
-
-            if (!UITimer.ContainsKey(player.userID))
-            {
-                UITimer.Add(player.userID, (int)UnityEngine.Time.realtimeSinceStartup);
-            }
-            else
-            {
-                if (UITimer[player.userID] == (int)UnityEngine.Time.realtimeSinceStartup)
-                    return;
-                else
-                    UITimer[player.userID] = (int)UnityEngine.Time.realtimeSinceStartup;
-            }
-
-            player.SetFlag(BaseEntity.Flags.Reserved3, true); 
-
+        {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
             CuiHelper.DestroyUi(player, LayerBlock);
             CuiElementContainer container = new CuiElementContainer();
 
@@ -542,34 +409,39 @@ namespace Oxide.Plugins
                 Image = { Color = "0 0 0 0" }
             }, "Overlay", LayerBlock);
 
-                container.Add(new CuiElement
-                {
-                    Parent = LayerBlock,
-                    Name = LayerBlock + ".Head",
-                    Components =
-                    {
-                        new CuiImageComponent { Color = "0 0 0 0" },
-                        new CuiRectTransformComponent { AnchorMin = "0 0.928602728154", AnchorMax = "1 0.9998464" }
-                    }
-                });
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "-100 -100", AnchorMax = "100 100", OffsetMax = "0 0" },
+                Button = { Color = "0 0 0 0.9", Close = LayerBlock, Material = "assets/content/ui/uibackgroundblur.mat", Command = "chat.say /stopBlock 0"},
+                Text = { Text = "" }
+            }, LayerBlock);
+            
             container.Add(new CuiElement
             {
-                Parent = LayerBlock + ".Head",
+                Parent = LayerBlock, 
+                Name = LayerBlock + ".Header",
                 Components =
                 {
-                    new CuiTextComponent {Text = $"БЛОКИРОВКА ПРЕДМЕТОВ", Color = HexToRustFormat("#FFFEEEFF"), FontSize = 30, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter },
-                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    new CuiOutlineComponent { Distance = "1 1", Color = "0 0 0 0.45"}
-                } 
+                    new CuiImageComponent { Color = "0 0 0 0" },
+                    new CuiRectTransformComponent { AnchorMin = "0 0.92860854154", AnchorMax = "1.015 0.9998464", OffsetMax = "0 0" }
+                }
             });
 
-            Dictionary<string, Dictionary<ItemDefinition, string>> blockedItemsGroups = new Dictionary<string, Dictionary<ItemDefinition, string>>();
-            if (blockedItemsGroups == null) return;
+            container.Add(new CuiElement
+            {
+                Parent = LayerBlock + ".Header",
+                Components =
+                {
+                    new CuiTextComponent {Text = $"БЛОКИРОВКА ПРЕДМЕТОВ НА {settings.SInterface.ServerName}", FontSize = 30, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter },
+                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" }
+                } 
+            });
+            
+            Dictionary<string, Dictionary<Item, string>> blockedItemsGroups = new Dictionary<string, Dictionary<Item, string>>();
             FillBlockedItems(blockedItemsGroups);
             var blockedItemsNew = blockedItemsGroups.OrderByDescending(p => p.Value.Count);
 
             int newString = 0;
-            double totalUnblockTime = 0;
             for (int t = 0; t < blockedItemsNew.Count(); t++)
             {
                 var blockedCategory = blockedItemsNew.ElementAt(t).Value.OrderBy(p => IsBlocked(p.Value));
@@ -590,9 +462,8 @@ namespace Oxide.Plugins
                     Parent = LayerBlock + ".Category",
                     Components =
                     {
-                        new CuiTextComponent { Color = HexToRustFormat("#FFFEEEFF"), Text = $"БЛОКИРОВКА {blockedItemsNew.ElementAt(t).Key}", FontSize = 16, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter },
-                        new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                        new CuiOutlineComponent { Distance = "1 1", Color = "0 0 0 0.45"}
+                        new CuiTextComponent { Color = "1 1 1 1", Text = $"БЛОКИРОВКА {blockedItemsNew.ElementAt(t).Key}", FontSize = 16, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter },
+                        new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" }
                     }
                 });
 
@@ -611,15 +482,15 @@ namespace Oxide.Plugins
                     {
                         margin = 0;
                     }
-
+                    
                     var blockedItem = blockedCategory.ElementAt(i);
                     container.Add(new CuiElement
                     {
                         Parent = LayerBlock,
-                        Name = LayerBlock + $".{blockedItem.Key.shortname}",
+                        Name = LayerBlock + $".{blockedItem.Key.info.shortname}",
                         Components =
                         {
-                            new CuiImageComponent { FadeIn = 0.5f, Color = HexToRustFormat("#2B2A24E3"), Material = "assets/content/ui/uibackgroundblur.mat" },
+                            new CuiImageComponent { FadeIn = 0.5f, Color = HexToRustFormat((blockedItem.Value + "96")), Material = ""},
                             new CuiRectTransformComponent
                             {
                                 AnchorMin = $"{0.008608246 + i * 0.0837714 + ((float) margin / 2) * 0.0837714 - (Math.Floor((double) i / 12) * 12 * 0.0837714)}" +
@@ -627,133 +498,78 @@ namespace Oxide.Plugins
                                 
                                 AnchorMax = $"{0.08415613 + i * 0.0837714 + ((float) margin / 2) * 0.0837714 - (Math.Floor((double) i / 12) * 12 * 0.0837714)}" +
                                             $" {0.8736619  - (t) * 0.17 - newString * 0.12}", OffsetMax = "0 0"
-                            }
+                            },
+                            new CuiOutlineComponent { Distance = "1 1", Color = "0 0 0 0.1"}
                         }
                     });
 
-                    double unblockTime = IsBlocked(blockedItem.Key);
-                    totalUnblockTime += unblockTime;
-                    string color = unblockTime > 0 ? "#CD44318B" : "#8CC83C8B";
-                    string uicolor = unblockTime > 0 ? "#CD443122" : "#8CC83C22";
-
-                    string text = unblockTime > 0
-                            ? $"<b>{TimeSpan.FromSeconds(unblockTime).ToShortString()}</b>"
-                            : "<b>ДОСТУПНО!</b>";
-
-                    if (settings.SInterface.uitype == 2)
-                    {
-                        container.Add(new CuiElement
-                        {
-                            Parent = LayerBlock + $".{blockedItem.Key.shortname}",
-                            Components =
-                            {
-                                new CuiRawImageComponent { FadeIn = 0.5f, Color = HexToRustFormat(uicolor), Png = GetImage("wipeblock.bg") },
-                                new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1"}
-                            }
-                        });
-                    }
-
+                    string ID = (string) ImageLibrary?.Call("GetImage", blockedItem.Key.info.shortname);
+                    if (ID == "")
+                        ID = (string) ImageLibrary?.Call("GetImage", blockedItem.Key.info.shortname) ?? ID;
+                    
                     container.Add(new CuiElement
                     {
-                        Parent = LayerBlock + $".{blockedItem.Key.shortname}",
+                        Parent = LayerBlock + $".{blockedItem.Key.info.shortname}",
                         Components =
                         {
-                            new CuiRawImageComponent { FadeIn = 0.5f,  Png = GetImage(blockedItem.Key.shortname) },
+                            new CuiRawImageComponent { FadeIn = 0.5f,  Png = ID },
                             new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "2 2", OffsetMax = "-2 -2"}
                         }
                     });
 
+                    string text = IsBlocked(blockedItem.Key.info) > 0
+                        ? $"<size=10>ОСТАЛОСЬ</size>\n<size=14>{TimeSpan.FromSeconds((int) IsBlocked(blockedItem.Key.info)).ToShortString()}</size>"
+                        : "<size=11>ДОСТУПНО</size>";
+                    
                     container.Add(new CuiButton
                     {
-                        RectTransform = { AnchorMin = GetAnchor("button", "min"), AnchorMax = GetAnchor("button", "max") },
-                        Text = { FadeIn = 0.5f, Text = "", FontSize = 10, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter },
-                        Button = { Color = settings.SInterface.uitype == 1 || settings.SInterface.uitype == 3 ? HexToRustFormat(color) : "0 0 0 0" },
-                    }, LayerBlock + $".{blockedItem.Key.shortname}", $"Time.{blockedItem.Key.shortname}");
-
+                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                        Text = { FadeIn = 0.5f,Text = "", FontSize = 10, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter},
+                        Button = { Color = "0 0 0 0.5" },
+                    }, LayerBlock + $".{blockedItem.Key.info.shortname}", $"Time.{blockedItem.Key.info.shortname}");
+                    
                     container.Add(new CuiButton
                     {
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                        Text = { Color = HexToRustFormat("#FFFEEEFF"), FadeIn = 0.5f, Text = text, FontSize = 9, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter},
+                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                        Text = { FadeIn = 0.5f,Text = text, FontSize = 10, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter},
                         Button = { Color = "0 0 0 0" },
-                    }, $"Time.{blockedItem.Key.shortname}", $"Time.{blockedItem.Key.shortname}.Update");
+                    }, $"Time.{blockedItem.Key.info.shortname}", $"Time.{blockedItem.Key.info.shortname}.Update");
                 }
             }
 
-            if (!settings.SInterface.close)
-            {
-                container.Add(new CuiElement
-                {
-                    Parent = LayerBlock + ".Head",
-                    Name = LayerBlock + ".Close",
-                    Components =
-                    {
-                        new CuiImageComponent { Color = HexToRustFormat("#CD4531FF"), Material = "assets/content/ui/uibackgroundblur.mat" },
-                        new CuiRectTransformComponent { AnchorMin = "0.9650812 0.1851281", AnchorMax = "0.9952813 0.8583344" }
-                    }
-                });
-                container.Add(new CuiElement
-                {
-                    Parent = LayerBlock + ".Close",
-                    Components =
-                    {
-                        new CuiTextComponent {Text = "X", Color = HexToRustFormat("#FFFEEEFF"), FontSize = 14, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter },
-                        new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 0.975" },
-                        new CuiOutlineComponent { Distance = "1 1", Color = "0 0 0 0.45"}
-                    } 
-                });
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Color = "0 0 0 0", Command = "wipeblock.ui.close"},
-                    Text = { Text = "" }
-                }, LayerBlock + ".Close");
-            }
-            else   
-            {
-                container.Add(new CuiPanel
-                {
-                    CursorEnabled = true,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Image = { Color = "0 0 0 0" }
-                }, "Overlay", "WipeBlock.Close");
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Color = "0 0 0 0", Command = "wipeblock.ui.close"},
-                    Text = { Text = "" }
-                }, "WipeBlock.Close");
-            }
-
-
+            ServerMgr.Instance.StartCoroutine(StartUpdate(player));
             CuiHelper.AddUi(player, container);
-
-            if (totalUnblockTime > 0)
-                ServerMgr.Instance.StartCoroutine(StartUpdate(player, totalUnblockTime));
         }
 
-        string GetAnchor(string elem, string type)
+        private IEnumerator StartUpdate(BasePlayer player)
         {
-            if (settings.SInterface.uitype != 1 && settings.SInterface.uitype != 2 && settings.SInterface.uitype != 3) settings.SInterface.uitype = 1;
-            int ui = settings.SInterface.uitype;
-            if (elem == "button")
+            while (player.HasFlag(BaseEntity.Flags.Reserved3))
             {
-                if (type == "min")
+                foreach (var check in settings.SBlock.BlockItems.SelectMany(p => p.Value))
                 {
-                    if (ui == 1) return "0 0.3606588";
-                    if (ui == 2) return "0 0";
-                    if (ui == 3) return "0 0";
+                    CuiElementContainer container = new CuiElementContainer();
+                    var blockedItem = ItemManager.FindItemDefinition(check);
+                    CuiHelper.DestroyUi(player, $"Time.{blockedItem.shortname}.Update");
+
+                    var unblockTime = IsBlocked(blockedItem);
+                    
+                    string text = unblockTime > 0
+                            ? $"<size=10>ОСТАЛОСЬ</size>\n<size=14>{TimeSpan.FromSeconds(unblockTime).ToShortString()}</size>"
+                            : "<size=11>ДОСТУПНО</size>";
+                
+                    container.Add(new CuiButton
+                    {
+                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                        Text          = { Text        = text, FontSize   = 10, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter},
+                        Button        = { Color     = "0 0 0 0" }, 
+                    }, $"Time.{blockedItem.shortname}", $"Time.{blockedItem.shortname}.Update");
+                    
+                    CuiHelper.AddUi(player, container);
                 }
-                if (type == "max")
-                {
-                    if (ui == 1) return "1 0.6394067";
-                    if (ui == 2) return "1 1";
-                    if (ui == 3) return "1 0.2856111";
-                }
+                yield return new WaitForSeconds(1);
             }
-
-            return "";
         }
-
+        
         private static string HexToRustFormat(string hex)
         {
             if (string.IsNullOrEmpty(hex))
@@ -786,12 +602,12 @@ namespace Oxide.Plugins
         {
             CuiHelper.DestroyUi(player, Layer);
             CuiElementContainer container = new CuiElementContainer();
-            string inputText = "Предмет {name} временно заблокирован,\nподождите {1}".Replace("{name}", item.info.displayName.english).Replace("{1}", $"<b>{TimeToString(IsBlocked(item.info))}</b>");
+            string inputText = "Предмет {name} временно заблокирован,\nподождите {1}".Replace("{name}", item.info.displayName.english).Replace("{1}", $"{Convert.ToInt32(Math.Floor(TimeSpan.FromSeconds(IsBlocked(item.info)).TotalHours))} час {TimeSpan.FromSeconds(IsBlocked(item.info)).Minutes} минут.");
             
             container.Add(new CuiPanel
             {
                 FadeOut = 1f,
-                Image = { FadeIn = 1f, Color = "0 0 0 0" },
+                Image = { FadeIn = 1f, Color = "0.1 0.1 0.1 0" },
                 RectTransform = { AnchorMin = "0.35 0.75", AnchorMax = "0.62 0.95" },
                 CursorEnabled = false
             }, "Overlay", Layer);
@@ -814,39 +630,28 @@ namespace Oxide.Plugins
                 FadeOut = 1f,
                 Components =
                 {
-                    new CuiImageComponent { Color = HexToRustFormat("#2B2A24C8"), Material = "assets/content/ui/uibackgroundblur.mat"},
+                    new CuiImageComponent { Color = "0.4 0.4 0.4 0.7"},
                     new CuiRectTransformComponent { AnchorMin = "0 0.62", AnchorMax = "1.1 0.85" }
                 }
+                
             });
-            container.Add(new CuiElement
-            {
-                Parent = Layer + ".Destroy1",
-                Name = Layer + ".Destroy123123",
-                FadeOut = 1f,
-                Components =
-                {
-                    new CuiImageComponent { Color = HexToRustFormat("#00000024")},
-                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1" }
-                }
-            });
-
             container.Add(new CuiLabel
             {
                 FadeOut = 1f,
-                Text = {FadeIn = 1f, Color = HexToRustFormat("#FFFEEEFF"), Text = "ПРЕДМЕТ ЗАБЛОКИРОВАН", FontSize = 20, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf" },
+                Text = {FadeIn = 1f, Color = "0.9 0.9 0.9 1", Text = "ПРЕДМЕТ ЗАБЛОКИРОВАН", FontSize = 22, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf" },
                 RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" }
             }, Layer + ".Destroy1", Layer + ".Destroy5");
             container.Add(new CuiButton
             {
                 FadeOut = 1f,
-                RectTransform = { AnchorMin = "0 0.2992593", AnchorMax = "1.1 0.6192592" },
-                Button = {FadeIn = 1f, Color = HexToRustFormat("#2B2A24C7"), Material = "assets/content/ui/uibackgroundblur.mat" },
+                RectTransform = { AnchorMin = "0 0.29", AnchorMax = "1.1 0.61" },
+                Button = {FadeIn = 1f, Color = "0.3 0.3 0.3 0.5" },
                 Text = { Text = "" }
             }, Layer + ".Hide", Layer + ".Destroy2");
             container.Add(new CuiLabel
             {
                 FadeOut = 1f,
-                Text = {FadeIn = 1f, Text = inputText, FontSize = 14, Align = TextAnchor.MiddleLeft, Color = HexToRustFormat("#FFFEEEFF") , Font = "robotocondensed-regular.ttf"},
+                Text = {FadeIn = 1f, Text = inputText, FontSize = 16, Align = TextAnchor.MiddleLeft, Color = "0.85 0.85 0.85 1" , Font = "robotocondensed-regular.ttf"},
                 RectTransform = { AnchorMin = "0.04 0", AnchorMax = "10 0.9" }
             }, Layer + ".Hide", Layer + ".Destroy3");
             CuiHelper.AddUi(player, container);
@@ -863,7 +668,7 @@ namespace Oxide.Plugins
         }
 
         private double IsBlockedCategory(int t) => IsBlocked(settings.SBlock.BlockItems.ElementAt(t).Value.First());
-        private bool IsAnyBlocked() => UnBlockTime(settings.SBlock.BlockItems.Last().Key) > CurrentTime();
+        private bool IsAnyBlocked() => UnBlockTime(settings.SBlock.BlockItems.Last().Key) + settings.SBlock.TimeMove > CurrentTime();
         private double IsBlocked(string shortname) 
         {
             if (!settings.SBlock.BlockItems.SelectMany(p => p.Value).Contains(shortname))
@@ -879,77 +684,28 @@ namespace Oxide.Plugins
 
         private double IsBlocked(ItemDefinition itemDefinition) => IsBlocked(itemDefinition.shortname);
 
-        private void FillBlockedItems(Dictionary<string, Dictionary<ItemDefinition, string>> fillDictionary)
+        private void FillBlockedItems(Dictionary<string, Dictionary<Item, string>> fillDictionary)
         {
             foreach (var category in settings.SBlock.BlockItems)
             {
                 string categoryColor = GetGradient(category.Key);
-                if (categoryColor == null) return;
                 foreach (var item in category.Value)
                 {
-                    if (item == null) return;
-                    ItemDefinition definition = ItemManager.FindItemDefinition(item);
-                    if (definition == null) return;
-                    string catName = settings.SBlock.CategoriesName[definition.category.ToString()];
-                    if (string.IsNullOrEmpty(catName)) return;
-
-                    if (!fillDictionary.ContainsKey(catName))
-                        fillDictionary.Add(catName, new Dictionary<ItemDefinition, string>());
+                    Item createItem = ItemManager.CreateByPartialName(item);
+                    string catName = settings.SBlock.CategoriesName[createItem.info.category.ToString()];
                 
-                    if (!fillDictionary[catName].ContainsKey(definition))
-                        fillDictionary[catName].Add(definition, categoryColor);
+                    if (!fillDictionary.ContainsKey(catName))
+                        fillDictionary.Add(catName, new Dictionary<Item, string>());
+                
+                    if (!fillDictionary[catName].ContainsKey(createItem))
+                        fillDictionary[catName].Add(createItem, categoryColor);
                 }
             }
         }
 
-        private void CheckActiveBlocks()
-        {
-            if (IsAnyBlocked())
-            {
-                UpdateAction = ServerMgr.Instance.StartCoroutine(UpdateInfoBlock());
-
-                SubscribeHooks(true);
-            }
-            else
-                SubscribeHooks(false);
-        }
-        
-        private void SubscribeHooks(bool subscribe)
-        {
-            if (subscribe)
-            {
-                Subscribe(nameof(CanWearItem));
-                Subscribe(nameof(CanEquipItem));
-                Subscribe(nameof(OnReloadWeapon));
-                Subscribe(nameof(OnReloadMagazine));
-                Subscribe(nameof(CanAcceptItem));
-            }
-            else
-            {
-                Unsubscribe(nameof(CanWearItem));
-                Unsubscribe(nameof(CanEquipItem));
-                Unsubscribe(nameof(OnReloadWeapon));
-                Unsubscribe(nameof(OnReloadMagazine));
-                Unsubscribe(nameof(CanAcceptItem));
-            }
-        }
         #endregion
 
         #region Utils
-
-        string CheckText(string text)
-        {
-            if (text.Length < 8) return $"<size=12>{text}</size>";
-            if (text.Length < 16) return $"<size=10>{text}</size>";
-            if (text.Length > 16) 
-            {
-                if (text.Length == 17) return $"<size=10>{text}</size>";
-                if (text.Length <= 20) return $"<size=8>{text}</size>";
-                else return $"<size=6>{text}</size>";
-            }
-
-            return text;
-        }
 
         static readonly DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0);
         static double CurrentTime() { return DateTime.UtcNow.Subtract(epoch).TotalSeconds; }
@@ -999,120 +755,7 @@ namespace Oxide.Plugins
                 Config[menu, key] = varObject;
             }
         }
-
-        private bool playerOnDuel(BasePlayer player)
-        {
-            if (Duels != null)
-                if (Duels.Call<bool>("inDuel", player))
-                    return true;
-
-            if (Battles != null)
-                if (Battles.Call<bool>("IsPlayerOnBattle", player.userID))
-                    return true;
-
-            if (ArenaTournament != null)
-                if (ArenaTournament.Call<bool>("IsOnTournament", player.userID))
-                    return true;
-
-            return false;
-        }
-
-        #endregion
-
-        #region Coroutines
-        private IEnumerator StartUpdate(BasePlayer player, double totalUnblockTime)
-        {
-            while (player.HasFlag(BaseEntity.Flags.Reserved3) && player.IsConnected && totalUnblockTime > 0)
-            {
-                totalUnblockTime = 0;
-
-                foreach (var check in settings.SBlock.BlockItems.SelectMany(p => p.Value))
-                {
-                    CuiElementContainer container = new CuiElementContainer();
-                    ItemDefinition blockedItem = ItemManager.FindItemDefinition(check);
-
-                    double unblockTime = IsBlocked(blockedItem.shortname);
-                    totalUnblockTime += unblockTime;
-
-                    string text = unblockTime > 0
-                            ? $"<size=10><b>{TimeSpan.FromSeconds(unblockTime).ToShortString()}</b></size>"
-                            : "<b>ДОСТУПНО!</b>";
-
-                    if (unblockTime > 0)
-                    {
-                        CuiHelper.DestroyUi(player, $"Time.{blockedItem.shortname}.Update");
-                        container.Add(new CuiButton
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                            Text = { Color = HexToRustFormat("#FFFEEEFF"), Text = text, FontSize = 12, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter},
-                            Button = { Color = "0 0 0 0" },
-                        }, $"Time.{blockedItem.shortname}", $"Time.{blockedItem.shortname}.Update");
-
-                        CuiHelper.AddUi(player, container);
-                    }
-                }
-
-                yield return new WaitForSeconds(1);
-            }
-
-            player.SetFlag(BaseEntity.Flags.Reserved3, false);
-            yield break;
-        }
-
-        private IEnumerator UpdateInfoBlock()
-        {
-            while (true)
-            {
-                if (!IsAnyBlocked())
-                {
-                    foreach (BasePlayer player in BasePlayer.activePlayerList)
-                        CuiHelper.DestroyUi(player, LayerInfoBlock);
-
-                    SubscribeHooks(false);
-                    this.UpdateAction = null;
-                    yield break;
-                }
-
-                yield return new WaitForSeconds(30);
-            }
-        }
-
-        public string TimeToString(double time)
-        {
-            TimeSpan elapsedTime = TimeSpan.FromSeconds(time);
-            int hours = elapsedTime.Hours;
-            int minutes = elapsedTime.Minutes;
-            int seconds = elapsedTime.Seconds;
-            int days = Mathf.FloorToInt((float)elapsedTime.TotalDays);
-            string s = "";
-            if (days > 0) s += $"{days} д. ";
-            if (hours > 0) s += $"{hours} ч. ";
-            if (minutes > 0) s += $"{minutes} м. ";
-            if (seconds > 0) s += $"{seconds} с.";
-            else s = s.TrimEnd(' ');
-            return s;
-        }
-
-        string GetImage(string name) => (string)IMGLibrary.GetImage(name, 0);
-
-        public static class IMGLibrary
-        {
-            public static bool AddImage(string url, string imageName, ulong imageId = 0, Action callback = null) => (bool)_ins.ImageLibrary.Call("AddImage", url, imageName, imageId, callback);
-            public static bool AddImageData(string imageName, byte[] array, ulong imageId = 0, Action callback = null) => (bool)_ins.ImageLibrary.Call("AddImageData", imageName, array, imageId, callback);
-            public static string GetImageURL(string imageName, ulong imageId = 0) => (string)_ins.ImageLibrary.Call("GetImageURL", imageName, imageId);
-            public static string GetImage(string imageName, ulong imageId = 0, bool returnUrl = false) => (string)_ins.ImageLibrary.Call("GetImage", imageName, imageId, returnUrl);
-            public static List<ulong> GetImageList(string name) => (List<ulong>)_ins.ImageLibrary.Call("GetImageList", name);
-            public static Dictionary<string, object> GetSkinInfo(string name, ulong id) => (Dictionary<string, object>)_ins.ImageLibrary.Call("GetSkinInfo", name, id);
-            public static bool HasImage(string imageName, ulong imageId) => (bool)_ins.ImageLibrary.Call("HasImage", imageName, imageId);
-            public static bool IsInStorage(uint crc) => (bool)_ins.ImageLibrary.Call("IsInStorage", crc);
-            public static bool IsReady() => (bool)_ins.ImageLibrary.Call("IsReady");
-            public static void ImportImageList(string title, Dictionary<string, string> imageList, ulong imageId = 0, bool replace = false, Action callback = null) => _ins.ImageLibrary.Call("ImportImageList", title, imageList, imageId, replace, callback);
-            public static void ImportItemList(string title, Dictionary<string, Dictionary<ulong, string>> itemList, bool replace = false, Action callback = null) => _ins.ImageLibrary.Call("ImportItemList", title, itemList, replace, callback);
-            public static void ImportImageData(string title, Dictionary<string, byte[]> imageList, ulong imageId = 0, bool replace = false, Action callback = null) => _ins.ImageLibrary.Call("ImportImageData", title, imageList, imageId, replace, callback);
-            public static void LoadImageList(string title, List<KeyValuePair<string, ulong>> imageList, Action callback = null) => _ins.ImageLibrary.Call("LoadImageList", title, imageList, callback);
-            public static void RemoveImage(string imageName, ulong imageId) => _ins?.ImageLibrary?.Call("RemoveImage", imageName, imageId);
-        }
-
+        
         #endregion
     }
 }

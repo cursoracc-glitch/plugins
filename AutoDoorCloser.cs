@@ -13,7 +13,8 @@ using Oxide.Core.Libraries.Covalence;
 namespace Oxide.Plugins
 {
     [Info("AutoDoorCloser", "Ryamkk", "1.0.5", ResourceId = 1924)]
- 
+	[Description("Переработка плагина AutoDoor с oxide. Почти схожая версия плагина с Moscow.ovh :)")]
+	
     class AutoDoorCloser : RustPlugin
     {
 	    [PluginReference]
@@ -100,7 +101,7 @@ namespace Oxide.Plugins
 
             if (args.Length == 0)
             {
-                SendReply(player, GetMessage("CMD.AD.HELP", player, playerPrefs.Contains(player.UserIDString) ? "<color=#8e6874>Выключен</color>" : "<color=#8e6874>Включено</color>"));
+                SendReply(player, GetMessage("CMD.AD.HELP", player, playerPrefs.Contains(player.UserIDString) ? "<color=#ff0000>Выключен</color>" : "<color=#00ff00>Включено</color>"));
                 return;
             }
             if (args.Length == 1)
@@ -136,35 +137,23 @@ namespace Oxide.Plugins
 	    #region Localization
         void LoadDefaultMessages()
         {
-            lang.RegisterMessages(new Dictionary<string, string>() 
+            lang.RegisterMessages(new Dictionary<string, string>
             {
-                ["NO.ACCESS"] = "У вас нет <color=#8e6874>доступа</color> к этой команде!",
+                ["NO.ACCESS"] = "У вас нет доступа к этой команде.",
 				
-				["RAID.BLOCKED"] = "<size=14>Был активирован <color=#8e6874>Рейд-Блок</color></size>\n<size=12>-автоматическое закрытие дверей недоступно!</size>",
+				["RAID.BLOCKED"] = "Активирован РеидБлок автоматическое закрытия дверей недоступно!",
 				
-				["ALREADY.ON"] = "Автоматическое закрытие <color=#8e6874>дверей</color> уже включено", 
-                ["AUTO.CLOSE.ON"] = "Вы <color=#8e6874>включили</color> автоматическое закрытие дверей",
+				["ALREADY.ON"] = "Автоматическое закрытие дверей уже включено.", 
+                ["AUTO.CLOSE.ON"] = "Вы включили автоматическое закрытие дверей.",
 				
-				["ALREADY.OFF"] = "Автоматическое закрытия <color=#8e6874>дверей</color> уже выключено",
-                ["AUTO.CLOSE.OFF"] = "Вы <color=#8e6874>выключили</color> автоматическое закрытие дверей",
+				["ALREADY.OFF"] = "Автоматическое закрытия дверей уже выключено.",
+                ["AUTO.CLOSE.OFF"] = "Вы выключили автоматическое закрытие дверей.",
 				
-                ["CMD.AD.HELP"] = "<size=14>Автоматическое <color=#8e6874>закрытие</color> дверей: {0}</size>\n<size=12><color=#8e6874>/ad on</color> - Включить автоматическое закрытие дверей.</size>\n<size=12><color=#8e6874>/ad off</color> - Выключить автоматическое закрытие дверей.</size>",
-            }, this, "ru");
-
-            lang.RegisterMessages(new Dictionary<string, string>() 
-            {
-                ["NO.ACCESS"] = "You do not have <color=#8e6874>access</color> to this command!",
-				
-				["RAID.BLOCKED"] = "<size=14>The <color=#8e6874>Raid-Block</color></size>\n<size=12>Automatic door closing is unavailable!</size>",
-				
-				["ALREADY.ON"] = "Automatic closing of <color=#8e6874>doors</color> is already enabled", 
-                ["AUTO.CLOSE.ON"] = "You have <color=#8e6874>enabled</color> automatic door closing",
-				
-				["ALREADY.OFF"] = "Automatic closing of <color=#8e6874>doors</color> is already turned off",
-                ["AUTO.CLOSE.OFF"] = "You <color=#8e6874>disabled</color> the automatic door closure",
-				
-                ["CMD.AD.HELP"] = "<size=14>Automatic <color=#8e6874>closing</color> doors: {0}</size>\n<size=12><color=#8e6874>/ad on</color> - Enable automatic door closing.</size>\n<size=12><color=#8e6874>/ad off</color> - Turn off automatic door closing.</size>",
-            }, this, "en");
+                ["CMD.AD.HELP"] = "<size=17>Текущее состояние: {0}</size>\n" +
+				                  "ДОСТУПНЫЕ КОМАНДЫ:\n" +
+				                  "/ad on - Включить автоматическое закрытие дверей.\n" +
+				                  "/ad off - Выключить автоматическое закрытие дверей.",
+            }, this);
         }
 		#endregion
 		

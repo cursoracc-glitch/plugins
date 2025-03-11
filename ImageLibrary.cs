@@ -1,10 +1,8 @@
 //Reference: Facepunch.Sqlite
-//Reference: UnityEngine.UnityWebRequestModule
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Configuration;
 using Oxide.Core.Plugins;
-using Steamworks;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -14,7 +12,7 @@ using UnityEngine.Networking;
 
 namespace Oxide.Plugins
 {
-    [Info("Image Library", "Sempai#3239", "2.0.54")]
+    [Info("Image Library", "", "2.0.54")]
     [Description("Plugin API for downloading and managing images")]
     class ImageLibrary : RustPlugin
     {
@@ -58,13 +56,6 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             itemShortNames = ItemManager.itemList.Select(x => x.shortname).ToArray();
-
-            foreach (ItemDefinition item in ItemManager.itemList)
-            {
-                string workshopName = item.displayName.english.ToLower().Replace("skin", "").Replace(" ", "").Replace("-", "");
-                if (!workshopNameToShortname.ContainsKey(workshopName))
-                    workshopNameToShortname.Add(workshopName, item.shortname);
-            }
 
             AddDefaultUrls();
 
@@ -150,18 +141,12 @@ namespace Oxide.Plugins
 
             AddImage("http://i.imgur.com/sZepiWv.png", "NONE", 0);
             AddImage("http://i.imgur.com/lydxb0u.png", "LOADING", 0);
+
             foreach (var image in configData.UserImages)
             {
                 if (!string.IsNullOrEmpty(image.Value))
                     AddImage(image.Value, image.Key, 0);
             }
-
-            if ((Steamworks.SteamInventory.Definitions?.Length ?? 0) == 0)
-            {
-                PrintWarning("Waiting for Steamworks to update item definitions....");
-                Steamworks.SteamInventory.OnDefinitionsUpdated += GetItemSkins;
-            }
-            else GetItemSkins();
         }
 
         private void CheckForRefresh()
@@ -230,7 +215,7 @@ namespace Oxide.Plugins
 
         #endregion Functions
 
-        #region Workshop Names and Image URLs
+        #region Image URLs
 
         private void AddDefaultUrls()
         {
@@ -238,50 +223,12 @@ namespace Oxide.Plugins
             {
                 string identifier = $"{itemDefinition.shortname}_0";
                 if (!imageUrls.URLs.ContainsKey(identifier))
-                    imageUrls.URLs.Add(identifier, $"https://www.rustedit.io/images/imagelibrary/{itemDefinition.shortname}.png");
+                    imageUrls.URLs.Add(identifier, $"https://rust.summer-rust.xyz/items180/{itemDefinition.shortname}.png");
             }
             SaveUrls();
         }
 
-        private readonly Dictionary<string, string> workshopNameToShortname = new Dictionary<string, string>
-        {
-            {"longtshirt", "tshirt.long" },
-            {"cap", "hat.cap" },
-            {"beenie", "hat.beenie" },
-            {"boonie", "hat.boonie" },
-            {"balaclava", "mask.balaclava" },
-            {"pipeshotgun", "shotgun.waterpipe" },
-            {"woodstorage", "box.wooden" },
-            {"ak47", "rifle.ak" },
-            {"bearrug", "rug.bear" },
-            {"boltrifle", "rifle.bolt" },
-            {"bandana", "mask.bandana" },
-            {"hideshirt", "attire.hide.vest" },
-            {"snowjacket", "jacket.snow" },
-            {"buckethat", "bucket.helmet" },
-            {"semiautopistol", "pistol.semiauto" },
-            {"burlapgloves", "burlap.gloves" },
-            {"roadsignvest", "roadsign.jacket" },
-            {"roadsignpants", "roadsign.kilt" },
-            {"burlappants", "burlap.trousers" },
-            {"collaredshirt", "shirt.collared" },
-            {"mp5", "smg.mp5" },
-            {"sword", "salvaged.sword" },
-            {"workboots", "shoes.boots" },
-            {"vagabondjacket", "jacket" },
-            {"hideshoes", "attire.hide.boots" },
-            {"deerskullmask", "deer.skull.mask" },
-            {"minerhat", "hat.miner" },
-            {"lr300", "rifle.lr300" },
-            {"lr300.item", "rifle.lr300" },
-            {"burlap.gloves", "burlap.gloves.new"},
-            {"leather.gloves", "burlap.gloves"},
-            {"python", "pistol.python" },
-            {"m39", "rifle.m39"},
-            {"woodendoubledoor", "door.double.hinged.wood"}
-        };
-
-        #endregion Workshop Names and Image URLs
+        #endregion Image URLs
 
         #region API
 
@@ -471,12 +418,6 @@ namespace Oxide.Plugins
                 }
             }
 
-            if (workshopDownloads.Count > 0)
-            {
-                QueueWorkshopDownload(title, newLoadOrderURL, workshopDownloads, 0, callback);
-                return;
-            }
-
             if (newLoadOrderURL.Count > 0)
             {
                 loadOrders.Enqueue(new LoadOrder(title, newLoadOrderURL, null, false, callback));
@@ -519,303 +460,6 @@ namespace Oxide.Plugins
             }, null, "CL_ReceiveFilePng", crc, (uint)array.Length, array);
         }
         #endregion API
-
-        #region Steam API
-        private List<ulong> BuildApprovedItemList()
-        {
-            List<ulong> list = new List<ulong>();
-
-            foreach (InventoryDef item in Steamworks.SteamInventory.Definitions)
-            {
-                string shortname = item.GetProperty("itemshortname");
-                ulong workshopid;
-
-                if (item == null || string.IsNullOrEmpty(shortname))
-                    continue;
-
-                if (workshopNameToShortname.ContainsKey(shortname))
-                    shortname = workshopNameToShortname[shortname];
-
-                if (item.Id < 100)
-                    continue;
-
-                if (!ulong.TryParse(item.GetProperty("workshopid"), out workshopid))
-                    continue;
-
-                if (HasImage(shortname, workshopid))
-                    continue;
-
-                list.Add(workshopid);
-            }
-
-            return list;
-        }
-
-        private string BuildDetailsString(List<ulong> list, int page)
-        {
-            int start = page * 100;
-            int end = start + 100 > list.Count ? list.Count : start + 100;
-
-            string details = string.Format("?key={0}&itemcount={1}", configData.SteamAPIKey, end - start);
-
-            for (int i = start; i < end; i++)
-                details += string.Format("&publishedfileids[{0}]={1}", i - start, list[i]);
-
-            return details;
-        }
-
-        private string BuildDetailsString(List<ulong> list)
-        {
-            string details = string.Format("?key={0}&itemcount={1}", configData.SteamAPIKey, list.Count);
-
-            for (int i = 0; i < list.Count; i++)
-                details += string.Format("&publishedfileids[{0}]={1}", i, list[i]);
-
-            return details;
-        }
-
-        private bool IsValid(PublishedFileQueryDetail item)
-        {
-            if (string.IsNullOrEmpty(item.preview_url))
-                return false;
-
-            if (item.tags == null)
-                return false;
-
-            return true;
-        }
-
-        private void GetItemSkins()
-        {
-            Steamworks.SteamInventory.OnDefinitionsUpdated -= GetItemSkins;
-
-            PrintWarning("Retrieving item skin lists...");
-
-            GetApprovedItemSkins(BuildApprovedItemList(), 0);
-        }
-
-        private void QueueFileQueryRequest(string details, Action<PublishedFileQueryDetail[]> callback)
-        {
-            webrequest.Enqueue(STEAM_API_URL, details, (code, response) =>
-            {
-                try
-                {
-                    PublishedFileQueryResponse query = JsonConvert.DeserializeObject<PublishedFileQueryResponse>(response, errorHandling);
-                    if (query == null || query.response == null || query.response.publishedfiledetails.Length == 0)
-                    {
-                        if (code != 200)
-                            PrintError($"There was a error querying Steam for workshop item data : Code ({code})");
-                        return;
-                    }
-                    else
-                    {
-                        if (query?.response?.publishedfiledetails?.Length > 0)
-                            callback.Invoke(query.response.publishedfiledetails);
-                    }
-                }
-                catch { }
-            }, this, Core.Libraries.RequestMethod.POST);
-        }
-
-        private void GetApprovedItemSkins(List<ulong> itemsToDownload, int page)
-        {
-            if (itemsToDownload.Count < 1)
-            {
-                Puts("Approved skins loaded");
-
-                SaveUrls();
-                SaveSkinInfo();
-
-                if (!orderPending)
-                    ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
-                return;
-            }
-
-            int totalPages = Mathf.CeilToInt((float)itemsToDownload.Count / 100f) - 1;
-
-            string details = BuildDetailsString(itemsToDownload, page);
-
-            QueueFileQueryRequest(details, (PublishedFileQueryDetail[] items) =>
-            {
-                ServerMgr.Instance.StartCoroutine(ProcessApprovedBlock(itemsToDownload, items, page, totalPages));
-            });
-        }
-
-        private IEnumerator ProcessApprovedBlock(List<ulong> itemsToDownload, PublishedFileQueryDetail[] items, int page, int totalPages)
-        {
-            PrintWarning($"Processing approved skins; Page {page + 1}/{totalPages + 1}");
-
-            Dictionary<string, Dictionary<ulong, string>> loadOrder = new Dictionary<string, Dictionary<ulong, string>>();
-
-            foreach (PublishedFileQueryDetail item in items)
-            {
-                if (!IsValid(item))
-                    continue;
-
-                foreach (PublishedFileQueryDetail.Tag tag in item.tags)
-                {
-                    if (string.IsNullOrEmpty(tag.tag))
-                        continue;
-
-                    ulong workshopid = Convert.ToUInt64(item.publishedfileid);
-
-                    string adjTag = tag.tag.ToLower().Replace("skin", "").Replace(" ", "").Replace("-", "").Replace(".item", "");
-                    if (workshopNameToShortname.ContainsKey(adjTag))
-                    {
-                        string shortname = workshopNameToShortname[adjTag];
-
-                        string identifier = $"{shortname}_{workshopid}";
-
-                        if (!imageUrls.URLs.ContainsKey(identifier))
-                            imageUrls.URLs.Add(identifier, item.preview_url.Replace("https", "http"));
-
-                        skinInformation.skinData[identifier] = new Dictionary<string, object>
-                                {
-                                    {"title", item.title },
-                                    {"votesup", 0 },
-                                    {"votesdown", 0 },
-                                    {"description", item.description },
-                                    {"score", 0 },
-                                    {"views", 0 },
-                                    {"created", new DateTime() },
-                                };
-                    }
-                }
-            }
-
-            yield return CoroutineEx.waitForEndOfFrame;
-            yield return CoroutineEx.waitForEndOfFrame;
-
-            if (page < totalPages)
-                GetApprovedItemSkins(itemsToDownload, page + 1);
-            else
-            {
-                itemsToDownload.Clear();
-
-                Puts("Approved skins loaded");
-
-                SaveUrls();
-                SaveSkinInfo();
-
-                if (!orderPending)
-                    ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
-            }
-        }
-
-        private void QueueWorkshopDownload(string title, Dictionary<string, string> newLoadOrderURL, List<KeyValuePair<string, ulong>> workshopDownloads, int page = 0, Action callback = null)
-        {
-            int rangeMin = page * 100;
-            int rangeMax = (page + 1) * 100;
-
-            if (rangeMax > workshopDownloads.Count)
-                rangeMax = workshopDownloads.Count;
-
-            List<ulong> requestedSkins = workshopDownloads.GetRange(rangeMin, rangeMax - rangeMin).Select(x => x.Value).ToList();
-
-            int totalPages = Mathf.CeilToInt((float)workshopDownloads.Count / 100f) - 1;
-
-            string details = BuildDetailsString(requestedSkins);
-
-            try
-            {
-                webrequest.Enqueue(STEAM_API_URL, details, (code, response) =>
-                {
-                    PublishedFileQueryResponse query = JsonConvert.DeserializeObject<PublishedFileQueryResponse>(response, errorHandling);
-                    if (query == null || query.response == null || query.response.publishedfiledetails.Length == 0)
-                    {
-                        if (code != 200)
-                            PrintError($"There was a error querying Steam for workshop item data : Code ({code})");
-
-                        if (page < totalPages)
-                            QueueWorkshopDownload(title, newLoadOrderURL, workshopDownloads, page + 1, callback);
-                        else
-                        {
-                            if (newLoadOrderURL.Count > 0)
-                            {
-                                loadOrders.Enqueue(new LoadOrder(title, newLoadOrderURL, null, false, page < totalPages ? null : callback));
-                                if (!orderPending)
-                                    ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
-                            }
-                            else
-                            {
-                                if (callback != null)
-                                    callback.Invoke();
-                            }
-                        }
-                        return;
-                    }
-                    else
-                    {
-                        if (query.response.publishedfiledetails.Length > 0)
-                        {
-                            Dictionary<string, Dictionary<ulong, string>> loadOrder = new Dictionary<string, Dictionary<ulong, string>>();
-
-                            foreach (PublishedFileQueryDetail item in query.response.publishedfiledetails)
-                            {
-                                if (!string.IsNullOrEmpty(item.preview_url))
-                                {
-                                    ulong skinId = Convert.ToUInt64(item.publishedfileid);
-
-                                    KeyValuePair<string, ulong>? kvp = workshopDownloads.Find(x => x.Value == skinId);
-
-                                    if (kvp.HasValue)
-                                    {
-                                        string identifier = $"{kvp.Value.Key}_{kvp.Value.Value}";
-
-                                        if (!newLoadOrderURL.ContainsKey(identifier))
-                                            newLoadOrderURL.Add(identifier, item.preview_url);
-
-                                        if (!imageUrls.URLs.ContainsKey(identifier))
-                                            imageUrls.URLs.Add(identifier, item.preview_url);
-
-                                        skinInformation.skinData[identifier] = new Dictionary<string, object>
-                                        {
-                                            {"title", item.title },
-                                            {"votesup",  0 },
-                                            {"votesdown", 0 },
-                                            {"description", item.description },
-                                            {"score", 0 },
-                                            {"views", item.views },
-                                            {"created", new DateTime(item.time_created) },
-                                        };
-
-                                        requestedSkins.Remove(skinId);
-                                    }
-                                }
-                            }
-
-                            SaveUrls();
-                            SaveSkinInfo();
-
-                            if (requestedSkins.Count != 0)
-                            {
-                                Puts($"{requestedSkins.Count} workshop skin ID's for image batch ({title}) are invalid! They may have been removed from the workshop\nIDs: {requestedSkins.ToSentence()}");
-                            }
-                        }
-
-                        if (page < totalPages)
-                            QueueWorkshopDownload(title, newLoadOrderURL, workshopDownloads, page + 1, callback);
-                        else
-                        {
-                            if (newLoadOrderURL.Count > 0)
-                            {
-                                loadOrders.Enqueue(new LoadOrder(title, newLoadOrderURL, null, false, page < totalPages ? null : callback));
-                                if (!orderPending)
-                                    ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
-                            }
-                            else
-                            {
-                                if (callback != null)
-                                    callback.Invoke();
-                            }
-                        }
-                    }
-                },
-                this,
-                Core.Libraries.RequestMethod.POST);
-            }
-            catch { }
-        }
 
         #region JSON Response Classes
         public class PublishedFileQueryResponse
@@ -860,7 +504,6 @@ namespace Oxide.Plugins
                 public string tag { get; set; }
             }
         }
-        #endregion
         #endregion
 
         #region Commands
@@ -1050,7 +693,7 @@ namespace Oxide.Plugins
             {
                 UnityWebRequest www = UnityWebRequest.Get(info.url);
 
-                yield return www.SendWebRequest();
+                yield return www.Send();
                 if (il == null) yield break;
                 if (www.isNetworkError || www.isHttpError)
                 {

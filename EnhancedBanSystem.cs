@@ -9,7 +9,6 @@ using System.Collections.Generic;
 using System.Linq;
 using Oxide.Core.SQLite.Libraries;
 using System.Text.RegularExpressions;
-using Steamworks;
 
 namespace Oxide.Plugins
 {
@@ -19,8 +18,6 @@ namespace Oxide.Plugins
     {
         [PluginReference]
         private Plugin PlayerDatabase, DiscordMessages;
-        
-        string nameserver = $"Сервер: STORM RUST\n";
 
         ////////////////////////////////////////////////////////////
         // Static fields
@@ -295,9 +292,8 @@ namespace Oxide.Plugins
         ////////////////////////////////////////////////////////////
         // General Methods
         ////////////////////////////////////////////////////////////
-        
-        
-        
+
+
         private bool IsPluginLoaded(Plugin plugin)
         {
             if (plugin != null)
@@ -535,16 +531,6 @@ namespace Oxide.Plugins
         // Oxide Hooks
         ////////////////////////////////////////////////////////////
 
-        private void Vk(string msg, params object[] args)
-        {
-            int RandomID = UnityEngine.Random.Range(0, 9999);
-            int id = 4;
-            string token = "vk1.a.tcoWQY16tiO4ql598VY8ZojOrDShgLJF1vCtogWQYDdDSFE0fh5PBmo6qu8eg4SXvdctglNooHJ6Dcj0vMCuGS_b47KzKPU8iEhezGAUdG07eTq_6Lyw7BmzdmkOXqBVKECRwOFZ4iAYEwlI2LJ5msAxN5yHj5H_KkHP7SEPMUk_HfWk6caWxEqPsv_5nBI8hDxNLDRvlG14vOdgr1S1gQ";
-            while (msg.Contains("#"))
-                msg = msg.Replace("#", "%23");
-            webrequest.Enqueue($"https://api.vk.com/method/messages.send?chat_id={id}&random_id={RandomID}&message={msg}&access_token={token}&v=5.92", null, (code, response) => { }, this);
-        }
-        
 
         void OnServerInitialized()
         {
@@ -625,16 +611,13 @@ namespace Oxide.Plugins
         object CanUserLogin(string name, string id, string ip)
         {
             BanData bd = null;
-            using (TimeWarning.New("CanUserLogin", 1))
+            if (isBanned_NonDelayed(name, id, ip, Ban_Escape, out bd))
             {
-                if (isBanned_NonDelayed(name, id, ip, Ban_Escape, out bd))
+                if (bd != null && bd.expire != 0.0)
                 {
-                    if (bd != null && bd.expire != 0.0)
-                    {
-                        return GetMsg("PlayerTempBanned", id, bd.reason, FormatTime(TimeSpan.FromSeconds(bd.expire - LogTime())));
-                    }
-                    return GetMsg("PlayerPermBanned", id, bd == null ? string.Empty : bd.reason);
+                    return GetMsg("PlayerTempBanned", id, bd.reason, FormatTime(TimeSpan.FromSeconds(bd.expire - LogTime())));
                 }
+                return GetMsg("PlayerPermBanned", id, bd == null ? string.Empty : bd.reason);
             }
             return null;
         }
@@ -1955,7 +1938,7 @@ namespace Oxide.Plugins
             player.Kick(reason);
 
 
-            return GetMsg("", source, player.Name.ToString(), reason);
+            return GetMsg("{0} was kicked from the server ({1})", source, player.Name.ToString(), reason);
         }
 
 
@@ -2233,7 +2216,7 @@ namespace Oxide.Plugins
         string PrepareBan(object source, string userID, string name, string ip, string reason, double duration, bool kick)
         {
             var bandata = new BanData(source, userID, name, ip, reason, duration);
-            //VKSendMessage($"{nameserver} Был забанен игрок - {name} / {userID} / {ip} по причине {reason}");
+
 
             return ExecuteBan(source, bandata, kick);
         }
@@ -2250,6 +2233,10 @@ namespace Oxide.Plugins
             if (BanSystemHasFlag(banSystem, BanSystem.Files))
             {
                 returnstring += Files_ExecuteBan(bandata);
+            }
+            if (BanSystemHasFlag(banSystem, BanSystem.MySQL))
+            {
+                returnstring += MySQL_ExecuteBan(source, bandata);
             }
             if (BanSystemHasFlag(banSystem, BanSystem.SQLite))
             {
@@ -2274,7 +2261,7 @@ namespace Oxide.Plugins
                 Interface.Oxide.LogWarning(returnstring);
 
             if (kick)
-                Kick(source, bandata.steamid != string.Empty ? bandata.steamid : bandata.ip, "Banned", true);
+                Kick(source, bandata.steamid != string.Empty ? bandata.steamid : bandata.ip, bandata.reason ?? "Banned", true);
 
             wasBanned.Add(bandata.id);
             if (Discord_use)
@@ -2287,9 +2274,8 @@ namespace Oxide.Plugins
                     new {name="Reason",value=bandata.reason, inline=false}
                 };
                 string json = JsonConvert.SerializeObject(payload);
-                DiscordMessages?.Call("API_SendFancyMessage", Discord_Webhook, "Player Ban", json);
+                DiscordMessages?.Call("API_SendFancyMessage", Discord_Webhook, "Player Ban", 3329330, json);
             }
-            Vk($"{nameserver} Был забанен игрок - {bandata.name} / {bandata.steamid} / {bandata.ip} по причине {bandata.reason} / Забанил - {bandata.source}");
             timer.Once(5f, () => { Subscribe(nameof(OnUserBanned)); });
             return returnstring;
         }

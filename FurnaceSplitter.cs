@@ -1,612 +1,482 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Oxide.Core;
 using Oxide.Core.Plugins;
+using Oxide.Game.Rust.Cui;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
 namespace Oxide.Plugins
-{	
-    [Info("Furnace Splitter", "Nimant", "1.0.10")]    
+{
+    [Info("Furnace Splitter", "Skipcast", "2.2.0")]
+    [Description("Splits up resources in furnaces automatically and shows useful furnace information")]
     public class FurnaceSplitter : RustPlugin
-    {        
-				
-		#region Variables 		
+    {
+        private class OvenSlot
+        {
+            /// <summary>The item in this slot. May be null.</summary>
+            public Item Item;
 
-        private static FurnaceSplitter instance;
-		
-		private readonly static Dictionary<string, List<string>> SortItems = new Dictionary<string, List<string>>()
-		{
-			{ "furnace", new List<string>() { "hq.metal.ore", "metal.ore", "sulfur.ore" } },
-			{ "furnace.large", new List<string>() { "hq.metal.ore", "metal.ore", "sulfur.ore" } },
-			{ "furnace_static", new List<string>() { "hq.metal.ore", "metal.ore", "sulfur.ore" } },
-			{ "refinery_small_deployed", new List<string>() { "crude.oil" } },
-			{ "small_refinery_static", new List<string>() { "crude.oil" } },						
-			
-			{ "campfire", new List<string>() { "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw" } },			
-            { "fireplace.deployed", new List<string>() { "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw" } },			
-            { "hobobarrel_static", new List<string>() { "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw" } },			
-            { "skull_fire_pit", new List<string>() { "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw" } },			
-			{ "bbq.deployed", new List<string>() { "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw" } },
-			{ "cursedcauldron.deployed", new List<string>() { "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw" } }
-		};
-		
-		private readonly static Dictionary<string, string> MainRemains = new Dictionary<string, string>()
-		{
-			{ "furnace", "charcoal" },
-			{ "furnace.large", "charcoal" },
-			{ "furnace_static", "charcoal" },
-			{ "refinery_small_deployed", "charcoal" },
-			{ "small_refinery_static", "charcoal" },
-			
-			{ "campfire", "charcoal" },			
-            { "fireplace.deployed", "charcoal" },            
-            { "hobobarrel_static", "charcoal" },            
-            { "skull_fire_pit", "charcoal" },
-			{ "bbq.deployed", "charcoal" },
-			{ "cursedcauldron.deployed", "charcoal" }
-		};
-		
-		private readonly static Dictionary<string, string> OreRemains = new Dictionary<string, string>()
-		{
-			{ "hq.metal.ore", "metal.refined" },
-			{ "metal.ore", "metal.fragments" },
-			{ "sulfur.ore", "sulfur" },
-			{ "crude.oil", "lowgradefuel" },
-			
-			{ "bearmeat", "bearmeat.cooked" },
-			{ "chicken.raw", "chicken.cooked" },
-			{ "deermeat.raw", "deermeat.cooked" },
-			{ "fish.raw", "fish.cooked" },
-			{ "horsemeat.raw", "horsemeat.cooked" },
-			{ "humanmeat.raw", "humanmeat.cooked" },
-			{ "meat.boar", "meat.pork.cooked" },
-			{ "wolfmeat.raw", "wolfmeat.cooked" }
-		};
-		
-		private readonly static Dictionary<string, List<string>> SortOrder = new Dictionary<string, List<string>>()
-		{
-			{ "furnace", new List<string>() { "wood", "metal.ore", "sulfur.ore", "hq.metal.ore", "metal.fragments", "sulfur", "metal.refined", "charcoal" } },
-			{ "furnace.large", new List<string>() { "wood", "metal.ore", "sulfur.ore", "hq.metal.ore", "metal.fragments", "sulfur", "metal.refined", "charcoal" } },
-			{ "furnace_static", new List<string>() { "wood", "metal.ore", "sulfur.ore", "hq.metal.ore", "metal.fragments", "sulfur", "metal.refined", "charcoal" } },
-			{ "refinery_small_deployed", new List<string>() { "wood", "crude.oil", "lowgradefuel", "charcoal" } },
-			{ "small_refinery_static", new List<string>() { "wood", "crude.oil", "lowgradefuel", "charcoal" } },
-			
-			{ "campfire", new List<string>() { "wood", "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw", "bearmeat.cooked", "chicken.cooked", "deermeat.cooked", "fish.cooked", "horsemeat.cooked", "humanmeat.cooked", "meat.pork.cooked", "wolfmeat.cooked", "charcoal" } },			
-            { "fireplace.deployed", new List<string>() { "wood", "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw", "bearmeat.cooked", "chicken.cooked", "deermeat.cooked", "fish.cooked", "horsemeat.cooked", "humanmeat.cooked", "meat.pork.cooked", "wolfmeat.cooked", "charcoal" } },			
-            { "hobobarrel_static", new List<string>() { "wood", "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw", "bearmeat.cooked", "chicken.cooked", "deermeat.cooked", "fish.cooked", "horsemeat.cooked", "humanmeat.cooked", "meat.pork.cooked", "wolfmeat.cooked", "charcoal" } },			
-            { "skull_fire_pit", new List<string>() { "wood", "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw", "bearmeat.cooked", "chicken.cooked", "deermeat.cooked", "fish.cooked", "horsemeat.cooked", "humanmeat.cooked", "meat.pork.cooked", "wolfmeat.cooked", "charcoal" } },			
-			{ "bbq.deployed", new List<string>() { "wood", "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw", "bearmeat.cooked", "chicken.cooked", "deermeat.cooked", "fish.cooked", "horsemeat.cooked", "humanmeat.cooked", "meat.pork.cooked", "wolfmeat.cooked", "charcoal" } },
-			{ "cursedcauldron.deployed", new List<string>() { "wood", "bearmeat", "chicken.raw", "deermeat.raw", "fish.raw", "horsemeat.raw", "humanmeat.raw", "meat.boar", "wolfmeat.raw", "bearmeat.cooked", "chicken.cooked", "deermeat.cooked", "fish.cooked", "horsemeat.cooked", "humanmeat.cooked", "meat.pork.cooked", "wolfmeat.cooked", "charcoal" } }
-		};
-		
-		private class ItemNfo
-		{			
-			public int totalAmount;
-			public List<int> positions;
-			public bool isBurnable;
-			public int minSlotsNeed;
-			public bool needSplit;
-			public float percent;
-			public int newSlots;
-			public ulong skin;
-		}						
+            /// <summary>The slot position</summary>
+            public int? Position;
 
-		#endregion
-		
-		#region Hooks		                          
+            /// <summary>The slot's index in the itemList list.</summary>
+            public int Index;
 
-		private void OnServerInitialized() => instance = this;
-		
-		private object CanMoveItem(Item item, PlayerInventory inventory, uint targetContainer, int targetSlot)
-        {            
-			if (item == null || inventory == null) 
-				return null;
-            
-			ItemContainer container = inventory.FindContainer(targetContainer);            
-                            
-			if (container == null || (item.GetRootContainer() != null && container == item.GetRootContainer())) 
-				return null;						
-
-			BaseOven oven = container.entityOwner as BaseOven;			
-
-			if (oven == null) 
-				return null;												
-			
-			if (!SortItems.ContainsKey(oven.ShortPrefabName))
-				return null;
-								
-			if (MoveSplitItem(item, oven))
-			{																											
-				AutoAddFuel(inventory, oven);				
-				SortItemsInContainer(oven);				
-				return false;
-			}						
-			
-			return null;
+            /// <summary>How much should be added/removed from stack</summary>
+            public int DeltaAmount;
         }
-		
-		#endregion
-		
-		#region Main
-		
-		private static bool MoveSplitItem(Item item, BaseOven oven)
+
+        public class OvenInfo
         {
-			if (item == null || oven == null) 
-				return false;						
-			
-			if (!item.MoveToContainer(oven.inventory, -1, false)) 			
-				return false;
-			
-			var type = oven.ShortPrefabName;
-			var pos = oven.transform.position;
-			
-			oven.inventory.MarkDirty();
-		
-			var ovenItems = GetOvenItemsInfo(oven);									
-			
-			if (!IsMinSlotsAvailable(oven, ovenItems))
-				return false;
-						
-			CalcItemsPercent(ref ovenItems);
-			
-			int freeSlots = CalcFreeSlots(oven, ovenItems);																			
-						
-			if (freeSlots <= 0) 
-				return false;
-			
-			if (!IsCalcNewItemsSlots(ref ovenItems, freeSlots))
-				return false;						
-			
-			List<int> usedPos = new List<int>();
-			List<Item> newItems = new List<Item>();						
-			
-			foreach(var pair in ovenItems.OrderBy(x=> !x.Value.isBurnable).ThenByDescending(x=> x.Value.percent))
-			{
-				var slots = pair.Value.newSlots == 0 ? pair.Value.minSlotsNeed : pair.Value.newSlots;				
-				int totalAmount = pair.Value.totalAmount;
-				
-				for(int ii=0;ii<slots;ii++)
-				{		
-					if (totalAmount <= 0) break;																														
-					if (oven == null)
-					{
-						instance.PrintWarning($"Неожиданное исчезновение контейнера '{type}', в точке {pos}. Итерация 1.");
-						return false;
-					}
-					
-					if (!IsUsedItemFromPosition(oven, ref usedPos, ref totalAmount, pair.Key, pair.Value, slots-ii))					
-						if (!IsCreateNewItem(ref newItems, ref totalAmount, pair.Key, pair.Value, slots-ii))
-							return false;
-				}
-				
-				if (oven == null)
-				{
-					instance.PrintWarning($"Неожиданное исчезновение контейнера '{type}', в точке {pos}. Итерация 2.");
-					return false;
-				}
-				DeleteLeftItemsFromPositions(oven, usedPos, pair.Value);											
-			}
-			
-			if (oven == null)
-			{
-				instance.PrintWarning($"Неожиданное исчезновение контейнера '{type}', в точке {pos}. Итерация 3.");
-				return false;
-			}
-			MoveNewItemsToContainer(ref newItems, oven);						
-					
-            return true;
+            public float ETA;
+            public float FuelNeeded;
         }
-						
-		private static Dictionary<string, ItemNfo> GetOvenItemsInfo(BaseOven oven)
-		{						
-			ItemContainer container = oven.inventory;
-			var result = new Dictionary<string, ItemNfo>();
-					
-			foreach(var item in container.itemList)
-			{								
-				var key = $"{item.info.shortname}|{item.skin}";
-				if (!result.ContainsKey(key))
-				{															
-					ItemNfo nfo = new ItemNfo();					
-					nfo.totalAmount = item.amount;
-					nfo.positions = new List<int>() { item.position };
-					nfo.isBurnable = oven.fuelType != null && oven.fuelType == item.info;			
-					nfo.needSplit = SortItems[oven.ShortPrefabName].Contains(item.info.shortname) && !item.IsBlueprint();
-					nfo.skin = item.skin;
-					result.Add(key, nfo);																												
-				}
-				else
-				{
-					result[key].totalAmount += item.amount;
-					result[key].positions.Add(item.position);
-				}								
-			}
-			
-			foreach(var pair in result)	
-			{
-				var info = ItemManager.FindItemDefinition(pair.Key.Split('|')[0]);
-				
-				if (!IsNoStack(pair.Key))
-					pair.Value.minSlotsNeed = (int)Math.Ceiling((float)pair.Value.totalAmount / info.stackable);			
-				else
-					pair.Value.minSlotsNeed = container.itemList.Where(x=> x.info.shortname == pair.Key.Split('|')[0] && x.skin.ToString() == pair.Key.Split('|')[1]).Count();
-			}
-			
-			return result;
-		}				
-		
-		private static bool IsNoStack(string key)
-		{						
-			var itemName = key.Split('|')[0];
-			if (itemName == "blueprintbase") return true;
-			
-			if (MainRemains.Values.Contains(itemName))
-				return true;
-			
-			if (OreRemains.Values.Contains(itemName))
-				return true;
-			
-			return false;
-		}
-		
-        private static bool IsMinSlotsAvailable(BaseOven oven, Dictionary<string, ItemNfo> ovenItems)
+
+        private class StoredData
         {
-            int totalMinSlots = 0;			
-			foreach(var pair in ovenItems)			
-				totalMinSlots += pair.Value.minSlotsNeed;							
-			
-			if (totalMinSlots > oven.inventory.capacity) 
-				return false;
-			
-			return true;
-        }		
+            public Dictionary<ulong, PlayerOptions> AllPlayerOptions { get; private set; } = new Dictionary<ulong, PlayerOptions>();
+        }
 
-        private static void CalcItemsPercent(ref Dictionary<string, ItemNfo> ovenItems)
-		{
-			int totalAmount_ = 0;
-			foreach(var pair in ovenItems)
-			{			
-				if (pair.Value.needSplit)
-					totalAmount_ += pair.Value.totalAmount;								
-			}						
-			
-			foreach(var pair in ovenItems)
-			{
-				if (pair.Value.needSplit)
-					pair.Value.percent = (100f * pair.Value.totalAmount) / totalAmount_;
-			}
-		}
-		
-		private static bool IsBurnableExists(Dictionary<string, ItemNfo> ovenItems)
-		{
-			bool wasBurnable = false;			
-			foreach(var pair in ovenItems)		
-			{											
-				if (pair.Value.isBurnable)
-					wasBurnable = true;
-			}										
-			
-			return wasBurnable;				
-		}
-		
-		private static int CalcFreeSlots(BaseOven oven, Dictionary<string, ItemNfo> ovenItems)
-		{
-			int freeSlots = oven.inventory.capacity;						
-			
-			if (!IsBurnableExists(ovenItems))
-				freeSlots -= 1;		
-			
-			if (MainRemains.ContainsKey(oven.ShortPrefabName))			
-				if (ovenItems.Where(x=> MainRemains[oven.ShortPrefabName] == x.Key.Split('|')[0]).Count()==0)				
-					freeSlots -= 1;																		
-			
-			foreach(var pair in ovenItems)		
-			{			
-				if (!pair.Value.needSplit)
-					freeSlots -= pair.Value.minSlotsNeed;
-				
-				if (pair.Value.needSplit && OreRemains.ContainsKey(pair.Key.Split('|')[0]))				
-					if (ovenItems.Where(x=> OreRemains[pair.Key.Split('|')[0]] == x.Key.Split('|')[0]).Count()==0)											
-						freeSlots -= 1;																										
-			}																												
-			
-			return freeSlots;
-		}
-		
-		private static bool IsCalcNewItemsSlots(ref Dictionary<string, ItemNfo> ovenItems, int freeSlots)
-		{
-			int occupNewSlots = 0;
-			foreach(var pair in ovenItems.OrderBy(x=> x.Value.percent))			
-			{
-				if (pair.Value.needSplit)
-				{					
-					pair.Value.newSlots = (int)Math.Round(freeSlots * (pair.Value.percent / 100f));
-					pair.Value.newSlots = pair.Value.newSlots <= 0 ? 1 : pair.Value.newSlots;
-					occupNewSlots += pair.Value.newSlots;
-				}
-			}
-			
-			int terminate = 100;
-			while((occupNewSlots - freeSlots) > 0)
-			{
-				if (terminate <= 0)
-				{
-					instance.PrintError("Обнаружен бесконечный цикл!");
-					return false;
-				}
-				
-				foreach(var nfo in ovenItems.OrderByDescending(x=> x.Value.newSlots).Select(x=> x.Value).ToList())			
-				{
-					if (nfo.needSplit)
-					{
-						if (nfo.newSlots-1 <= 0)
-							return false;
-						
-						nfo.newSlots -= 1;
-						occupNewSlots -= 1;
-						break;
-					}
-				}
-				terminate--;
-			}
-			
-			return true;
-		}				
-		
-		private static bool IsUsedItemFromPosition(BaseOven oven, ref List<int> usedPos, ref int totalAmount, string key, ItemNfo nfo, int passSlots)
-		{						
-			var info = ItemManager.FindItemDefinition(key.Split('|')[0]);
-			
-			for(int jj=0;jj<nfo.positions.Count;jj++)
-			{												
-				if (usedPos.Contains(nfo.positions[jj])) continue;
-				if (totalAmount <= 0) break;
-										
-				var uItem = oven.inventory.itemList.FirstOrDefault(x=>x.position == nfo.positions[jj]);
-				if (uItem == null) continue;
-				
-				if (!nfo.needSplit && !IsNoStack(key))
-				{
-					if (totalAmount >= uItem.info.stackable)
-					{
-						uItem.amount = uItem.info.stackable;
-						totalAmount -= uItem.info.stackable;
-					}
-					else
-					{
-						uItem.amount = totalAmount;						
-						totalAmount = 0;
-					}
-				}
-				else
-				{
-					int splitAmount = (int)Math.Ceiling((float)totalAmount / (passSlots));
-					
-					if (splitAmount > info.stackable)
-						return false;
-					
-					if (totalAmount >= splitAmount)
-					{
-						uItem.amount = splitAmount;
-						totalAmount -= splitAmount;
-					}
-					else
-					{
-						uItem.amount = totalAmount;
-						totalAmount = 0;
-					}
-				}
-				
-				usedPos.Add(nfo.positions[jj]);
-				return true;
-			}						
-			
-			return false;
-		}
-		
-		private static bool IsCreateNewItem(ref List<Item> newItems, ref int totalAmount, string key, ItemNfo nfo, int passSlots)
-		{
-			var info = ItemManager.FindItemDefinition(key.Split('|')[0]);
-			
-			if (!nfo.needSplit)
-			{
-				if (totalAmount >= info.stackable)
-				{																								
-					var newItem = ItemManager.Create(info, info.stackable, nfo.skin);								
-					newItems.Add(newItem);								
-					totalAmount -= info.stackable;
-				}
-				else
-				{
-					var newItem = ItemManager.Create(info, totalAmount, nfo.skin);								
-					newItems.Add(newItem);								
-					totalAmount = 0;
-				}
-			}
-			else
-			{
-				int splitAmount = (int)Math.Ceiling((float)totalAmount / passSlots);
-				
-				if (splitAmount > info.stackable)
-					return false;
-				
-				if (totalAmount >= splitAmount)
-				{
-					var newItem = ItemManager.Create(info, splitAmount, nfo.skin);								
-					newItems.Add(newItem);								
-					totalAmount -= splitAmount;
-				}
-				else
-				{
-					var newItem = ItemManager.Create(info, totalAmount, nfo.skin);
-					newItems.Add(newItem);								
-					totalAmount = 0;
-				}
-			}
-			
-			return true;
-		}
-		
-		private static void DeleteLeftItemsFromPositions(BaseOven oven, List<int> usedPos, ItemNfo nfo)
-		{
-			if (oven == null) return;
-			
-			for(int jj=0;jj<nfo.positions.Count;jj++)
-			{
-				if (usedPos.Contains(nfo.positions[jj])) continue;
-				
-				var uItem = oven.inventory.itemList.FirstOrDefault(x=>x.position == nfo.positions[jj]);
-				if (uItem != null)
-				{
-					uItem.RemoveFromContainer();
-					uItem.Remove(0f);
-				}
-			}	
-		}
-		
-		private static void MoveNewItemsToContainer(ref List<Item> newItems, BaseOven oven)
-		{			
-			if (oven == null) return;
-			
-			foreach(var newItem in newItems)
-			{
-				if (newItem == null || oven == null) continue;
-				
-				if (!newItem.MoveToContainer(oven.inventory, -1, false))					
-				{					
-					instance.PrintWarning("Предмет не влез в контейнер и был выброшен!");
-					newItem.Drop(oven.transform.position, oven.dropVelocity + Vector3Ex.Range(-1f, 1f)); 					
-				}
-			}
-			
-			newItems.Clear();
-			
-			if (oven != null) 			
-				oven.inventory.MarkDirty();            
-		}				
-		
-		private static bool IsFirstItemMore(Item item1, Item item2, BaseOven oven)
-		{
-			foreach(var itemName in SortOrder[oven.ShortPrefabName])
-			{								
-				if (item1.info.shortname == itemName)
-				{
-					if (item2.info.shortname == itemName)
-					{
-						if (item1.amount >= item2.amount)
-							return true;
-						else
-							return false;
-					}
-					else
-						return true;
-				}
-				else				
-					if (item2.info.shortname == itemName)
-						return false;					
-			}
-						
-			return false;
-		}
-		
-		private static void SwapItems(Item item1, Item item2)
-		{
-			if (item1 == null || item2 == null) return;
-			var container1 = item1.parent;
-			var container2 = item2.parent;
-			if (container1 == null || container2 == null) return;
-			var slot1 = item1.position;
-			var slot2 = item2.position;
-			item1.RemoveFromContainer();
-			item2.RemoveFromContainer();
-			item1.MoveToContainer(container2, slot2);
-			item2.MoveToContainer(container1, slot1);
-		}
-		
-		private static void SortItemsInContainer(BaseOven oven)
-		{
-			if (oven == null) return;
-				
-			List<Item> Items = oven.inventory.itemList.ToList();												
-			
-			for(int jj=0;jj<Items.Count()-1;jj++)
-			{				
-				for(int ii=jj+1;ii<Items.Count();ii++)
-				{
-					if (!IsFirstItemMore(Items[jj], Items[ii], oven))
-					{																														
-						var tempItem = Items[ii];
-						Items[ii] = Items[jj];
-						Items[jj] = tempItem;						
-					}					
-				}
-			}									
-									
-			for(int pos=0;pos<Items.Count;pos++)
-			{
-				var item = oven.inventory.itemList.FirstOrDefault(x=>x.position == pos);
-				if (item != null)
-				{
-					if (Items[pos] != item)
-						SwapItems(Items[pos], item);										
-				}
-				else
-				{
-					Items[pos].RemoveFromContainer();
-					Items[pos].MoveToContainer(oven.inventory, pos);
-				}
-			}						
-			
-			Items.Clear();
-			oven.inventory.MarkDirty();  
-		}
-                
-		#endregion
-		
-		#region AutoAddFuel
-		
-		private static Dictionary<ItemDefinition, float> GetSmeltTimes(BaseOven oven)
+        private class PluginConfig
         {
-            ItemContainer container = oven.inventory;
-            var cookables = container.itemList.Where(item =>
+            //[JsonRequired]
+            public Vector2 UiPosition { get; set; } = new Vector2(0.6505f, 0.022f);
+        }
+
+        private class PlayerOptions
+        {
+            public bool Enabled;
+            public Dictionary<string, int> TotalStacks = new Dictionary<string, int>();
+        }
+
+        public enum MoveResult
+        {
+            Ok,
+            SlotsFilled,
+            NotEnoughSlots
+        }
+
+        private class Vector2Converter : JsonConverter
+        {
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
             {
-                ItemModCookable cookable = item.info.GetComponent<ItemModCookable>();
-                return cookable != null && CanCook(cookable, oven);
-            }).ToList();
-
-            if (cookables.Count == 0)
-                return new Dictionary<ItemDefinition, float>();
-
-            var distinctCookables = cookables.GroupBy(item => item.info, item => item).ToList();
-            Dictionary<ItemDefinition, int> amounts = new Dictionary<ItemDefinition, int>();
-
-            foreach (var group in distinctCookables)
-            {
-                int biggestAmount = group.Max(item => item.amount);
-                amounts.Add(group.Key, biggestAmount);
+                Vector2 vec = (Vector2)value;
+                serializer.Serialize(writer, new { vec.x, vec.y });
             }
 
-            var smeltTimes = amounts.ToDictionary(kv => kv.Key, kv => GetSmeltTime(kv.Key.GetComponent<ItemModCookable>(), kv.Value));
-            return smeltTimes;
+            public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+            {
+                Vector2 result = new Vector2();
+                JObject jVec = JObject.Load(reader);
+
+                result.x = jVec["x"].ToObject<float>();
+                result.y = jVec["y"].ToObject<float>();
+
+                return result;
+            }
+
+            public override bool CanConvert(Type objectType)
+            {
+                return objectType == typeof(Vector2);
+            }
         }
 
-		private static float GetSmeltTime(ItemModCookable cookable, int amount)
+        private Dictionary<ulong, PlayerOptions> allPlayerOptions => storedData.AllPlayerOptions;
+        private PluginConfig config;
+        private StoredData storedData;
+
+        private const string permUse = "furnacesplitter.use";
+
+        private readonly Dictionary<ulong, string> openUis = new Dictionary<ulong, string>();
+        private readonly Dictionary<BaseOven, List<BasePlayer>> looters = new Dictionary<BaseOven, List<BasePlayer>>();
+        private readonly Stack<BaseOven> queuedUiUpdates = new Stack<BaseOven>();
+
+        private readonly string[] compatibleOvens =
         {
-            float smeltTime = cookable.cookTime * amount;
-            return smeltTime;
-        }   
-		
-        private static bool CanCook(ItemModCookable cookable, BaseOven oven)
+            "bbq.deployed",
+            "campfire",
+            "fireplace.deployed",
+            "furnace",
+            "furnace.large",
+            "hobobarrel_static",
+            "refinery_small_deployed",
+            "skull_fire_pit"
+        };
+
+        private void OnPlayerDisconnected(BasePlayer player, string reason)
         {
-            return oven.cookingTemperature >= cookable.lowTemp && oven.cookingTemperature <= cookable.highTemp;
+            DestroyUI(player);
         }
-		
-        private static void AutoAddFuel(PlayerInventory playerInventory, BaseOven oven)
+
+        private void OnPlayerInit(BasePlayer player)
         {
-            int neededFuel = (int)Math.Ceiling(GetOvenFuelNeed(oven));
+            InitPlayer(player);
+        }
+
+        private void Init()
+        {
+            // Only add if it's not already been added in LoadDefaultConfig. That would be the case the first time the plugin is initialized.
+            if (Config.Settings.Converters.All(conv => conv.GetType() != typeof(Vector2Converter)))
+                Config.Settings.Converters.Add(new Vector2Converter());
+        }
+
+        private void Loaded()
+        {
+            storedData = Interface.Oxide.DataFileSystem.ReadObject<StoredData>(Name);
+
+            permission.RegisterPermission(permUse, this);
+
+            if (config == null)
+            {
+                // Default config not created, load existing config.
+                config = Config.ReadObject<PluginConfig>();
+            }
+            else
+            {
+                // Save default config.
+                Config.WriteObject(config);
+            }
+        }
+
+        #region Configuration
+
+        protected override void LoadDefaultConfig()
+        {
+            Config.Settings.Converters.Add(new Vector2Converter());
+            PrintWarning("Creating default config for FurnaceSplitter.");
+            config = new PluginConfig();
+        }
+
+        #endregion Configuration
+
+        private void OnServerInitialized()
+        {
+            foreach (BasePlayer player in Player.Players)
+            {
+                InitPlayer(player);
+            }
+
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                // English
+                { "turnon", "Turn On" },
+                { "turnoff", "Turn Off" },
+                { "title", "Furnace Splitter" },
+                { "eta", "ETA" },
+                { "totalstacks", "Total stacks" },
+                { "trim", "Trim fuel" },
+                { "lootsource_invalid", "Current loot source invalid" },
+                { "unsupported_furnace", "Unsupported furnace." },
+                { "nopermission", "You don't have permission to use this." }
+            }, this);
+        }
+
+        private void OnServerSave()
+        {
+            SaveData();
+        }
+
+        private void SaveData()
+        {
+            Interface.Oxide.DataFileSystem.WriteObject("FurnaceSplitter", storedData);
+        }
+
+        private void InitPlayer(BasePlayer player)
+        {
+            if (!allPlayerOptions.ContainsKey(player.userID))
+            {
+                allPlayerOptions[player.userID] = new PlayerOptions
+                {
+                    Enabled = true,
+                    TotalStacks = new Dictionary<string, int>()
+                };
+            }
+
+            var initialStackOptions = new Dictionary<string, int>
+            {
+                {"furnace", 3},
+                {"bbq.deployed", 9},
+                {"campfire", 2},
+                {"fireplace.deployed", 2},
+                {"furnace.large", 15},
+                {"hobobarrel_static", 2},
+                {"refinery_small_deployed", 3},
+                {"skull_fire_pit", 2}
+            };
+
+            PlayerOptions options = allPlayerOptions[player.userID];
+
+            foreach (var kv in initialStackOptions)
+            {
+                if (!options.TotalStacks.ContainsKey(kv.Key))
+                    options.TotalStacks.Add(kv.Key, kv.Value);
+            }
+        }
+
+        private void OnTick()
+        {
+            while (queuedUiUpdates.Count > 0)
+            {
+                BaseOven oven = queuedUiUpdates.Pop();
+
+                if (!oven || oven.IsDestroyed)
+                    continue;
+
+                OvenInfo ovenInfo = GetOvenInfo(oven);
+
+                GetLooters(oven)?.ForEach(plr =>
+                {
+                    if (plr && !plr.IsDestroyed)
+                    {
+                        CreateUi(plr, oven, ovenInfo);
+                    }
+                });
+            }
+        }
+
+        public OvenInfo GetOvenInfo(BaseOven oven)
+        {
+            OvenInfo result = new OvenInfo();
+            var smeltTimes = GetSmeltTimes(oven);
+
+            if (smeltTimes.Count > 0)
+            {
+                var longestStack = smeltTimes.OrderByDescending(kv => kv.Value).First();
+                float fuelUnits = oven.fuelType.GetComponent<ItemModBurnable>().fuelAmount;
+                float neededFuel = (float)Math.Ceiling(longestStack.Value * (oven.cookingTemperature / 200.0f) / fuelUnits);
+
+                result.FuelNeeded = neededFuel;
+                result.ETA = longestStack.Value;
+            }
+
+            return result;
+        }
+
+        private void Unload()
+        {
+            SaveData();
+
+            foreach (var kv in openUis.ToDictionary(kv => kv.Key, kv => kv.Value))
+            {
+                BasePlayer player = BasePlayer.FindByID(kv.Key);
+                DestroyUI(player);
+            }
+        }
+
+        private bool GetEnabled(BasePlayer player)
+        {
+            return allPlayerOptions[player.userID].Enabled;
+        }
+
+        private void SetEnabled(BasePlayer player, bool enabled)
+        {
+            allPlayerOptions[player.userID].Enabled = enabled;
+            CreateUiIfFurnaceOpen(player);
+        }
+
+        private bool IsSlotCompatible(Item item, BaseOven oven, ItemDefinition itemDefinition)
+        {
+            ItemModCookable cookable = item.info.GetComponent<ItemModCookable>();
+
+            if (item.amount < item.info.stackable && item.info == itemDefinition)
+                return true;
+
+            if (oven.allowByproductCreation && oven.fuelType.GetComponent<ItemModBurnable>().byproductItem == item.info)
+                return true;
+
+            if (cookable == null || cookable.becomeOnCooked == itemDefinition)
+                return true;
+
+            if (CanCook(cookable, oven))
+                return true;
+
+            return false;
+        }
+
+        private void OnConsumeFuel(BaseOven oven, Item fuel, ItemModBurnable burnable)
+        {
+            if (compatibleOvens.Contains(oven.ShortPrefabName))
+                queuedUiUpdates.Push(oven);
+        }
+
+        private List<BasePlayer> GetLooters(BaseOven oven)
+        {
+            if (looters.ContainsKey(oven))
+                return looters[oven];
+
+            return null;
+        }
+
+        private void AddLooter(BaseOven oven, BasePlayer player)
+        {
+            if (!looters.ContainsKey(oven))
+                looters[oven] = new List<BasePlayer>();
+
+            var list = looters[oven];
+            list.Add(player);
+        }
+
+        private void RemoveLooter(BaseOven oven, BasePlayer player)
+        {
+            if (!looters.ContainsKey(oven))
+                return;
+
+            looters[oven].Remove(player);
+        }
+
+        private object CanMoveItem(Item item, PlayerInventory inventory, uint targetContainer, int targetSlot)
+        {
+        	if(item == null || inventory == null)
+        		return null;
+            BasePlayer player = inventory.GetComponent<BasePlayer>();
+            if (player == null)
+                return null;
+
+            ItemContainer container = inventory.FindContainer(targetContainer);
+            ItemContainer originalContainer = item.GetRootContainer();
+            if(container == null || originalContainer == null) 
+            	return null;
+            Func<object> splitFunc = () =>
+            {
+                if (player == null || !HasPermission(player) || !GetEnabled(player))
+                    return null;
+
+                PlayerOptions playerOptions = allPlayerOptions[player.userID];
+
+                if (container == null || originalContainer == null || container == item.GetRootContainer())
+                    return null;
+
+                BaseOven oven = container.entityOwner as BaseOven;
+                ItemModCookable cookable = item.info.GetComponent<ItemModCookable>();
+
+                if (oven == null || cookable == null)
+                    return null;
+
+                int totalSlots = 2 + (oven.allowByproductCreation ? 1 : 0);
+
+                if (playerOptions.TotalStacks.ContainsKey(oven.ShortPrefabName))
+                {
+                    totalSlots = playerOptions.TotalStacks[oven.ShortPrefabName];
+                }
+
+                if (cookable.lowTemp > oven.cookingTemperature || cookable.highTemp < oven.cookingTemperature)
+                    return null;
+
+                MoveSplitItem(item, oven, totalSlots);
+                return true;
+            };
+
+            object returnValue = splitFunc();
+
+            if (HasPermission(player) && GetEnabled(player))
+            {
+                BaseOven oven = container?.entityOwner as BaseOven ?? item.GetRootContainer().entityOwner as BaseOven;
+
+                if (oven != null && compatibleOvens.Contains(oven.ShortPrefabName))
+                {
+                    if (returnValue is bool && (bool)returnValue)
+                        AutoAddFuel(inventory, oven);
+
+                    queuedUiUpdates.Push(oven);
+                }
+            }
+
+            return returnValue;
+        }
+
+        private MoveResult MoveSplitItem(Item item, BaseOven oven, int totalSlots)
+        {
+            ItemContainer container = oven.inventory;
+            int invalidItemsCount = container.itemList.Count(slotItem => !IsSlotCompatible(slotItem, oven, item.info));
+            int numOreSlots = Math.Min(container.capacity - invalidItemsCount, totalSlots);
+            int totalMoved = 0;
+            int totalAmount = Math.Min(item.amount + container.itemList.Where(slotItem => slotItem.info == item.info).Take(numOreSlots).Sum(slotItem => slotItem.amount), item.info.stackable * numOreSlots);
+
+            if (numOreSlots <= 0)
+            {
+                return MoveResult.NotEnoughSlots;
+            }
+
+            //Puts("---------------------------");
+
+            int totalStackSize = Math.Min(totalAmount / numOreSlots, item.info.stackable);
+            int remaining = totalAmount - totalAmount / numOreSlots * numOreSlots;
+
+            List<int> addedSlots = new List<int>();
+
+            //Puts("total: {0}, remaining: {1}, totalStackSize: {2}", totalAmount, remaining, totalStackSize);
+
+            List<OvenSlot> ovenSlots = new List<OvenSlot>();
+
+            for (int i = 0; i < numOreSlots; ++i)
+            {
+                Item existingItem;
+                int slot = FindMatchingSlotIndex(container, out existingItem, item.info, addedSlots);
+
+                if (slot == -1) // full
+                {
+                    return MoveResult.NotEnoughSlots;
+                }
+
+                addedSlots.Add(slot);
+
+                OvenSlot ovenSlot = new OvenSlot
+                {
+                    Position = existingItem?.position,
+                    Index = slot,
+                    Item = existingItem
+                };
+
+                int currentAmount = existingItem?.amount ?? 0;
+                int missingAmount = totalStackSize - currentAmount + (i < remaining ? 1 : 0);
+                ovenSlot.DeltaAmount = missingAmount;
+
+                //Puts("[{0}] current: {1}, delta: {2}, total: {3}", slot, currentAmount, ovenSlot.DeltaAmount, currentAmount + missingAmount);
+
+                if (currentAmount + missingAmount <= 0)
+                    continue;
+
+                ovenSlots.Add(ovenSlot);
+            }
+
+            foreach (OvenSlot slot in ovenSlots)
+            {
+                if (slot.Item == null)
+                {
+                    Item newItem = ItemManager.Create(item.info, slot.DeltaAmount, item.skin);
+                    slot.Item = newItem;
+                    newItem.MoveToContainer(container, slot.Position ?? slot.Index);
+                }
+                else
+                {
+                    slot.Item.amount += slot.DeltaAmount;
+                }
+
+                totalMoved += slot.DeltaAmount;
+            }
+
+            container.MarkDirty();
+
+            if (totalMoved >= item.amount)
+            {
+                item.Remove();
+                item.GetRootContainer()?.MarkDirty();
+                return MoveResult.Ok;
+            }
+            else
+            {
+                item.amount -= totalMoved;
+                item.GetRootContainer()?.MarkDirty();
+                return MoveResult.SlotsFilled;
+            }
+        }
+
+        private void AutoAddFuel(PlayerInventory playerInventory, BaseOven oven)
+        {
+            int neededFuel = (int)Math.Ceiling(GetOvenInfo(oven).FuelNeeded);
             neededFuel -= oven.inventory.GetAmount(oven.fuelType.itemid, false);
             var playerFuel = playerInventory.FindItemIDs(oven.fuelType.itemid);
 
@@ -643,54 +513,559 @@ namespace Oxide.Plugins
                 if (neededFuel <= 0)
                     break;
             }
-        }         
-		
-		private static float GetOvenFuelNeed(BaseOven oven)
+        }
+
+        private int FindMatchingSlotIndex(ItemContainer container, out Item existingItem, ItemDefinition itemType, List<int> indexBlacklist)
         {
-            float result = 0;
-            var smeltTimes = GetSmeltTimes(oven); 
+            existingItem = null;
+            int firstIndex = -1;
+            Dictionary<int, Item> existingItems = new Dictionary<int, Item>();
 
-            if (smeltTimes.Count > 0)
+            for (int i = 0; i < container.capacity; ++i)
             {
-                var longestStack = smeltTimes.OrderByDescending(kv => kv.Value).First();
-                float fuelUnits = oven.fuelType.GetComponent<ItemModBurnable>().fuelAmount * configData.SmeltRate; 
-                float neededFuel = (float)Math.Ceiling(longestStack.Value * (oven.cookingTemperature / 200.0f) / fuelUnits);
+                if (indexBlacklist.Contains(i))
+                    continue;
 
-                result = neededFuel;                
+                Item itemSlot = container.GetSlot(i);
+                if (itemSlot == null || itemType != null && itemSlot.info == itemType)
+                {
+                    if (itemSlot != null)
+                        existingItems.Add(i, itemSlot);
+
+                    if (firstIndex == -1)
+                    {
+                        existingItem = itemSlot;
+                        firstIndex = i;
+                    }
+                }
             }
 
-            return result;
-        } 
-		
-		#endregion
-		
-		#region Config        
-		
-		private void Init() => LoadVariables();
-		
-        private static ConfigData configData;
-		
-        private class ConfigData
-        {            
-			[JsonProperty(PropertyName = "Рейт плавки")]
-			public float SmeltRate;
-        }
-		
-        private void LoadVariables() => configData = Config.ReadObject<ConfigData>();        
-		
-        protected override void LoadDefaultConfig()
-        {
-            configData = new ConfigData
+            if (existingItems.Count <= 0 && firstIndex != -1)
             {
-                SmeltRate = 1f
-            };
-            SaveConfig(configData);
-			timer.Once(0.1f, ()=> SaveConfig(configData));
-        }        
-		
-        private void SaveConfig(ConfigData config) => Config.WriteObject(config, true);
-		
-        #endregion
-       
+                return firstIndex;
+            }
+            else if (existingItems.Count > 0)
+            {
+                var largestStackItem = existingItems.OrderByDescending(kv => kv.Value.amount).First();
+                existingItem = largestStackItem.Value;
+                return largestStackItem.Key;
+            }
+
+            existingItem = null;
+            return -1;
+        }
+
+        private void OnLootEntity(BasePlayer player, BaseEntity entity)
+        {
+            BaseOven oven = entity as BaseOven;
+
+            if (oven == null || !HasPermission(player) || !compatibleOvens.Contains(oven.ShortPrefabName))
+                return;
+
+            AddLooter(oven, player);
+            queuedUiUpdates.Push(oven);
+        }
+
+        private void OnLootEntityEnd(BasePlayer player, BaseCombatEntity entity)
+        {
+            BaseOven oven = entity as BaseOven;
+
+            if (oven == null || !compatibleOvens.Contains(oven.ShortPrefabName))
+                return;
+
+            DestroyUI(player);
+            RemoveLooter(oven, player);
+        }
+
+        private void OnEntityKill(BaseNetworkable networkable)
+        {
+            BaseOven oven = networkable as BaseOven;
+
+            if (oven != null)
+            {
+                DestroyOvenUI(oven);
+            }
+        }
+
+        private void OnOvenToggle(BaseOven oven, BasePlayer player)
+        {
+            if (compatibleOvens.Contains(oven.ShortPrefabName))
+                queuedUiUpdates.Push(oven);
+        }
+
+        private void CreateUiIfFurnaceOpen(BasePlayer player)
+        {
+            BaseOven oven = player.inventory.loot?.entitySource as BaseOven;
+
+            if (oven != null && compatibleOvens.Contains(oven.ShortPrefabName))
+                queuedUiUpdates.Push(oven);
+        }
+
+        private CuiElementContainer CreateUi(BasePlayer player, BaseOven oven, OvenInfo ovenInfo)
+        {
+            PlayerOptions options = allPlayerOptions[player.userID];
+            int totalSlots = GetTotalStacksOption(player, oven) ?? oven.inventory.capacity - (oven.allowByproductCreation ? 1 : 2);
+            string remainingTimeStr;
+            string neededFuelStr;
+
+            if (ovenInfo.ETA <= 0)
+            {
+                remainingTimeStr = "0s";
+                neededFuelStr = "0";
+            }
+            else
+            {
+                remainingTimeStr = FormatTime(ovenInfo.ETA);
+                neededFuelStr = ovenInfo.FuelNeeded.ToString("##,###");
+            }
+
+            string contentColor = "0.7 0.7 0.7 1.0";
+            int contentSize = 10;
+            string toggleStateStr = (!options.Enabled).ToString();
+            string toggleButtonColor = !options.Enabled
+                                        ? "0.415 0.5 0.258 0.4"
+                                        : "0.8 0.254 0.254 0.4";
+            string toggleButtonTextColor = !options.Enabled
+                                            ? "0.607 0.705 0.431"
+                                            : "0.705 0.607 0.431";
+            string buttonColor = "0.75 0.75 0.75 0.1";
+            string buttonTextColor = "0.77 0.68 0.68 1";
+
+            int nextDecrementSlot = totalSlots - 1;
+            int nextIncrementSlot = totalSlots + 1;
+
+            DestroyUI(player);
+
+            Vector2 uiPosition = config.UiPosition;
+            Vector2 uiSize = new Vector2(0.1785f, 0.111f);
+
+            CuiElementContainer result = new CuiElementContainer();
+            string rootPanelName = result.Add(new CuiPanel
+            {
+                Image = new CuiImageComponent
+                {
+                    Color = "0 0 0 0"
+                },
+                RectTransform =
+                {
+                    AnchorMin = uiPosition.x + " " + uiPosition.y,
+                    AnchorMax = uiPosition.x + uiSize.x + " " + (uiPosition.y + uiSize.y)
+                    //AnchorMin = "0.6505 0.022",
+                    //AnchorMax = "0.829 0.133"
+                }
+            }, "Hud.Menu");
+
+            string headerPanel = result.Add(new CuiPanel
+            {
+                Image = new CuiImageComponent
+                {
+                    Color = "0.75 0.75 0.75 0.1"
+                },
+                RectTransform =
+                {
+                    AnchorMin = "0 0.775",
+                    AnchorMax = "1 1"
+                }
+            }, rootPanelName);
+
+            // Header label
+            result.Add(new CuiLabel
+            {
+                RectTransform =
+                {
+                    AnchorMin = "0.051 0",
+                    AnchorMax = "1 0.95"
+                },
+                Text =
+                {
+                    Text = lang.GetMessage("title", this, player.UserIDString),
+                    Align = TextAnchor.MiddleLeft,
+                    Color = "0.77 0.7 0.7 1",
+                    FontSize = 13
+                }
+            }, headerPanel);
+
+            string contentPanel = result.Add(new CuiPanel
+            {
+                Image = new CuiImageComponent
+                {
+                    Color = "0.65 0.65 0.65 0.06"
+                },
+                RectTransform =
+                {
+                    AnchorMin = "0 0",
+                    AnchorMax = "1 0.74"
+                }
+            }, rootPanelName);
+
+            // ETA label
+            result.Add(new CuiLabel
+            {
+                RectTransform =
+                {
+                    AnchorMin = "0.02 0.7",
+                    AnchorMax = "0.98 1"
+                },
+                Text =
+                {
+                    Text = string.Format("{0}: " + (ovenInfo.ETA > 0 ? "~" : "") + remainingTimeStr + " (" + neededFuelStr +  " " + oven.fuelType.displayName.english.ToLower() + ")", lang.GetMessage("eta", this, player.UserIDString)),
+                    Align = TextAnchor.MiddleLeft,
+                    Color = contentColor,
+                    FontSize = contentSize
+                }
+            }, contentPanel);
+
+            // Toggle button
+            result.Add(new CuiButton
+            {
+                RectTransform =
+                {
+                    AnchorMin = "0.02 0.4",
+                    AnchorMax = "0.25 0.7"
+                },
+                Button =
+                {
+                    Command = "furnacesplitter.enabled " + toggleStateStr,
+                    Color = toggleButtonColor
+                },
+                Text =
+                {
+                    Align = TextAnchor.MiddleCenter,
+                    Text = options.Enabled ? lang.GetMessage("turnoff", this, player.UserIDString) : lang.GetMessage("turnon", this, player.UserIDString),
+                    Color = toggleButtonTextColor,
+                    FontSize = 11
+                }
+            }, contentPanel);
+
+            // Trim button
+            result.Add(new CuiButton
+            {
+                RectTransform =
+                {
+                    AnchorMin = "0.27 0.4",
+                    AnchorMax = "0.52 0.7"
+                },
+                Button =
+                {
+                    Command = "furnacesplitter.trim",
+                    Color = buttonColor
+                },
+                Text =
+                {
+                    Align = TextAnchor.MiddleCenter,
+                    Text = lang.GetMessage("trim", this, player.UserIDString),
+                    Color = contentColor,
+                    FontSize = 11
+                }
+            }, contentPanel);
+
+            // Decrease stack button
+            result.Add(new CuiButton
+            {
+                RectTransform =
+                {
+                    AnchorMin = "0.02 0.05",
+                    AnchorMax = "0.07 0.35"
+                },
+                Button =
+                {
+                    Command = "furnacesplitter.totalstacks " + nextDecrementSlot,
+                    Color = buttonColor
+                },
+                Text =
+                {
+                    Align = TextAnchor.MiddleCenter,
+                    Text = "<",
+                    Color = buttonTextColor,
+                    FontSize = contentSize
+                }
+            }, contentPanel);
+
+            // Empty slots label
+            result.Add(new CuiLabel
+            {
+                RectTransform =
+                {
+                    AnchorMin = "0.08 0.05",
+                    AnchorMax = "0.19 0.35"
+                },
+                Text =
+                {
+                    Align = TextAnchor.MiddleCenter,
+                    Text = totalSlots.ToString(),
+                    Color = contentColor,
+                    FontSize = contentSize
+                }
+            }, contentPanel);
+
+            // Increase stack button
+            result.Add(new CuiButton
+            {
+                RectTransform =
+                {
+                    AnchorMin = "0.19 0.05",
+                    AnchorMax = "0.25 0.35"
+                },
+                Button =
+                {
+                    Command = "furnacesplitter.totalstacks " + nextIncrementSlot,
+                    Color = buttonColor
+                },
+                Text =
+                {
+                    Align = TextAnchor.MiddleCenter,
+                    Text = ">",
+                    Color = buttonTextColor,
+                    FontSize = contentSize
+                }
+            }, contentPanel);
+
+            // Stack itemType label
+            result.Add(new CuiLabel
+            {
+                RectTransform =
+                {
+                    AnchorMin = "0.27 0.05",
+                    AnchorMax = "1 0.35"
+                },
+                Text =
+                {
+                    Align = TextAnchor.MiddleLeft,
+                    Text = string.Format("({0})", lang.GetMessage("totalstacks", this, player.UserIDString)),
+                    Color = contentColor,
+                    FontSize = contentSize
+                }
+            }, contentPanel);
+
+            openUis.Add(player.userID, rootPanelName);
+            CuiHelper.AddUi(player, result);
+            return result;
+        }
+
+        private string FormatTime(float totalSeconds)
+        {
+            double hours = Math.Floor(totalSeconds / 3600);
+            double minutes = Math.Floor(totalSeconds / 60 % 60);
+            float seconds = totalSeconds % 60;
+
+            if (hours <= 0 && minutes <= 0)
+                return seconds + "s";
+            if (hours <= 0)
+                return minutes + "m" + seconds + "s";
+            return hours + "h" + minutes + "m" + seconds + "s";
+        }
+
+        private Dictionary<ItemDefinition, float> GetSmeltTimes(BaseOven oven)
+        {
+            ItemContainer container = oven.inventory;
+            var cookables = container.itemList.Where(item =>
+            {
+                ItemModCookable cookable = item.info.GetComponent<ItemModCookable>();
+                return cookable != null && CanCook(cookable, oven);
+            }).ToList();
+
+            if (cookables.Count == 0)
+                return new Dictionary<ItemDefinition, float>();
+
+            var distinctCookables = cookables.GroupBy(item => item.info, item => item).ToList();
+            Dictionary<ItemDefinition, int> amounts = new Dictionary<ItemDefinition, int>();
+
+            foreach (var group in distinctCookables)
+            {
+                int biggestAmount = group.Max(item => item.amount);
+                amounts.Add(group.Key, biggestAmount);
+            }
+
+            var smeltTimes = amounts.ToDictionary(kv => kv.Key, kv => GetSmeltTime(kv.Key.GetComponent<ItemModCookable>(), kv.Value));
+            return smeltTimes;
+        }
+
+        private bool CanCook(ItemModCookable cookable, BaseOven oven)
+        {
+            return oven.cookingTemperature >= cookable.lowTemp && oven.cookingTemperature <= cookable.highTemp;
+        }
+
+        private float GetSmeltTime(ItemModCookable cookable, int amount)
+        {
+            float smeltTime = cookable.cookTime * amount;
+            return smeltTime;
+        }
+
+        private int? GetTotalStacksOption(BasePlayer player, BaseOven oven)
+        {
+            PlayerOptions options = allPlayerOptions[player.userID];
+
+            if (options.TotalStacks.ContainsKey(oven.ShortPrefabName))
+                return options.TotalStacks[oven.ShortPrefabName];
+
+            return null;
+        }
+
+        private void DestroyUI(BasePlayer player)
+        {
+            if (!openUis.ContainsKey(player.userID))
+                return;
+
+            string uiName = openUis[player.userID];
+
+            if (openUis.Remove(player.userID))
+                CuiHelper.DestroyUi(player, uiName);
+        }
+
+        private void DestroyOvenUI(BaseOven oven)
+        {
+            if (oven == null) throw new ArgumentNullException(nameof(oven));
+
+            foreach (KeyValuePair<ulong, string> kv in openUis.ToDictionary(kv => kv.Key, kv => kv.Value))
+            {
+                BasePlayer player = BasePlayer.FindByID(kv.Key);
+
+                BaseOven playerLootOven = player.inventory.loot?.entitySource as BaseOven;
+
+                if (oven == playerLootOven)
+                {
+                    DestroyUI(player);
+                    RemoveLooter(oven, player);
+                }
+            }
+        }
+
+        [ConsoleCommand("furnacesplitter.enabled")]
+        private void ConsoleCommand_Toggle(ConsoleSystem.Arg arg)
+        {
+            BasePlayer player = arg.Player();
+
+            if (!HasPermission(player))
+            {
+                player.ConsoleMessage(lang.GetMessage("nopermission", this, player.UserIDString));
+                return;
+            }
+
+            if (!arg.HasArgs())
+            {
+                player.ConsoleMessage(GetEnabled(player).ToString());
+                return;
+            }
+
+            bool enabled = arg.GetBool(0);
+            SetEnabled(player, enabled);
+            CreateUiIfFurnaceOpen(player);
+        }
+
+        [ConsoleCommand("furnacesplitter.totalstacks")]
+        private void ConsoleCommand_TotalStacks(ConsoleSystem.Arg arg)
+        {
+            BasePlayer player = arg.Player();
+            BaseOven lootSource = player.inventory.loot?.entitySource as BaseOven;
+
+            if (!HasPermission(player))
+            {
+                player.ConsoleMessage(lang.GetMessage("nopermission", this, player.UserIDString));
+                return;
+            }
+
+            if (lootSource == null || !compatibleOvens.Contains(lootSource.ShortPrefabName))
+            {
+                player.ConsoleMessage(lang.GetMessage("lootsource_invalid", this, player.UserIDString));
+                return;
+            }
+
+            string ovenName = lootSource.ShortPrefabName;
+            PlayerOptions playerOption = allPlayerOptions[player.userID];
+
+            if (playerOption.TotalStacks.ContainsKey(ovenName))
+            {
+                if (!arg.HasArgs())
+                {
+                    player.ConsoleMessage(playerOption.TotalStacks[ovenName].ToString());
+                }
+                else
+                {
+                    int newValue = (int)Mathf.Clamp(arg.GetInt(0), 0, lootSource.inventory.capacity);
+                    playerOption.TotalStacks[ovenName] = newValue;
+                }
+            }
+            else
+            {
+                Debug.LogWarning("[FurnaceSplitter] Unsupported furnace '" + ovenName + "'");
+                player.ConsoleMessage(lang.GetMessage("unsupported_furnace", this, player.UserIDString));
+            }
+
+            CreateUiIfFurnaceOpen(player);
+        }
+
+        [ConsoleCommand("furnacesplitter.trim")]
+        private void ConsoleCommand_Trim(ConsoleSystem.Arg arg)
+        {
+            BasePlayer player = arg.Player();
+            BaseOven lootSource = player.inventory.loot?.entitySource as BaseOven;
+
+            if (!HasPermission(player))
+            {
+                player.ConsoleMessage(lang.GetMessage("nopermission", this, player.UserIDString));
+                return;
+            }
+
+            if (lootSource == null || !compatibleOvens.Contains(lootSource.ShortPrefabName))
+            {
+                player.ConsoleMessage(lang.GetMessage("lootsource_invalid", this, player.UserIDString));
+                return;
+            }
+
+            OvenInfo ovenInfo = GetOvenInfo(lootSource);
+            var fuelSlots = lootSource.inventory.itemList.Where(item => item.info == lootSource.fuelType).ToList();
+            int totalFuel = fuelSlots.Sum(item => item.amount);
+            int toRemove = (int)Math.Floor(totalFuel - ovenInfo.FuelNeeded);
+
+            if (toRemove <= 0)
+                return;
+
+            foreach (Item fuelItem in fuelSlots)
+            {
+                int toTake = Math.Min(fuelItem.amount, toRemove);
+                toRemove -= toTake;
+
+                Vector3 dropPosition = player.GetDropPosition();
+                Vector3 dropVelocity = player.GetDropVelocity();
+
+                if (toTake >= fuelItem.amount)
+                {
+                    if (!player.inventory.GiveItem(fuelItem))
+                        fuelItem.Drop(dropPosition, dropVelocity, Quaternion.identity);
+                }
+                else
+                {
+                    Item splitItem = fuelItem.SplitItem(toTake);
+                    if (!player.inventory.GiveItem(splitItem))
+                        splitItem.Drop(dropPosition, dropVelocity, Quaternion.identity);
+                }
+
+                if (toRemove <= 0)
+                    break;
+            }
+        }
+
+        private bool HasPermission(BasePlayer player)
+        {
+            return permission.UserHasPermission(player.UserIDString, permUse);
+        }
+
+        #region Exposed plugin methods
+
+        [HookMethod("MoveSplitItem")]
+        public string Hook_MoveSplitItem(Item item, BaseOven oven, int totalSlots)
+        {
+            MoveResult result = MoveSplitItem(item, oven, totalSlots);
+            return result.ToString();
+        }
+
+        [HookMethod("GetOvenInfo")]
+        public JObject Hook_GetOvenInfo(BaseOven oven)
+        {
+            OvenInfo ovenInfo = GetOvenInfo(oven);
+            return JObject.FromObject(ovenInfo);
+        }
+
+        #endregion Exposed plugin methods
     }
 }

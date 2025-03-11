@@ -7,7 +7,7 @@ using Random = UnityEngine.Random;
 
 namespace Oxide.Plugins
 {
-    [Info("Quick Smelt", "Iv Misticos", "5.1.1")]
+    [Info("Quick Smelt", "Iv Misticos", "5.1.2")]
     [Description("Increases the speed of the furnace smelting")]
     class QuickSmelt : RustPlugin
     {
@@ -32,24 +32,24 @@ namespace Oxide.Plugins
             [JsonProperty(PropertyName = "Speed Multipliers", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public Dictionary<string, float> SpeedMultipliers = new Dictionary<string, float>
             {
-                {"global", 2.0f},
-                {"furnace.shortname", 2.0f}
+                {"global", 1.0f},
+                {"furnace.shortname", 1.0f}
             };
 
             [JsonProperty(PropertyName = "Fuel Usage Speed Multipliers",
                 ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public Dictionary<string, float> FuelSpeedMultipliers = new Dictionary<string, float>
             {
-                {"global", 2.0f},
-                {"furnace.shortname", 2.0f}
+                {"global", 1.0f},
+                {"furnace.shortname", 1.0f}
             };
 
             [JsonProperty(PropertyName = "Fuel Usage Multipliers",
                 ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public Dictionary<string, int> FuelUsageMultipliers = new Dictionary<string, int>
             {
-                {"global", 2},
-                {"furnace.shortname", 2}
+                {"global", 1},
+                {"furnace.shortname", 1}
             };
 
             [JsonProperty(PropertyName = "Output Multipliers", ObjectCreationHandling = ObjectCreationHandling.Replace)]
@@ -59,13 +59,13 @@ namespace Oxide.Plugins
                     {
                         "global", new Dictionary<string, float>
                         {
-                            {"global", 2.0f}
+                            {"global", 1.0f}
                         }
                     },
                     {
                         "furnace.shortname", new Dictionary<string, float>
                         {
-                            {"item.shortname", 2.0f}
+                            {"item.shortname", 1.0f}
                         }
                     }
                 };
@@ -115,7 +115,7 @@ namespace Oxide.Plugins
             [JsonProperty(PropertyName = "Debug")]
             public bool Debug = false;
         }
-        
+
         protected override void LoadConfig()
         {
             base.LoadConfig();
@@ -126,13 +126,9 @@ namespace Oxide.Plugins
             }
             catch
             {
-                Config.WriteObject(_config, false, $"{Interface.GetMod().ConfigDirectory}/{Name}.jsonError");
-                PrintError("The configuration file contains an error and has been replaced with a default config.\n" +
-                           "The error configuration file was saved in the .jsonError extension");
+                PrintError("Your configuration file contains an error. Using default configuration values.");
                 LoadDefaultConfig();
             }
-
-            SaveConfig();
         }
 
         protected override void LoadDefaultConfig() => _config = new Configuration();
@@ -309,25 +305,25 @@ namespace Oxide.Plugins
                     
                 if (!_config.SpeedMultipliers.TryGetValue(Furnace.ShortPrefabName, out modifierF) &&
                     !_config.SpeedMultipliers.TryGetValue("global", out modifierF))
-                    modifierF = 2.0f;
+                    modifierF = 1.0f;
 
                 _speedMultiplier =  0.5f / modifierF;
                 
                 if (!_config.FuelSpeedMultipliers.TryGetValue(Furnace.ShortPrefabName, out modifierF) &&
                     !_config.FuelSpeedMultipliers.TryGetValue("global", out modifierF))
-                    modifierF = 2.0f;
+                    modifierF = 1.0f;
 
                 _fuelSpeedMultiplier = modifierF;
                 
                 if (!_config.FuelUsageMultipliers.TryGetValue(Furnace.ShortPrefabName, out modifierI) &&
                     !_config.FuelUsageMultipliers.TryGetValue("global", out modifierI))
-                    modifierI = 2;
+                    modifierI = 1;
 
                 _fuelUsageMultiplier = modifierI;
                 
                 if (!_config.SmeltingFrequencies.TryGetValue(Furnace.ShortPrefabName, out modifierI) &&
                     !_config.SmeltingFrequencies.TryGetValue("global", out modifierI))
-                    modifierI = 2;
+                    modifierI = 1;
 
                 _smeltingFrequency = modifierI;
 

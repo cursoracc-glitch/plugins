@@ -1,89 +1,51 @@
+﻿using System.Collections.Generic;
+using System.Linq;
 using Network;
 using Newtonsoft.Json;
-using Oxide.Core;
-using Oxide.Core.Configuration;
 using Oxide.Core.Libraries.Covalence;
 using Oxide.Game.Rust.Cui;
 using Rust;
-using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Vanish", "Whispers88", "1.8.0")]
-    [Description("Allows players with permission to become invisible")]
-    public class Vanish : CovalencePlugin
+    [Info("Vanish", "Fartus", "1.0.0")]
+    [Description("Позволяет игрокам с разрешением становиться невидимыми")]
+    public class Vanish : RustPlugin
     {
         #region Configuration
-        private readonly List<BasePlayer> _hiddenPlayers = new List<BasePlayer>();
-        private List<ulong> _hiddenOffline = new List<ulong>();
-        private static readonly List<string> _registeredhooks = new List<string> { "CanUseLockedEntity", "OnPlayerDisconnected", "OnEntityTakeDamage" };
-        private static readonly DamageTypeList _EmptyDmgList = new DamageTypeList();
-        CuiElementContainer cachedVanishUI = null;
-
 
         private Configuration config;
 
         public class Configuration
         {
-            [JsonProperty("NoClip on Vanish (runs noclip command)")]
-            public bool NoClipOnVanish = true;
+            [JsonProperty(PropertyName = "Ссылка на картинку индикатора (.png или .jpg)")]
+            public string ImageUrlIcon;
 
-            [JsonProperty("Use OnEntityTakeDamage hook (Set to true to enable use of vanish.damage perm. Set to false for better performance)")]
-            public bool UseOnEntityTakeDamage = false;
+            [JsonProperty(PropertyName = "Включить звуковой эффект (true/false)")]
+            public bool PlaySoundEffect;
 
-            [JsonProperty("Use CanUseLockedEntity hook (Allows vanished players with the perm vanish.unlock to bypass locks. Set to false for better performance)")]
-            public bool UseCanUseLockedEntity = true;
+            [JsonProperty(PropertyName = "Показать индикатор невидимости (true/false)")]
+            public bool ShowGuiIcon;
 
-            [JsonProperty("Keep a vanished player hidden on disconnect")]
-            public bool HideOnDisconnect = true;
+            [JsonProperty(PropertyName = "Время в режиме невидимости (в секундах, 0 - отключить)")]
+            public int VanishTimeout;
 
-            [JsonProperty("Turn off fly hack detection for players in vanish")]
-            public bool AntiHack = true;
+            [JsonProperty(PropertyName = "Включить видимость для админов (true/false)")]
+            public bool VisibleToAdmin;
 
-            [JsonProperty("Disable metabolism in vanish")]
-            public bool Metabolism = true;
-
-            [JsonProperty("Reset hydration and health on un-vanishing (resets to pre-vanished state)")]
-            public bool MetabolismReset = true;
-
-            [JsonProperty("Enable vanishing and reappearing sound effects")]
-            public bool EnableSound = true;
-
-            [JsonProperty("Make sound effects public")]
-            public bool PublicSound = false;
-
-            [JsonProperty("Enable chat notifications")]
-            public bool EnableNotifications = true;
-
-            [JsonProperty("Sound effect to use when vanishing")]
-            public string VanishSoundEffect = "assets/prefabs/npc/patrol helicopter/effects/rocket_fire.prefab";
-
-            [JsonProperty("Sound effect to use when reappearing")]
-            public string ReappearSoundEffect = "assets/prefabs/npc/patrol helicopter/effects/rocket_fire.prefab";
-
-            [JsonProperty("Enable GUI")]
-            public bool EnableGUI = true;
-
-            [JsonProperty("Icon URL (.png or .jpg)")]
-            public string ImageUrlIcon = "https://imgur.com/qnYh2sK";
-
-            [JsonProperty("Image Color")]
-            public string ImageColor = "1 1 1 0.3";
-
-            [JsonProperty("Image AnchorMin")]
-            public string ImageAnchorMin = "0.175 0.017";
-
-            [JsonProperty("Image AnchorMax")]
-            public string ImageAnchorMax = "0.22 0.08";
-
-            public string ToJson() => JsonConvert.SerializeObject(this);
-
-            public Dictionary<string, object> ToDictionary() => JsonConvert.DeserializeObject<Dictionary<string, object>>(ToJson());
+            public static Configuration DefaultConfig()
+            {
+                return new Configuration
+                {
+                    ImageUrlIcon = "https://i.imgur.com/5vjIch3.png",
+                    PlaySoundEffect = true,
+                    ShowGuiIcon = true,
+                    VanishTimeout = 0,
+                    VisibleToAdmin = true
+                };
+            }
         }
-
-        protected override void LoadDefaultConfig() => config = new Configuration();
 
         protected override void LoadConfig()
         {
@@ -91,748 +53,441 @@ namespace Oxide.Plugins
             try
             {
                 config = Config.ReadObject<Configuration>();
-                if (config == null)
-                {
-                    throw new JsonException();
-                }
-
-                if (config.ImageUrlIcon == "https://imgur.com/qnYh2sK.png")
-                {
-                    config.ImageUrlIcon = "https://imgur.com/qnYh2sK.png";
-                    config.ImageColor = "1 1 1 0.8";
-                    if (config.ImageAnchorMin == "0.175 0.017" && config.ImageAnchorMax == "0.22 0.08")
-                    {
-                        config.ImageAnchorMin = "0.18 0.017";
-                        config.ImageAnchorMax = "0.22 0.09";
-                    }
-                    LogWarning("Updating image Icon URL");
-                    SaveConfig();
-                }
-
-                if (!config.ToDictionary().Keys.SequenceEqual(Config.ToDictionary(x => x.Key, x => x.Value).Keys))
-                {
-                    LogWarning("Configuration appears to be outdated; updating and saving");
-                    SaveConfig();
-                }
+                if (config?.PlaySoundEffect == null) LoadDefaultConfig();
             }
             catch
             {
-                LogWarning($"Configuration file {Name}.json is invalid; using defaults");
+                PrintWarning($"Не удалось прочитать oxide/config/{Name}.json, создание нового файла конфигурации...");
                 LoadDefaultConfig();
             }
+            SaveConfig();
         }
 
-        protected override void SaveConfig()
-        {
-            LogWarning($"Configuration changes saved to {Name}.json");
-            Config.WriteObject(config, true);
-        }
+        protected override void LoadDefaultConfig() => config = Configuration.DefaultConfig();
 
-        private void Loaded()
-        {
-            _hiddenOfflineData = Interface.Oxide.DataFileSystem.GetFile("VanishPlayers");
-            LoadData();
-        }
+        protected override void SaveConfig() => Config.WriteObject(config);
 
-        #endregion Configuration
+        #endregion
 
         #region Localization
 
-        protected override void LoadDefaultMessages()
+        private new void LoadDefaultMessages()
         {
             lang.RegisterMessages(new Dictionary<string, string>
             {
-                ["VanishCommand"] = "vanish",
-                ["Vanished"] = "Vanish: <color=orange> Enabled </color>",
-                ["Reappear"] = "Vanish: <color=orange> Disabled </color>",
-                ["NoPerms"] = "You do not have permission to do this",
-                ["PermanentVanish"] = "You are in a permanent vanish mode",
-
+                ["CantDamageBuilds"] = "Вы не можете нанести урон зданиям в режиме невидимки",
+                ["CantHurtAnimals"] = "Вы не можете нанести урон животным в режиме невидимки",
+                ["CantHurtPlayers"] = "Вы не можете нанести урон игрокам в режиме невидимки",
+                ["CantUseTeleport"] = "Вы не можете телепортироваться в режиме невидимки",
+                ["CommandVanish"] = "vanish",
+                ["NotAllowed"] = "Извините, Вы не можете использовать '{0}' сейчас!",
+                ["PlayersOnly"] = "Комманда '{0}' может использоваться только игроком",
+                ["VanishDisabled"] = "Вы вышли из режима невидимки!",
+                ["VanishEnabled"] = "Вы вошли в режим невидимки!",
+                ["VanishTimedOut"] = "Таймаут режима невидимки!",
+                ["NotAllowedPerm"] = "У вас нет разрешения! ({0})",
             }, this);
         }
 
-        #endregion Localization
+        #endregion
 
         #region Initialization
 
-        private const string PermAllow = "vanish.allow";
-        private const string PermUnlock = "vanish.unlock";
-        private const string PermDamage = "vanish.damage";
-        private const string PermVanish = "vanish.permanent";
+        private const string defaultEffect = "assets/prefabs/npc/patrol helicopter/effects/rocket_fire.prefab";
+        private const string VANISH_PERM = "vanish.use";
+		private const string VANISH_DAMAGE_PERM = "vanish.damage.all";
+		private const string VANISH_ABILITIES_PERM = "vanish.abilities.all";
 
         private void Init()
         {
-            cachedVanishUI = CreateVanishUI();
+            permission.RegisterPermission(VANISH_PERM, this);
+			permission.RegisterPermission(VANISH_DAMAGE_PERM, this);
+			permission.RegisterPermission(VANISH_ABILITIES_PERM, this);
 
-            // Register universal chat/console commands
-            AddLocalizedCommand(nameof(VanishCommand));
+            AddCommandAliases("CommandVanish", "VanishCommand");
 
-            // Register permissions for commands
-            permission.RegisterPermission(PermAllow, this);
-            permission.RegisterPermission(PermUnlock, this);
-            permission.RegisterPermission(PermDamage, this);
-            permission.RegisterPermission(PermVanish, this);
-
-            //Unsubscribe from hooks
-            UnSubscribeFromHooks();
-
-            if (!config.UseOnEntityTakeDamage)
-            {
-                _registeredhooks.Remove("OnEntityTakeDamage");
-            }
-
-            if (!config.UseCanUseLockedEntity)
-            {
-                _registeredhooks.Remove("CanUseLockedEntity");
-            }
-
-            foreach (var player in BasePlayer.activePlayerList)
-            {
-                if (!HasPerm(player.UserIDString, PermVanish) || IsInvisible(player)) continue;
-                Disappear(player);
-            }
-
+            Unsubscribe();
         }
 
-        private void Unload()
+        private void Subscribe()
         {
-            foreach (var p in _hiddenPlayers)
-            {
-                if (!_hiddenOffline.Contains(p.userID))
-                    _hiddenOffline.Add(p.userID);
-            }
-
-            SaveData();
-
-            for (int i = _hiddenPlayers.Count - 1; i > -1; i--)
-            {
-                if (_hiddenPlayers[i] == null) continue;
-                Reappear(_hiddenPlayers[i]);
-            }
+            Subscribe(nameof(CanNetworkTo));
+            Subscribe(nameof(CanBeTargeted));
+            Subscribe(nameof(CanBradleyApcTarget));
+            Subscribe(nameof(OnNpcPlayerTarget));
+            Subscribe(nameof(OnNpcTarget));
+            Subscribe(nameof(OnEntityTakeDamage));
+            Subscribe(nameof(OnPlayerSleepEnded));
+            Subscribe(nameof(OnPlayerLand));
         }
 
-        private DynamicConfigFile _hiddenOfflineData;
-
-        private void LoadData()
+        private void Unsubscribe()
         {
-            try
-            {
-                _hiddenOffline = _hiddenOfflineData.ReadObject<List<ulong>>();
-            }
-            catch
-            {
-                _hiddenOffline = new List<ulong>();
-            }
-
-            foreach (var playerid in _hiddenOffline)
-            {
-                BasePlayer player = BasePlayer.FindByID(playerid);
-                if (player == null) continue;
-                if (IsInvisible(player))
-                    continue;
-
-                if (!player.IsConnected)
-                {
-                    List<Connection> connections = new List<Connection>();
-                    foreach (var con in Net.sv.connections)
-                    {
-                        if (con.connected && con.isAuthenticated && con.player is BasePlayer && con.player != player)
-                            connections.Add(con);
-                    }
-                    player.OnNetworkSubscribersLeave(connections);
-                    player.DisablePlayerCollider();
-                    player.syncPosition = false;
-                    player.limitNetworking = true;
-                }
-                else
-                {
-                    Disappear(player);
-                }
-            }
+            Unsubscribe(nameof(CanNetworkTo));
+            Unsubscribe(nameof(CanBeTargeted));
+            Unsubscribe(nameof(CanBradleyApcTarget));
+            Unsubscribe(nameof(OnNpcPlayerTarget));
+            Unsubscribe(nameof(OnNpcTarget));
+            Unsubscribe(nameof(OnEntityTakeDamage));
+            Unsubscribe(nameof(OnPlayerSleepEnded));
+            Unsubscribe(nameof(OnPlayerLand));
         }
 
-        private void SaveData()
+        #endregion
+
+        #region Data Storage
+
+        private class OnlinePlayer
         {
-            _hiddenOfflineData.WriteObject(_hiddenOffline);
+            public BasePlayer Player;
+            public bool IsInvisible;
         }
 
-        #endregion Initialization
+        [OnlinePlayers]
+        private Hash<BasePlayer, OnlinePlayer> onlinePlayers = new Hash<BasePlayer, OnlinePlayer>();
+
+        #endregion
 
         #region Commands
-        private void VanishCommand(IPlayer iplayer, string command, string[] args)
+
+        private void VanishCommand(IPlayer player, string command, string[] args)
         {
-            BasePlayer player = (BasePlayer)iplayer.Object;
-            if (player == null) return;
-            if (!HasPerm(player.UserIDString, PermAllow))
+            var basePlayer = player.Object as BasePlayer;
+            if (basePlayer == null)
             {
-                if (config.EnableNotifications) Message(player.IPlayer, "NoPerms");
+                player.Reply(Lang("PlayersOnly", player.Id, command));
                 return;
             }
-            if (HasPerm(player.UserIDString, PermVanish))
+
+            if (!player.HasPermission(VANISH_PERM))
             {
-                if (config.EnableNotifications) Message(player.IPlayer, "PermanentVanish");
+                Message(player, Lang("NotAllowedPerm", player.Id, VANISH_PERM));
                 return;
             }
-            if (IsInvisible(player)) Reappear(player);
-            else Disappear(player);
+
+            if (config.PlaySoundEffect) Effect.server.Run(defaultEffect, basePlayer.transform.position);
+            if (IsInvisible(basePlayer)) Reappear(basePlayer);
+            else Disappear(basePlayer);
         }
 
-        private void Reappear(BasePlayer player)
+        #endregion
+
+        #region Vanishing Act
+
+        private void Disappear(BasePlayer basePlayer)
         {
-            if (Interface.CallHook("OnVanishReappear", player) != null) return;
-            if (config.AntiHack) player.ResetAntiHack();
-
-            player.syncPosition = true;
-            VanishPositionUpdate vanishPositionUpdate;
-
-            if (player.TryGetComponent<VanishPositionUpdate>(out vanishPositionUpdate))
-                UnityEngine.Object.Destroy(vanishPositionUpdate);
-
-
-            //metabolism
-            if (config.Metabolism)
+            var connections = new List<Connection>();
+            foreach (var target in BasePlayer.activePlayerList)
             {
-                player.metabolism.temperature.min = -100;
-                player.metabolism.temperature.max = 100;
-                player.metabolism.radiation_poison.max = 500;
-                player.metabolism.oxygen.min = 0;
-                player.metabolism.calories.min = 0;
-                player.metabolism.wetness.max = 1;
-            }
-            if (config.MetabolismReset)
-            {
-                MetabolismValues value;
+                if (basePlayer == target || !target.IsConnected) continue;
+                if (config.VisibleToAdmin && target.IPlayer.IsAdmin) continue;
 
-                if (_storedMetabolism.TryGetValue(player, out value))
-                {
-                    player.health = value.health;
-                    player.metabolism.hydration.value = value.hydration;
-                }
-                _storedMetabolism.Remove(player);
+                connections.Add(target.net.connection);
             }
 
-            player.metabolism.isDirty = true;
-            player.metabolism.SendChangesToClient();
-
-            player._limitedNetworking = false;
-
-            _hiddenPlayers.Remove(player);
-            player.EnablePlayerCollider();
-            player.UpdateNetworkGroup();
-            player.SendNetworkUpdate();
-            player.GetHeldEntity()?.SendNetworkUpdate();
-
-            //Un-Mute Player Effects
-            player.drownEffect.guid = "28ad47c8e6d313742a7a2740674a25b5";
-            player.fallDamageEffect.guid = "ca14ed027d5924003b1c5d9e523a5fce";
-
-            if (_hiddenPlayers.Count == 0) UnSubscribeFromHooks();
-
-            if (config.EnableSound)
+            var held = basePlayer.GetHeldEntity();
+            if (held != null)
             {
-                if (config.PublicSound)
-                {
-                    Effect.server.Run(config.ReappearSoundEffect, player.transform.position);
-                }
-                else
-                {
-                    SendEffect(player, config.ReappearSoundEffect);
-                }
+                held.SetHeld(false);
+                held.UpdateVisiblity_Invis();
+                held.SendNetworkUpdate();
             }
-            CuiHelper.DestroyUi(player, "VanishUI");
 
-            if (config.NoClipOnVanish && player.IsFlying) player.SendConsoleCommand("noclip");
+            if (Net.sv.write.Start())
+            {
+                Net.sv.write.PacketID(Network.Message.Type.EntityDestroy);
+                Net.sv.write.EntityID(basePlayer.net.ID);
+                Net.sv.write.UInt8((byte)BaseNetworkable.DestroyMode.None);
+                Net.sv.write.Send(new SendInfo(connections));
+            }
 
-            if (config.EnableNotifications) Message(player.IPlayer, "Reappear");
+            basePlayer.UpdatePlayerCollider(false);
+
+            if (config.ShowGuiIcon) VanishGui(basePlayer);
+            onlinePlayers[basePlayer].IsInvisible = true;
+            Message(basePlayer.IPlayer, "VanishEnabled");
+
+            if (config.VanishTimeout > 0f) timer.Once(config.VanishTimeout, () =>
+            {
+                if (!onlinePlayers[basePlayer].IsInvisible) return;
+
+                Reappear(basePlayer);
+                Message(basePlayer.IPlayer, "VanishTimedOut");
+            });
+
+            Subscribe();
+
+            BaseEntity.Query.Server.RemovePlayer(basePlayer);
+            Puts("Removed Player From Animal Grid");
         }
 
-        private class MetabolismValues
+        // Hide from other players
+        private object CanNetworkTo(BaseNetworkable entity, BasePlayer target)
         {
-            public float health;
-            public float hydration;
+            var basePlayer = entity as BasePlayer ?? (entity as HeldEntity)?.GetOwnerPlayer();
+            if (basePlayer == null || target == null || basePlayer == target) return null;
+            if (config.VisibleToAdmin && target.IPlayer.IsAdmin) return null;
+            if (IsInvisible(basePlayer)) return false;
+
+            return null;
         }
 
-        private Dictionary<BasePlayer, MetabolismValues> _storedMetabolism = new Dictionary<BasePlayer, MetabolismValues>();
-        private void Disappear(BasePlayer player)
+        // Hide from helis/turrets
+        private object CanBeTargeted(BaseCombatEntity entity)
         {
-            if (!_hiddenPlayers.Contains(player))
-                _hiddenPlayers.Add(player);
+            var basePlayer = entity as BasePlayer;
+            if (basePlayer != null && IsInvisible(basePlayer)) return false;
 
-            if (Interface.CallHook("OnVanishDisappear", player) != null) return;
-
-            if (config.AntiHack)
-                player.PauseFlyHackDetection(float.MaxValue);
-
-            VanishPositionUpdate vanishPositionUpdate;
-            if (player.TryGetComponent<VanishPositionUpdate>(out vanishPositionUpdate))
-                UnityEngine.Object.Destroy(vanishPositionUpdate);
-
-            player.gameObject.AddComponent<VanishPositionUpdate>();
-
-            //metabolism
-            if (config.Metabolism)
-            {
-                player.metabolism.temperature.min = 20;
-                player.metabolism.temperature.max = 20;
-                player.metabolism.radiation_poison.max = 0;
-                player.metabolism.oxygen.min = 1;
-                player.metabolism.wetness.max = 0;
-                player.metabolism.calories.min = player.metabolism.calories.value;
-                player.metabolism.isDirty = true;
-                player.metabolism.SendChangesToClient();
-            }
-            if (config.MetabolismReset && !player._limitedNetworking)
-                _storedMetabolism[player] = new MetabolismValues() { health = player.health, hydration = player.metabolism.hydration.value };
-
-            List<Connection> connections = new List<Connection>();
-            foreach (var con in Net.sv.connections)
-            {
-                if (con.connected && con.isAuthenticated && con.player is BasePlayer && con.player != player)
-                    connections.Add(con);
-            }
-            player.OnNetworkSubscribersLeave(connections);
-            player.DisablePlayerCollider();
-            player.syncPosition = false;
-
-            player._limitedNetworking = true;
-
-            //Mute Player Effects
-            player.fallDamageEffect = new GameObjectRef();
-            player.drownEffect = new GameObjectRef();
-
-            if (_hiddenPlayers.Count == 1) SubscribeToHooks();
-
-            if (config.EnableSound)
-            {
-                if (config.PublicSound)
-                {
-                    Effect.server.Run(config.VanishSoundEffect, player.transform.position);
-                }
-                else
-                {
-                    SendEffect(player, config.VanishSoundEffect);
-                }
-            }
-
-            if (config.NoClipOnVanish && !player.IsFlying && !player.isMounted) player.SendConsoleCommand("noclip");
-
-            if (config.EnableGUI)
-            {
-                CuiHelper.AddUi(player, cachedVanishUI);
-            }
-
-            if (config.EnableNotifications) Message(player.IPlayer, "Vanished");
+            return null;
         }
 
-        #endregion Commands
-
-        #region Hooks
-        private void OnPlayerConnected(BasePlayer player)
+        // Hide from the bradley APC
+        private object CanBradleyApcTarget(BradleyAPC apc, BaseEntity entity)
         {
-            if (_hiddenOffline.Contains(player.userID))
+            var basePlayer = entity as BasePlayer;
+            if (basePlayer != null && IsInvisible(basePlayer)) return false;
+
+            return null;
+        }
+
+        // Hide from the patrol helicopter
+        private object CanHelicopterTarget(PatrolHelicopterAI heli, BasePlayer basePlayer)
+        {
+            if (IsInvisible(basePlayer)) return false;
+
+            return null;
+        }
+
+        // Hide from scientist NPCs
+        private object OnNpcPlayerTarget(NPCPlayerApex npc, BaseEntity entity)
+        {
+            var basePlayer = entity as BasePlayer;
+            if (basePlayer != null && IsInvisible(basePlayer)) return 0f;
+
+            return null;
+        }
+
+        // Hide from all other NPCs
+        private object OnNpcTarget(BaseNpc npc, BaseEntity entity)
+        {
+            var basePlayer = entity as BasePlayer;
+            if (basePlayer != null && IsInvisible(basePlayer)) return 0f;
+
+            return null;
+        }
+
+        private void OnPlayerSleepEnded(BasePlayer basePlayer)
+        {
+            if (IsInvisible(basePlayer)) // TODO: Add persistence permission check
             {
-                _hiddenOffline.Remove(player.userID);
-                if (HasPerm(player.UserIDString, PermAllow))
-                    Disappear(player);
-                return;
+                Disappear(basePlayer);
+                // TODO: Send message that still vanished
             }
-            if (HasPerm(player.UserIDString, PermVanish))
+        }
+
+        private object OnPlayerLand(BasePlayer player, float num)
+        {
+            if (IsInvisible(player))
             {
-                Disappear(player);
+                return false;
             }
+            return null;
         }
 
         private object CanUseLockedEntity(BasePlayer player, BaseLock baseLock)
         {
-            if (!player.limitNetworking) return null;
-            if (HasPerm(player.UserIDString, PermUnlock)) return true;
-            if (config.EnableNotifications) Message(player.IPlayer, "NoPerms");
+            if (IsInvisible(player))
+            {
+                if (permission.UserHasPermission(player.UserIDString, VANISH_ABILITIES_PERM) || player.IsImmortal())
+                {
+                    return true;
+                }
+            }
             return null;
         }
 
-        private object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
-        {
-            BasePlayer attacker = info?.InitiatorPlayer;
-            BasePlayer victim = entity?.ToPlayer();
-            if (!IsInvisible(victim) && !IsInvisible(attacker)) return null;
-            if (attacker == null) return null;
-            if (IsInvisible(attacker) && HasPerm(attacker.UserIDString, PermDamage)) return null;
-            info.damageTypes = _EmptyDmgList;
-            info.HitMaterial = 0;
-            info.PointStart = Vector3.zero;
-            info.HitEntity = null;
-            return true;
-        }
+        #endregion
 
-        private void OnPlayerDisconnected(BasePlayer player, string reason)
-        {
-            if (!IsInvisible(player)) return;
+        #region Reappearing Act
 
-            if (!config.HideOnDisconnect && !HasPerm(player.UserIDString, PermVanish))
-                Reappear(player);
-            else
+        private void Reappear(BasePlayer basePlayer)
+        {
+            onlinePlayers[basePlayer].IsInvisible = false;
+            basePlayer.SendNetworkUpdate();
+
+            var held = basePlayer.GetHeldEntity();
+            if (held != null)
             {
-                float terrainY = TerrainMeta.HeightMap.GetHeight(player.transform.position);
-                if (player.transform.position.y > terrainY)
-                    player.transform.position = new Vector3(player.transform.position.x, terrainY, player.transform.position.z);
-
-                if (!_hiddenOffline.Contains(player.userID))
-                    _hiddenOffline.Add(player.userID);
-
-                _hiddenPlayers.Remove(player);
-                VanishPositionUpdate t;
-                if (player.TryGetComponent<VanishPositionUpdate>(out t))
-                    UnityEngine.Object.Destroy(t);
+                held.UpdateVisibility_Hand();
+                held.SendNetworkUpdate();
             }
-            if (_hiddenPlayers.Count == 0) UnSubscribeFromHooks();
-            CuiHelper.DestroyUi(player, "VanishUI");
-            CuiHelper.DestroyUi(player, "VanishColliderUI");
+
+            basePlayer.UpdatePlayerCollider(true);
+
+            string gui;
+            if (guiInfo.TryGetValue(basePlayer.userID, out gui)) CuiHelper.DestroyUi(basePlayer, gui);
+            Puts("Added Player From Animal Grid");
+            //Add player back to Grid so AI can find it
+            BaseEntity.Query.Server.AddPlayer(basePlayer);
+
+            Message(basePlayer.IPlayer, "VanishDisabled");
+            if (onlinePlayers.Values.Count(p => p.IsInvisible) <= 0) Unsubscribe(nameof(CanNetworkTo));
         }
 
-        private void OnPlayerSpectate(BasePlayer player, string spectateFilter)
+        #endregion
+
+        #region GUI Indicator
+
+        private Dictionary<ulong, string> guiInfo = new Dictionary<ulong, string>();
+
+        private void VanishGui(BasePlayer basePlayer)
         {
-            VanishPositionUpdate vanishPositionUpdate;
-            if (!player.TryGetComponent<VanishPositionUpdate>(out vanishPositionUpdate)) return;
-            UnityEngine.Object.Destroy(vanishPositionUpdate);
-        }
+            string gui;
+            if (guiInfo.TryGetValue(basePlayer.userID, out gui)) CuiHelper.DestroyUi(basePlayer, gui);
 
-        private void OnPlayerSpectateEnd(BasePlayer player, string spectateFilter)
-        {
-            if (!player._limitedNetworking) return;
+            var elements = new CuiElementContainer();
+            guiInfo[basePlayer.userID] = CuiHelper.GetGuid();
 
-            VanishPositionUpdate vanishPositionUpdate;
-            if (!player.TryGetComponent<VanishPositionUpdate>(out vanishPositionUpdate))
-                player.gameObject.AddComponent<VanishPositionUpdate>().EndSpectate();
-        }
-
-        private object OnPlayerColliderEnable(BasePlayer player, CapsuleCollider collider) => IsInvisible(player) ? (object)true : null;
-
-        #endregion Hooks
-
-        #region GUI
-        private CuiElementContainer CreateVanishUI()
-        {
-            CuiElementContainer elements = new CuiElementContainer();
-            string panel = elements.Add(new CuiPanel
-            {
-                Image = { Color = "0.5 0.5 0.5 0.0" },
-                RectTransform = { AnchorMin = config.ImageAnchorMin, AnchorMax = config.ImageAnchorMax }
-            }, "Hud.Menu", "VanishUI");
             elements.Add(new CuiElement
             {
-                Parent = panel,
+                Name = guiInfo[basePlayer.userID],
                 Components =
                 {
-                    new CuiRawImageComponent {Color = config.ImageColor, Url = config.ImageUrlIcon},
-                    new CuiRectTransformComponent {AnchorMin = "0 0", AnchorMax = "1 1"}
+                    new CuiRawImageComponent { Color = "1 1 1 0.3", Url = config.ImageUrlIcon },
+                    new CuiRectTransformComponent { AnchorMin = "0.262 0.026",  AnchorMax = "0.3 0.092" }
                 }
             });
-            return elements;
+
+            CuiHelper.AddUi(basePlayer, elements);
         }
 
-        #endregion GUI
+        #endregion
 
-        #region Monobehaviour
-        public class VanishPositionUpdate : FacepunchBehaviour
+        #region Damage Blocking
+
+        private object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
         {
-            private BasePlayer player;
-            private static int Layermask = LayerMask.GetMask(LayerMask.LayerToName((int)Layer.Construction), LayerMask.LayerToName((int)Layer.Deployed), LayerMask.LayerToName((int)Layer.Vehicle_World), LayerMask.LayerToName((int)Layer.Player_Server));
-            LootableCorpse corpse;
-            GameObject child;
-            SphereCollider col;
-            int LayerReserved1 = (int)Layer.Reserved1;
+            var basePlayer = (info?.Initiator as BasePlayer) ?? entity as BasePlayer;
+            if (basePlayer == null || !basePlayer.IsConnected || !onlinePlayers[basePlayer].IsInvisible) return null;
 
-            private void Awake()
+            var player = basePlayer.IPlayer;
+
+            // Block damage to animals
+            if (entity is BaseNpc)
             {
-                player = GetComponent<BasePlayer>();
-                player.transform.localScale = Vector3.zero;
-                BaseEntity.Query.Server.RemovePlayer(player);
-                CreateChildGO();
+                if (player.HasPermission(VANISH_DAMAGE_PERM)) return null;
+
+                Message(player, "CantHurtAnimals");
+                return true;
             }
 
-            private void FixedUpdate()
+            // Block damage to buildings
+            if (!(entity is BasePlayer))
             {
-                if (player == null) return;
+                if (player.HasPermission(VANISH_DAMAGE_PERM)) return null;
 
-                if (corpse != null && !player.inventory.loot.IsLooting())
-                    corpse.Kill();
-
-                if (!player.serverInput.WasJustReleased(BUTTON.RELOAD)) return;
-
-                RaycastHit raycastHit;
-                if (!Physics.Raycast(player.eyes.HeadRay(), out raycastHit, 5f, Layermask))
-                    return;
-
-                BaseEntity entity = raycastHit.GetEntity() as BaseEntity;
-
-                if (entity == null) return;
-                if (entity as StorageContainer != null)
-                {
-                    StorageContainer container = (StorageContainer)entity;
-                    entity.SendAsSnapshot(player.Connection);
-                    player.inventory.loot.AddContainer(container.inventory);
-                    player.inventory.loot.entitySource = container;
-                    player.inventory.loot.PositionChecks = false;
-                    player.inventory.loot.MarkDirty();
-                    player.inventory.loot.SendImmediate();
-                    player.ClientRPCPlayer<string>(null, player, "RPC_OpenLootPanel", "generic_resizable");
-                    return;
-                }
-
-                if (entity as BasePlayer != null)
-                {
-                    BasePlayer targetplayer = (BasePlayer)entity;
-                    corpse = GameManager.server.CreateEntity(StringPool.Get(2604534927), Vector3.zero) as LootableCorpse;
-                    corpse.CancelInvoke("RemoveCorpse");
-                    corpse.syncPosition = false;
-                    corpse.limitNetworking = true;
-                    corpse.playerName = targetplayer.displayName;
-                    corpse.playerSteamID = 0;
-                    corpse.enableSaving = false;
-                    corpse.Spawn();
-                    corpse.SetFlag(BaseEntity.Flags.Locked, true);
-                    Buoyancy bouyancy;
-                    if (corpse.TryGetComponent<Buoyancy>(out bouyancy))
-                    {
-                        Destroy(bouyancy);
-                    }
-                    Rigidbody ridgidbody;
-                    if (corpse.TryGetComponent<Rigidbody>(out ridgidbody))
-                    {
-                        Destroy(ridgidbody);
-                    }
-
-                    corpse.SendAsSnapshot(player.Connection);
-
-                    player.inventory.loot.AddContainer(targetplayer.inventory.containerMain);
-                    player.inventory.loot.AddContainer(targetplayer.inventory.containerWear);
-                    player.inventory.loot.AddContainer(targetplayer.inventory.containerBelt);
-                    player.inventory.loot.entitySource = corpse;
-                    player.inventory.loot.PositionChecks = false;
-                    player.inventory.loot.MarkDirty();
-                    player.inventory.loot.SendImmediate();
-                    player.ClientRPCPlayer<string>(null, player, "RPC_OpenLootPanel", "player_corpse");
-                    return;
-                }
-
-                if (entity as Door != null)
-                {
-                    Door door = (Door)entity;
-                    if (door.IsOpen())
-                    {
-                        door.SetOpen(false, true);
-                    }
-                    else
-                    {
-                        door.SetOpen(true, false);
-                    }
-                    return;
-                }
-
-                BaseMountable component = entity.GetComponent<BaseMountable>();
-                if (!component)
-                {
-                    BaseVehicle componentInParent = entity.GetComponentInParent<BaseVehicle>();
-                    if (componentInParent)
-                    {
-                        if (!componentInParent.isServer)
-                        {
-                            componentInParent = BaseNetworkable.serverEntities.Find(componentInParent.net.ID) as BaseVehicle;
-                        }
-                        componentInParent.AttemptMount(player, true);
-                        return;
-                    }
-                }
-
-                if (component && !component.isServer)
-                {
-                    component = BaseNetworkable.serverEntities.Find(component.net.ID) as BaseMountable;
-                }
-                if (component)
-                {
-                    component.AttemptMount(player, true);
-                }
-
+                Message(player, "CantDamageBuilds");
+                return true;
             }
 
-            private void UpdatePos()
+            // Block damage to players
+            if (info?.Initiator is BasePlayer)
             {
-                if (player == null || player.IsSpectating())
-                    return;
+                if (player.HasPermission(VANISH_DAMAGE_PERM)) return null;
 
-                using (TimeWarning.New("UpdateVanishGroup"))
-                    player.net.UpdateGroups(player.transform.position);
+                Message(player, "CantHurtPlayers");
+                return true;
             }
 
-            void OnTriggerEnter(Collider col)
+            if (basePlayer == info.HitEntity)
             {
-                TriggerParent triggerParent = col.GetComponentInParent<TriggerParent>();
-                if (triggerParent != null)
+                // Block damage to self
+                if (player.HasPermission(VANISH_ABILITIES_PERM))
                 {
-                    triggerParent.OnEntityEnter(player);
-                    return;
-                }
-                TriggerWorkbench triggerWorkbench = col.GetComponentInParent<TriggerWorkbench>();
-                if (triggerWorkbench != null)
-                {
-                    player.EnterTrigger(triggerWorkbench);
-                    player.nextCheckTime = float.MaxValue;
-                    player.cachedCraftLevel = triggerWorkbench.parentBench.Workbenchlevel;
-                    player.SetPlayerFlag(BasePlayer.PlayerFlags.Workbench1, player.cachedCraftLevel == 1f);
-                    player.SetPlayerFlag(BasePlayer.PlayerFlags.Workbench2, player.cachedCraftLevel == 2f);
-                    player.SetPlayerFlag(BasePlayer.PlayerFlags.Workbench3, player.cachedCraftLevel == 3f);
+                    info.damageTypes = new DamageTypeList();
+                    info.HitMaterial = 0;
+                    info.PointStart = Vector3.zero;
+                    return true;
                 }
             }
 
-            void OnTriggerExit(Collider col)
-            {
-                TriggerParent triggerParent = col.GetComponentInParent<TriggerParent>();
-                if (triggerParent != null)
-                {
-                    triggerParent.OnEntityLeave(player);
-                    return;
-                }
-                TriggerWorkbench triggerWorkbench = col.GetComponentInParent<TriggerWorkbench>();
-                if (triggerWorkbench != null)
-                {
-                    player.LeaveTrigger(triggerWorkbench);
-                    player.cachedCraftLevel = 0f;
-                    player.SetPlayerFlag(BasePlayer.PlayerFlags.Workbench1, false);
-                    player.SetPlayerFlag(BasePlayer.PlayerFlags.Workbench2, false);
-                    player.SetPlayerFlag(BasePlayer.PlayerFlags.Workbench3, false);
-                    player.nextCheckTime = Time.realtimeSinceStartup;
-                    return;
-                }
-            }
-
-            public void EndSpectate()
-            {
-                InvokeRepeating(RespawnCheck, 1f, 0.5f);
-            }
-
-            public void RespawnCheck()
-            {
-                if (player == null || !player.IsAlive()) return;
-                CancelInvoke(RespawnCheck);
-                player.SetPlayerFlag(BasePlayer.PlayerFlags.Spectating, false);
-                player.SendNetworkUpdateImmediate();
-                CreateChildGO();
-            }
-
-            public void CreateChildGO()
-            {
-                if (player == null || player.IsSpectating())
-                    return;
-
-                player.transform.localScale = Vector3.zero;
-                child = gameObject.CreateChild();
-                col = child.AddComponent<SphereCollider>();
-                child.layer = LayerReserved1;
-                child.transform.localScale = Vector3.zero;
-                col.isTrigger = true;
-                player.lastAdminCheatTime = float.MaxValue;
-                InvokeRepeating("UpdatePos", 1f, 5f);
-            }
-
-            private void OnDestroy()
-            {
-                CancelInvoke(UpdatePos);
-
-                if (corpse != null)
-                    corpse.Kill();
-
-                if (player != null)
-                {
-                    if (player.IsConnected)
-                        player.Connection.active = true;
-
-                    BaseEntity.Query.Server.AddPlayer(player);
-                    player.lastAdminCheatTime = Time.realtimeSinceStartup;
-                    player.transform.localScale = new Vector3(1, 1, 1);
-
-                    //Reset Triggers
-                    if (player?.triggers != null)
-                    {
-                        for (int i = player.triggers.Count - 1; i >= 0; i--)
-                        {
-                            if (player.triggers[i] is TriggerWorkbench)
-                            {
-                                player.triggers[i].OnEntityLeave(player);
-                                player.triggers.RemoveAt(i);
-                            }
-                        }
-                    }
-
-                    //Rest Workbench Level
-                    player.cachedCraftLevel = 0f;
-                    player.SetPlayerFlag(BasePlayer.PlayerFlags.Workbench1, false);
-                    player.SetPlayerFlag(BasePlayer.PlayerFlags.Workbench2, false);
-                    player.SetPlayerFlag(BasePlayer.PlayerFlags.Workbench3, false);
-                    player.nextCheckTime = Time.realtimeSinceStartup;
-                }
-
-                if (col != null)
-                    Destroy(col);
-                if (child != null)
-                    Destroy(child);
-
-                GameObject.Destroy(this);
-            }
-
+            return null;
         }
 
-        #endregion Monobehaviour
+        #endregion
+
+        #region Weapon Blocking
+
+        private void OnPlayerTick(BasePlayer basePlayer)
+        {
+            if (!onlinePlayers[basePlayer].IsInvisible) return;
+
+            var held = basePlayer.GetHeldEntity();
+            if (held != null && basePlayer.IPlayer.HasPermission(VANISH_ABILITIES_PERM)) held.SetHeld(false);
+        }
+
+        #endregion
+
+        #region Teleport Blocking
+
+        private object CanTeleport(BasePlayer basePlayer)
+        {
+            if (onlinePlayers[basePlayer] == null)
+            {
+                return null;
+            }
+
+            //Ignore for normal teleport plugins
+            if (!onlinePlayers[basePlayer].IsInvisible)
+            {
+                return null;
+            }
+
+            var canTeleport = basePlayer.IPlayer.HasPermission(VANISH_ABILITIES_PERM);
+            return !canTeleport ? Lang("CantUseTeleport", basePlayer.UserIDString) : null;
+        }
+
+        #endregion
+
+        #region Persistence Handling
+
+        private void OnPlayerInit(BasePlayer basePlayer)
+        {
+            // TODO: Persistence permission check and handling
+        }
+
+        #endregion
+
+        #region Cleanup
+
+        private void Unload()
+        {
+            foreach (var basePlayer in BasePlayer.activePlayerList)
+            {
+                string gui;
+                if (guiInfo.TryGetValue(basePlayer.userID, out gui)) CuiHelper.DestroyUi(basePlayer, gui);
+            }
+        }
+
+        #endregion
 
         #region Helpers
 
-        private void AddLocalizedCommand(string command)
+        private void AddCommandAliases(string key, string command)
         {
-            foreach (string language in lang.GetLanguages(this))
+            foreach (var language in lang.GetLanguages(this))
             {
-                Dictionary<string, string> messages = lang.GetMessages(language, this);
-                foreach (KeyValuePair<string, string> message in messages)
-                {
-                    if (!message.Key.Equals(command)) continue;
-
-                    if (string.IsNullOrEmpty(message.Value)) continue;
-
-                    AddCovalenceCommand(message.Value, command);
-                }
+                var messages = lang.GetMessages(language, this);
+                foreach (var message in messages.Where(m => m.Key.Equals(key))) AddCovalenceCommand(message.Value, command);
             }
         }
 
-        private bool HasPerm(string id, string perm) => permission.UserHasPermission(id, perm);
+        private string Lang(string key, string id = null, params object[] args) => string.Format(lang.GetMessage(key, this, id), args);
 
-        private string GetLang(string langKey, string playerId = null, params object[] args) => string.Format(lang.GetMessage(langKey, this, playerId), args);
+        private void Message(IPlayer player, string key, params object[] args) => player.Reply(Lang(key, player.Id, args));
 
-        private void Message(IPlayer player, string langKey, params object[] args)
-        {
-            if (player.IsConnected) player.Message(GetLang(langKey, player.Id, args));
-        }
+        private bool IsInvisible(BasePlayer player) => onlinePlayers[player]?.IsInvisible ?? false;
 
-        private bool IsInvisible(BasePlayer player) => player?._limitedNetworking ?? false;
-
-        private void UnSubscribeFromHooks()
-        {
-            foreach (var hook in _registeredhooks)
-                Unsubscribe(hook);
-        }
-
-        private void SubscribeToHooks()
-        {
-            foreach (var hook in _registeredhooks)
-                Subscribe(hook);
-        }
-
-        private static void SendEffect(BasePlayer player, string sound) => EffectNetwork.Send(new Effect(sound, player, 0, Vector3.zero, Vector3.forward), player.net.connection);
-
-
-        #endregion Helpers
-
-        #region Public Helpers
-        public void _Disappear(BasePlayer basePlayer) => Disappear(basePlayer);
-        public void _Reappear(BasePlayer basePlayer) => Reappear(basePlayer);
-        public bool _IsInvisible(BasePlayer basePlayer) => IsInvisible(basePlayer);
         #endregion
     }
 }

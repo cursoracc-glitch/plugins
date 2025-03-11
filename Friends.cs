@@ -1,1677 +1,3367 @@
-    using System;
-    using System.Linq;
-    using System.Collections.Generic;
-    using System.Globalization;
-    using Oxide.Core;
-    using Newtonsoft.Json;
-    using Oxide.Core.Plugins;
-    using Oxide.Game.Rust.Cui;
-    using ProtoBuf;
-    using UnityEngine;
+using Oxide.Game.Rust.Cui;
+using UnityEngine;
+using System.Linq;
+using System.Collections.Generic;
+using Oxide.Core;
+using Newtonsoft.Json;
+using System.Text;
+using Oxide.Core.Plugins;
 
-    namespace Oxide.Plugins
+namespace Oxide.Plugins
+{
+    [Info("Friends", "walkinrey", "1.1.1f")]
+    public class Friends : RustPlugin
     {
-        /* Based on version 1.0.5 by Nimant */
-        [Info("Friends", "Nimant, Ryamkk", "1.1.0")]
-        class Friends : RustPlugin
+        [PluginReference] private Plugin ImageLibrary;
+
+        private Dictionary<ulong, string> _lastInput = new Dictionary<ulong, string>();
+        private Dictionary<ulong, int> _viewingNow = new Dictionary<ulong, int>();
+        private Dictionary<ulong, ulong> _pendingRequests = new Dictionary<ulong, ulong>();
+
+        private Dictionary<ulong, float> _requestCooldown = new Dictionary<ulong, float>();
+
+        private const string _middleAnchor = "0.5 0.5";
+
+        #region Конфиг
+
+        private Configuration _config;
+
+        private class Configuration
         {
-            [PluginReference] private Plugin ImageLibrary;
-            
-            public string Sprite = "assets/content/ui/ui.background.tile.psd";
-            public string Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat";
-            
-            public string Title = "ПОИСК ТИМЕЙТА";
-            public string Description = "Выберите игрока из списка либо воспользуйтесь быстрым поиском";
-            
-            private static Dictionary<ulong, List<ulong>> FriendsData = new Dictionary<ulong, List<ulong>>();
-            private static Dictionary<ulong, List<ulong>> FriendsWipeData = new Dictionary<ulong, List<ulong>>();
-            private static Dictionary<ulong, PlayerInfo>  PlayerTempData = new Dictionary<ulong, PlayerInfo>();
-            private static Dictionary<ulong, List<ulong>> FriendsWaitAccept = new Dictionary<ulong, List<ulong>>();
-            private static Dictionary<ulong, List<PlayerEntry>> friends = new Dictionary<ulong, List<PlayerEntry>>();
-            
-            private class PlayerEntry
+            [JsonProperty("Кнопки быстрого доступа, слева от кнопки удалить (макс. 3)")]
+            public List<FriendButton> friendButtons = new List<FriendButton>();
+
+            [JsonProperty("Настройка задержек")]
+            public CooldownSetup cooldowns = new CooldownSetup();
+
+            [JsonProperty("Настройка интерфейса")]
+            public GUISetup gui = new GUISetup();
+
+            [JsonProperty("Настройки логирования")]
+            public LogOptions logs = new LogOptions();
+
+            [JsonProperty("Время на принятие заявки в друзья")]
+            public float addTime = 30f;
+
+            [JsonProperty("Максимальное кол-во друзей")]
+            public int maxFriends = 35;
+
+            public class LogOptions
             {
-                public string name;
-                public ulong id;
+                [JsonProperty("Включить логирование в файл?")]
+                public bool enableLogs = false;
+
+                [JsonProperty("Логировать о добавлении в друзья?")]
+                public bool logAddFriends = true;
+
+                [JsonProperty("Логировать о удалении из друзей?")]
+                public bool logRemoveFriends = true;
+
+                [JsonProperty("Логировать о игнорировании запроса в друзья?")]
+                public bool logIgnoreRequest = true;
+
+                [JsonProperty("Логировать о добавлении шкафа в дата-файл игрока?")]
+                public bool logCupboardAdd = true;
+
+                [JsonProperty("Логировать о добавлении турели в дата-файл игрока?")]
+                public bool logTurretsAdd = true;
             }
 
-            public string Layer = "Friend.Menu";
-            public string LayerSearch = "Friend.Search";
-            public class ButtonEntry
+            public class FriendButton
             {
-                public string Name;
-                public string Sprite;
-                public string Command;
-                public string Color;
-            }
-            
-            private class PlayerInfo
-            {
-                public Dictionary<ulong, long> RemoveFriends = new Dictionary<ulong, long>();
-                public int CountAddFriends;
-                public long LastRemoveFriends;
-                
-                public bool TurrentAuthorization = false;
-                public bool AttackFriend = false;
-                public bool CodeAuthorization = false;
+                [JsonProperty("Отображаемое название")]
+                public string name = "Телепорт";
+
+                [JsonProperty("Исполняемая чатовая команда")]
+                public string command = "tpr %FRIEND_ID% %FRIEND_NAME%";
             }
 
-            private void Init()
+            public class CooldownSetup
             {
-                LoadVariables();
-                LoadData();
-                LoadWipeData();
-                LoadTmpData();          
-                LoadDefaultMessages();
+                [JsonProperty("Стандартная задержка на добавление в друзья")]
+                public float cooldown = 60f;
+
+                [JsonProperty("Задержка на добавление в друзья по пермишону")]
+                public Dictionary<string, float> permissionCooldown = new Dictionary<string, float>();
             }
-            
-            private void Unload()
+
+            public class GUISetup
             {
-                foreach (var player in BasePlayer.activePlayerList)
+                [JsonProperty("Цвет задней панели (при использовании картинки используется для указания ее цвета)")]
+                public string bgColor = "#242424";
+
+                [JsonProperty("Цвет основной панели")]
+                public string panelMainColor = "#333232";
+
+                [JsonProperty("Цвет второстепенных панелей")]
+                public string panelSecondColor = "#424242";
+
+                [JsonProperty("Цвет кнопок перелистывания, панели информации о друзьях и опций")]
+                public string panelThirdColor = "#525252";
+
+                [JsonProperty("Цвет кнопок включить, отправить заявку в друзья")]
+                public string greenButtonsColor = "#27ae60";
+
+                [JsonProperty("Цвет кнопок выключить, удалить, закрыть")]
+                public string redButtonsColor = "#e74c3c";
+
+                [JsonProperty("Цвет дополнительных кнопок")]
+                public string additionalButtonsColor = "#7f8c8d";
+
+                [JsonProperty("Положение панели запроса в друзья")]
+                public CuiRectTransformComponent panelRequest = new CuiRectTransformComponent();
+
+                [JsonProperty("Картинка заднего фона")]
+                public BackgroundImage image = new BackgroundImage();
+
+                public class BackgroundImage
                 {
-                    CuiHelper.DestroyUi(player, LayerSearch);
-                    CuiHelper.DestroyUi(player, Layer);
-                }
-                
-                SaveWipeData();
-            }
-            
-            private void OnServerSave() => SaveWipeData();
-            
-            private void OnNewSave()
-            {                               
-                PlayerTempData.Clear();
-                SaveTmpData();
-                
-                foreach(var pair in FriendsWipeData)
-                {
-                    if (FriendsData.ContainsKey(pair.Key)) FriendsData[pair.Key] = pair.Value;
-                    else FriendsData.Add(pair.Key, pair.Value);
-                }
-                SaveData();
-                
-                FriendsWipeData.Clear();
-                SaveWipeData();
-            }
-            
-            private void OnPlayerConnected(BasePlayer player) => LoadFriendList(player.userID);     
-            
-            private void OnServerInitialized()
-            {
-                if (5 > 0) timer.Every(5, () => { friends.Clear(); });
-                
-                foreach (var player in BasePlayer.activePlayerList)  
-                    OnPlayerConnected(player);                                    
-            }
-            
-            private object OnTurretTarget(AutoTurret turret, BaseCombatEntity targ)
-            {
-                if (!ShareCodeLocks || !(targ is BasePlayer) || turret.OwnerID <= 0) return null;
-                var player = (BasePlayer) targ;
-                if (turret.IsAuthed(player) || !HasFriend(turret.OwnerID, player.userID)) return null;
-                turret.authorizedPlayers.Add(new PlayerNameID
-                {
-                    userid = player.userID,
-                    username = player.displayName
-                });
-                return false;
-            }
-            
-            public Dictionary<BasePlayer, int> CooldownList = new Dictionary<BasePlayer, int>();
-            
-            private double GrabCurrentTime() => DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1, 0, 0, 0)).TotalSeconds;
-            
-            private bool FriendsSD(BasePlayer player, ulong friend)
-            {
-                return RelationshipManager.Instance.FindTeam(player.userID)?.members?.Contains(friend) == true;
-            }
-            
-            void OnEntityTakeDamage(BaseCombatEntity vic, HitInfo info)
-            {
-                try
-                {
-                    if (vic != null && vic is BasePlayer && info?.Initiator != null && info.Initiator is BasePlayer && vic != info.Initiator)
-                    {
-                        BasePlayer vitim = vic as BasePlayer;
-                        if (vitim == null) return;
-                        BasePlayer iniciator = info.Initiator as BasePlayer;
-                        if (iniciator == null) return;
-                        if (HasFriend(iniciator.userID, vitim.userID))
-                        {
-                            if (IsFriend(iniciator.userID, vitim.userID))
-                            {
-                                info.damageTypes?.ScaleAll(0f);
-                                iniciator.ChatMessage(string.Format($"Игрок {0} Ваш друг, вы неможете его ранить.", vitim.displayName));
-                            }
-                        }
-                    }
-                }
-                catch (NullReferenceException)
-                {
+                    [JsonProperty("Использовать картинку для заднего фона?")]
+                    public bool enableImage = false;
+
+                    [JsonProperty("Ссылка на картинку")]
+                    public string imageUrl = "";
                 }
             }
 
-            private bool ShareCodeLocks = true;
-            private object CanUseLockedEntity(BasePlayer player, BaseLock @lock)
+            public static Configuration GetDefault()
             {
-                if (!ShareCodeLocks || !(@lock is CodeLock) || @lock.GetParentEntity().OwnerID <= 0) return null;
-                if (HasFriend(@lock.GetParentEntity().OwnerID, player.userID))
+                Configuration configuration = new Configuration();
+
+                configuration.friendButtons = new List<FriendButton>
                 {
-                    if (IsFriend(@lock.GetParentEntity().OwnerID, player.userID))
+                    new FriendButton(),
+
+                    new FriendButton
                     {
-                        var codeLock = @lock as CodeLock;
-                        var whitelistPlayers = (List<ulong>)codeLock.whitelistPlayers;
-                        if (!whitelistPlayers.Contains(player.userID)) whitelistPlayers.Add(player.userID);
+                        name = "Трейд",
+                        command = "trade %FRIEND_ID% %FRIEND_NAME%"
                     }
-                    return null;
-                }
-                return null;
-            }
-
-            private readonly object True = true;
-
-            private object OnSamSiteTarget(SamSite samSite, BaseCombatEntity target)
-            {
-                var mountPoints = (target as BaseVehicle)?.mountPoints;
-                if (!IsOccupied(target, mountPoints))
-                    return True;
-
-                if (samSite.staticRespawn)
-                    return null;
-
-                var cupboard = samSite.GetBuildingPrivilege(samSite.WorldSpaceBounds());
-                if ((object)cupboard == null)
-                    return null;
-
-                if (mountPoints != null)
-                {
-                    foreach (var mountPoint in mountPoints)
-                    {
-                        var player = mountPoint.mountable.GetMounted();
-                        if ((object)player != null && IsAuthed(cupboard, player.userID))
-                            return True;
-                    }
-                }
-
-                foreach (var child in target.children)
-                {
-                    var player = child as BasePlayer;
-                    if ((object)player != null)
-                    {
-                        if (IsAuthed(cupboard, player.userID))
-                            return True;
-                    }
-                }
-
-                return null;
-            }
-
-            private static bool IsOccupied(BaseCombatEntity entity, List<BaseVehicle.MountPointInfo> mountPoints)
-            {
-                if (mountPoints != null)
-                {
-                    foreach (var mountPoint in mountPoints)
-                    {
-                        var player = mountPoint.mountable.GetMounted();
-                        if ((object)player != null)
-                            return true;
-                    }
-                }
-
-                foreach (var child in entity.children)
-                {
-                    if (child is BasePlayer)
-                        return true;
-                }
-
-                return false;
-            }
-
-            private static bool IsAuthed(BuildingPrivlidge cupboard, ulong userId)
-            {
-                foreach (var entry in cupboard.authorizedPlayers)
-                {
-                    if (entry.userid == userId)
-                        return true;
-                }
-
-                return false;
-            }
-            
-            private void FriendUI(BasePlayer player)
-            {
-                CuiElementContainer container = new CuiElementContainer();
-                List<ButtonEntry> buttons = new List<ButtonEntry>();
-                
-                var friends = GetFriends(player);
-                
-                if (friends.Count < 3)
-                {
-                    buttons.Add(new ButtonEntry
-                    {
-                        Name = "Поиск друзей",
-                        Command = "friend.cmd search",
-                        Sprite = "assets/icons/examine.png",
-                        Color = "#EA2E5D"
-                    });
-                }
-                
-                if (friends.Count > 0)
-                {
-                    buttons.Add(new ButtonEntry
-                    {
-                        Name = "Удалить всех друзей",
-                        Command = "friend.cmd removeall",
-                        Sprite = "assets/icons/clear_list.png",
-                        Color = "#EA2E5D"
-                    });
-                }
-
-                if (friends.Count > 0)
-                {
-                    foreach (var friend in GetFriends(player.userID))
-                    {
-                        var covFriend = covalence.Players.FindPlayerById(friend.ToString()); 
-                        if (covFriend == null) continue;
-                        
-                        buttons.Add(new ButtonEntry
-                        {
-                            Name = $"{covFriend.Name}\nНажми чтобы удалить",
-                            Command = $"friend.cmd remove {covFriend.Id}",
-                            Sprite = "assets/icons/friends_servers.png",
-                            Color = "#EA2E5D"
-                        });
-                    }
-                }
-
-                foreach(var pair in FriendsWaitAccept.Where(x=> x.Value.Contains(player.userID)).ToDictionary(x=> x.Key, x=> x.Value))
-                {
-                    if (pair.Key == player.userID)
-                    {
-                        buttons.Add(new ButtonEntry
-                        {
-                            Name = "Добавить в друзья",
-                            Command = "friend.cmd accept",
-                            Sprite = "assets/icons/vote_up.png",
-                            Color = "#EA2E5D"
-                        });
-
-                        buttons.Add(new ButtonEntry
-                        {
-                            Name = "Отклонить запрос",
-                            Command = "friend.cmd deny",
-                            Sprite = "assets/icons/vote_down.png",
-                            Color = "#EA2E5D"
-                        });
-                    }
-
-                    if (pair.Key != player.userID)
-                    {
-                        buttons.Add(new ButtonEntry
-                        {
-                            Name = "Добавить в друзья",
-                            Command = "friend.cmd accept",
-                            Sprite = "assets/icons/vote_up.png",
-                            Color = "#EA2E5D"
-                        });
-
-                        buttons.Add(new ButtonEntry
-                        {
-                            Name = "Отклонить запрос",
-                            Command = "friend.cmd deny",
-                            Sprite = "assets/icons/vote_down.png",
-                            Color = "#EA2E5D"
-                        });
-                    }
-                }
-
-                container.Add(new CuiPanel
-                {
-                    CursorEnabled = true,
-                    Image = { Color = "0 0 0 0" },
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5" },
-                }, "Hud", Layer);
-
-                container.Add(new CuiElement
-                {
-                    Parent = Layer,
-                    Components =
-                    {
-                        new CuiButtonComponent { Close = Layer, Color = "0 0 0 0" },
-                        new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-1000 -1000", OffsetMax = "1000 1000" }
-                    }
-                });
-
-                for (var i = 0; i < buttons.Count; i++) 
-                {
-                    var button = buttons[i];
-                    
-                    var r = buttons.Count * 10 + 25;
-                    var c = (double) buttons.Count / 2;
-                    var pos = i / c * Math.PI;    
-                    var x = r * Math.Sin(pos);
-                    var y = r * Math.Cos(pos);
-
-                    container.Add(new CuiElement
-                    {
-                        Parent = Layer,
-                        Name = Layer + $".{i}",
-                        Components =
-                        {
-                            new CuiImageComponent { Sprite = "assets/icons/circle_gradient.png", Color = HexToCuiColor(button.Color) },
-                            new CuiRectTransformComponent { AnchorMin = $"{x - 35} {y - 35}", AnchorMax = $"{x + 35} {y + 35}" },
-                        },
-                    });
-                    
-                    container.Add(new CuiElement
-                    {
-                        Parent = Layer + $".{i}",
-                        Components =
-                        {
-                            new CuiImageComponent { Sprite = button.Sprite, Color = HexToCuiColor("#FFFFFF3F") },
-                            new CuiRectTransformComponent { AnchorMin = "0.2 0.2", AnchorMax = "0.8 0.8" },
-                        },
-                    });
-                    
-                    container.Add(new CuiLabel
-                    {
-                        Text = { Text = button.Name, FontSize = 11, Align = TextAnchor.MiddleCenter, Color = HexToCuiColor("#FFFFFFCA"), Font = "robotocondensed-bold.ttf" },
-                        RectTransform = { AnchorMax = "1 1", AnchorMin = "0 0" }
-                    }, Layer + $".{i}"); 
-                    
-                    container.Add(new CuiButton
-                    {
-                        Button = { Color = "0 0 0 0", Command = $"{button.Command}", Close = Layer },
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                        Text = { Text = "" }
-                    }, Layer + $".{i}");
-                }
-
-                CuiHelper.DestroyUi(player, Layer);
-                CuiHelper.AddUi(player, container);
-            }
-
-            private void FriendSearchUI(BasePlayer player, int page = 0, bool reopen = false)
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                if (!reopen)
-                {
-                    CuiHelper.DestroyUi(player, LayerSearch);
-                    container.Add(new CuiPanel
-                    {
-                        CursorEnabled = true,
-                        Image = { Color = HexToCuiColor("#2E2E2E7D"), Sprite = Sprite, Material = Material },
-                        RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-420 -270", OffsetMax = "420 270" },
-                    }, "Hud", LayerSearch);
-                }
-
-                container.Add(new CuiElement
-                {
-                    Parent = LayerSearch,
-                    Components =
-                    {
-                        new CuiButtonComponent { Close = LayerSearch, Color = "0 0 0 0" },
-                        new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-1000 -1000", OffsetMax = "1000 1000" }
-                    }
-                });
-                
-                CuiHelper.DestroyUi(player, LayerSearch + ".Title");
-                container.Add(new CuiPanel
-                { 
-                    CursorEnabled = false,
-                    RectTransform = { AnchorMin = "0.5 0.95", AnchorMax = "0.5 0.95", OffsetMin = "-420 -13", OffsetMax = "420 23" },
-                    Image = { Color = "0 0 0 0" }
-                }, LayerSearch, LayerSearch + ".Title");
-                
-                container.Add(new CuiElement
-                {
-                    Parent = LayerSearch + ".Title",
-                    Components =
-                    {
-                        new CuiTextComponent { Text = Title, Color = "1 1 1 1", Align = TextAnchor.UpperCenter, Font = "robotocondensed-bold.ttf", FontSize = 20 },
-                        new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                    }
-                });
-                
-                container.Add(new CuiElement
-                {
-                    Parent = LayerSearch + ".Title",
-                    Components =
-                    {
-                        new CuiTextComponent { Text = Description, Color = "1 1 1 1", FontSize = 12, Align = TextAnchor.LowerCenter, Font = "robotocondensed-bold.ttf" },
-                        new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                    }
-                });
-
-                CuiHelper.DestroyUi(player, LayerSearch + ".BG");
-                container.Add(new CuiPanel()
-                { 
-                    CursorEnabled = false,
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-400 -260", OffsetMax = "400 230" },
-                    Image = { Color = "0 0 0 0" }
-                }, LayerSearch, LayerSearch + ".BG");
-                
-                container.Add(new CuiPanel
-                { 
-                    CursorEnabled = false,
-                    RectTransform = { AnchorMin = "0.5 0.96", AnchorMax = "0.5 0.96", OffsetMin = "-300 -12", OffsetMax = "300 15" },
-                    Image = { Color = "0 0 0 0.5", Sprite = Sprite, Material = Material }
-                }, LayerSearch + ".BG", LayerSearch + ".Input");
-                
-                container.Add(new CuiElement
-                {
-                    Parent = LayerSearch + ".Input",
-                    Components =
-                    {
-                        new CuiInputFieldComponent { Text = "", FontSize = 13, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter, Command = "friend.cmd add " },
-                        new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" }
-                    }
-                });
-
-                int i = 0;
-                int Number = 24;
-                
-                foreach (var check in BasePlayer.activePlayerList.Skip(page * Number).Take(Number))
-                {
-                    var list = BasePlayer.activePlayerList.Skip(page * Number).Take(Number).Count();
-                    
-                    float DistanceBetweenA = 0.006f; 
-                    float DistanceBetweenB = -0.007f;     
-                    float ToRaiseORLower = 0.71f;   
-                    float AmountUIonLine = 0.05f; 
-                    float StretchUP = 0.205f; 
-                    float StretchSide = 0.14f;     
-                    float MoveUIinLeft = 0.0050f; 
-                    
-                    float[] pos = SquarePos(i, list, AmountUIonLine, ToRaiseORLower, StretchSide, StretchUP, DistanceBetweenA, DistanceBetweenB, MoveUIinLeft);
-
-                    if (!reopen) CuiHelper.DestroyUi(player, LayerSearch + $".Avatar.{check.displayName}");
-                    
-                    container.Add(new CuiElement
-                    {
-                        Parent = LayerSearch + ".BG",
-                        Name = LayerSearch + $".Avatar.{check.displayName}",
-                        Components =
-                        {
-                            new CuiRawImageComponent { Png = (string) ImageLibrary?.Call("GetImage", check.UserIDString) },
-                            new CuiRectTransformComponent { AnchorMin = $"{pos[0]} {pos[1]}", AnchorMax = $"{pos[2]} {pos[3]}" }
-                        }
-                    });
-
-                    container.Add(new CuiButton
-                    {
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                        Button = { Color = "0 0 0 0.3", Command = $"friend.cmd add {check.displayName}" },
-                        Text = { Text = $"{check.displayName}", FontSize = 16, Align = TextAnchor.LowerLeft, Color = HexToCuiColor("#FFFFFFFF"), Font = "robotocondensed-bold.ttf" },
-                    }, LayerSearch + $".Avatar.{check.displayName}");
-                    i++;
-                }
-
-                string leftCommand = $"friend.cmd page {page - 1}";
-                string rightCommand = $"friend.cmd page {page + 1}";
-                bool leftActive = page > 0;
-                bool rightActive = (page + 1) * Number < BasePlayer.activePlayerList.Count;
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0.49 0.04", AnchorMax = "0.49 0.04", OffsetMin = "-100 -15", OffsetMax = "2 15" },
-                    Text = { Text = "←", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 20 },
-                    Button = { Command = leftActive ? leftCommand : "", Color = leftActive ? "0.294 0.38 0.168 1" : "0.294 0.38 0.168 0.3", Sprite = Sprite, Material = Material }
-                }, LayerSearch + ".BG");
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0.51 0.04", AnchorMax = "0.51 0.04", OffsetMin = "-2 -15", OffsetMax = "100 15" },
-                    Text = { Text = "→", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 20 },
-                    Button = { Command = rightActive ? rightCommand : "", Color = rightActive ? "0.294 0.38 0.168 1" : "0.294 0.38 0.168 0.3", Sprite = Sprite, Material = Material }
-                }, LayerSearch + ".BG");
-                
-                CuiHelper.AddUi(player, container);
-            }
-
-            [ConsoleCommand("friend.cmd")]
-            private void FriendsCMD(ConsoleSystem.Arg args)
-            {
-                var player = args.Player();
-                if (!player || !args.HasArgs(1)) return;
-                
-                switch (args.Args[0].ToLower())
-                {
-                    case "page":
-                    {
-                        int page = 0;
-                        
-                        if (!args.HasArgs(2) || !int.TryParse(args.Args[1], out page)) return;
-                        if (page < 0) return;
-                        
-                        FriendSearchUI(player, page, true);
-                        break;
-                    }
-                    
-                    case "add":
-                    {
-                        if (!args.HasArgs(2)) return;
-                        CuiHelper.DestroyUi(player, LayerSearch);
-                        player.Command($"chat.say \"/friend add {args.Args[1]}\"");
-                        break;
-                    }
-                    
-                    case "remove":
-                    {
-                        if (!args.HasArgs(2)) return;
-                        player.Command($"chat.say \"/friend remove {args.Args[1]}\"");
-                        break;
-                    }
-
-
-                    case "removeall":
-                    {
-                        if (!FriendsWipeData.ContainsKey(player.userID) || FriendsWipeData[player.userID].Count == 0)
-                        {
-                            GetMsg(player, "YOU.NOT.FRIEND");
-                            return;
-                        }
-
-                        if (!PlayerTempData.ContainsKey(player.userID))
-                            PlayerTempData.Add(player.userID, new PlayerInfo());
-
-                        foreach (var friendID in FriendsWipeData[player.userID].ToList())
-                        {
-                            FriendsWipeData[player.userID].Remove(friendID);
-
-                            if (FriendsWipeData.ContainsKey(friendID))
-                                FriendsWipeData[friendID].Remove(player.userID);
-                            else
-                            {
-                                LoadFriendList(friendID);
-                                if (FriendsWipeData.ContainsKey(friendID))
-                                    FriendsWipeData[friendID].Remove(player.userID);
-                            }
-
-                            var friend = BasePlayer.FindByID(friendID);
-
-                            GetMsg(friend, "FRIEND.REMOVED.YOU", new List<object>() {player.displayName});
-
-                            if (!PlayerTempData[player.userID].RemoveFriends.ContainsKey(friendID))
-                                PlayerTempData[player.userID].RemoveFriends.Add(friendID, ToEpochTime(DateTime.Now));
-                            else
-                                PlayerTempData[player.userID].RemoveFriends[friendID] = ToEpochTime(DateTime.Now);
-
-                            if (!PlayerTempData.ContainsKey(friendID))
-                                PlayerTempData.Add(friendID, new PlayerInfo());
-
-                            if (!PlayerTempData[friendID].RemoveFriends.ContainsKey(player.userID))
-                                PlayerTempData[friendID].RemoveFriends.Add(player.userID, ToEpochTime(DateTime.Now));
-                            else
-                                PlayerTempData[friendID].RemoveFriends[player.userID] = ToEpochTime(DateTime.Now);
-
-                            PlayerTempData[friendID].LastRemoveFriends = ToEpochTime(DateTime.Now);
-
-                            Interface.Oxide.CallHook("OnFriendRemoved", player.userID.ToString(), friendID.ToString());
-                            Interface.Oxide.CallHook("OnFriendRemoved", friendID.ToString(), player.userID.ToString());
-
-                            CallSomeOvhHooks(player.userID);
-                            CallSomeOvhHooks(friendID);
-                        }
-
-                        PlayerTempData[player.userID].LastRemoveFriends = ToEpochTime(DateTime.Now);
-                        GetMsg(player, "YOU.REMOVED.FRIENDS");
-
-                        SaveTmpData();
-                        return;
-                    }
-
-                    case "accept":
-                    {
-                        foreach (var pair in FriendsWaitAccept.Where(x => x.Value.Contains(player.userID))
-                            .ToDictionary(x => x.Key, x => x.Value))
-                        {
-                            if (!FriendsWipeData.ContainsKey(pair.Key))
-                                FriendsWipeData.Add(pair.Key, new List<ulong>());
-
-                            FriendsWipeData[pair.Key].Add(player.userID);
-
-                            if (!FriendsWipeData.ContainsKey(player.userID))
-                                FriendsWipeData.Add(player.userID, new List<ulong>());
-
-                            FriendsWipeData[player.userID].Add(pair.Key);
-
-                            (FriendsWaitAccept[pair.Key]).Remove(player.userID);
-
-                            var friend = BasePlayer.FindByID(pair.Key);
-                            var friendName = FindPlayerName(pair.Key);
-
-                            GetMsg(player, "YOU.ADDED.PLAYER", new List<object>() {friendName});
-                            GetMsg(friend, "PLAYER.ADDED.YOU", new List<object>() {player.displayName});
-
-                            if (!PlayerTempData.ContainsKey(player.userID))
-                                PlayerTempData.Add(player.userID, new PlayerInfo());
-
-                            PlayerTempData[player.userID].CountAddFriends++;
-
-                            if (!PlayerTempData.ContainsKey(pair.Key))
-                                PlayerTempData.Add(pair.Key, new PlayerInfo());
-
-                            PlayerTempData[pair.Key].CountAddFriends++;
-
-                            /*GetMsg(player, "PLAYER.ADDED.YOU.LIMIT",
-                                new List<object>()
-                                    {PlayerTempData[player.userID].CountAddFriends, configData.LimitToAddFrinds});
-                            GetMsg(friend, "PLAYER.ADDED.YOU.LIMIT",
-                                new List<object>()*/
-                                    /*{PlayerTempData[pair.Key].CountAddFriends, configData.LimitToAddFrinds});*/
-
-                            Interface.Oxide.CallHook("OnFriendAdded", player.userID.ToString(), pair.Key.ToString());
-                            Interface.Oxide.CallHook("OnFriendAdded", pair.Key.ToString(), player.userID.ToString());
-
-                            CallSomeOvhHooks(player.userID);
-                            CallSomeOvhHooks(pair.Key);
-
-                            SaveTmpData();
-                            return;
-                        }
-
-                        GetMsg(player, "YOU.NO.REQUEST");
-                        return;
-                    }
-
-                    case "deny":
-                    {
-                        foreach(var pair in FriendsWaitAccept.Where(x=> x.Value.Contains(player.userID)).ToDictionary(x=> x.Key, x=> x.Value))
-                        {                                                                               
-                            (FriendsWaitAccept[pair.Key]).Remove(player.userID);    
-
-                            var friend = BasePlayer.FindByID(pair.Key);                 
-                        
-                            GetMsg(player, "YOU.REFUSE.REQUEST");                   
-                            GetMsg(friend, "PLAYER.REFUSE.REQUEST", new List<object>() { player.displayName }); 
-                                                    
-                            return;
-                        }
-                    
-                        GetMsg(player, "YOU.NO.REQUEST");
-                        return;  
-                    }
-                    
-                    case "search":
-                    {
-                        FriendSearchUI(player, 0);
-                        break;
-                    }
-                }
-            }
-
-            [ChatCommand("friend")]
-            private void ChatFriend(BasePlayer player, string command, string[] args)
-            {           
-                if (player == null) return;                         
-                
-                if (args == null || args.Length < 1)
-                {
-                    FriendUI(player);
-                    GetMsg(player, "CMD.FRIEND.HELP");
-                    return;
-                }
-                
-                if (args[0].ToLower() == "list")
-                {               
-                    if (!FriendsWipeData.ContainsKey(player.userID) || FriendsWipeData[player.userID].Count == 0)
-                    {
-                        GetMsg(player, "YOU.NOT.FRIEND");
-                        return;
-                    }   
-                    
-                    string friendList = "";
-                    int count = 0;
-                    var players = BasePlayer.activePlayerList.ToList();
-                    
-                    foreach(var friend in FriendsWipeData[player.userID].Where(x=> players.Exists(y=> y != null && y.userID == x)))
-                    {
-                        if (count >= 15)
-                        {
-                            friendList += " и другие...";
-                            break;
-                        }
-                        friendList += " <color=#aae9f2>*</color> " + /*"<color=#90EE90>"+*/FindPlayerName(friend, true)/*+"</color>"*/ + "\n";
-                        count++;
-                    }
-                        
-                    if (count < 15)
-                    {
-                        foreach(var friend in FriendsWipeData[player.userID].Where(x=> !players.Exists(y=> y != null && y.userID == x)))
-                        {
-                            if (count >= 15)
-                            {
-                                friendList += " и другие...";
-                                break;
-                            }
-                            friendList += " <color=#aae9f2>*</color> " + /*"<color=#FFA07A>"+*/FindPlayerName(friend, true)/*+"</color>\n"*/ + "\n";
-                            count++;
-                        }
-                    }
-                    
-                    GetMsg(player, "FRIEND.LIST", new List<object>() { friendList.Trim('\n') });
-                    return;
-                }
-                
-                if (args[0].ToLower() == "add")
-                {
-                    if (args.Length < 2)
-                    {                   
-                        GetMsg(player, "FRIEND.ADD.HELP");
-                        return;
-                    }
-                                    
-                    if (FriendsWipeData.ContainsKey(player.userID) && FriendsWipeData[player.userID].Count >= configData.MaxFriends)
-                    {
-                        GetMsg(player, "YOUR.FRIENDS.LIMIT", new List<object>() { configData.MaxFriends });
-                        return;
-                    }   
-                                    
-                    string nameOrId = "";
-                    for(int ii=1;ii<args.Length;ii++)
-                        nameOrId += args[ii] + " ";
-                    nameOrId = nameOrId.Trim(' ');
-                                    
-                    var friend = FindOnlinePlayer(player, nameOrId);
-                    if (friend == null) return;                             
-                    
-                    if (friend.userID == player.userID)
-                    {
-                        GetMsg(player, "CANT.SEND.REQUEST.YOURSELF");                   
-                        return;
-                    }
-                    
-                    if (FriendsWipeData.ContainsKey(player.userID) && FriendsWipeData[player.userID].Contains(friend.userID))
-                    {
-                        GetMsg(player, "PLAYER.ALREADY.FRIENDS", new List<object>() { friend.displayName });
-                        return;
-                    } 
-                    
-                    if (FriendsWaitAccept.ContainsKey(player.userID) && FriendsWaitAccept[player.userID].Contains(friend.userID))
-                    {
-                        GetMsg(player, "YOUR.ACTIVE.REQUEST", new List<object>() { friend.displayName });
-                        return;
-                    }
-                    
-                    if (FriendsWaitAccept.ContainsKey(friend.userID) && FriendsWaitAccept[friend.userID].Contains(player.userID))
-                    {
-                        GetMsg(player, "PLAYER.SEND.YOU.REQUEST", new List<object>() { friend.displayName });
-                        return;
-                    }                               
-                    
-                    foreach(var pair in FriendsWaitAccept.Where(x=> x.Value.Contains(friend.userID)))
-                    {
-                        GetMsg(player, "PLAYER.ACTIVE.REQUEST", new List<object>() { friend.displayName, FindPlayerName(pair.Key) });
-                        return;
-                    }   
-                    
-                    if (FriendsWipeData.ContainsKey(friend.userID) && FriendsWipeData[friend.userID].Count >= configData.MaxFriends)
-                    {
-                        GetMsg(player, "PLAYER.FRIENDS.LIMIT", new List<object>() { friend.displayName, configData.MaxFriends });
-                        return;
-                    }
-                                    
-                    if (PlayerTempData.ContainsKey(player.userID) && (ToEpochTime(DateTime.Now) - PlayerTempData[player.userID].LastRemoveFriends) <= configData.BlockTimeToAddAgain * 60)
-                    {
-                        GetMsg(player, "CANT.SEND.REQUEST.YOU.COOLDOWN", new List<object>() { GetTime(configData.BlockTimeToAddAgain * 60 - (ToEpochTime(DateTime.Now) - PlayerTempData[player.userID].LastRemoveFriends)) });
-                        return;
-                    }
-                    
-                    if (PlayerTempData.ContainsKey(friend.userID) && (ToEpochTime(DateTime.Now) - PlayerTempData[friend.userID].LastRemoveFriends) <= configData.BlockTimeToAddAgain * 60)
-                    {
-                        GetMsg(player, "CANT.SEND.REQUEST.TARGET.COOLDOWN", new List<object>() { friend.displayName, GetTime(configData.BlockTimeToAddAgain * 60 - (ToEpochTime(DateTime.Now) - PlayerTempData[friend.userID].LastRemoveFriends)) });
-                        return;
-                    }
-                    
-                    if (PlayerTempData.ContainsKey(player.userID) && PlayerTempData[player.userID].RemoveFriends.ContainsKey(friend.userID) && (ToEpochTime(DateTime.Now) - PlayerTempData[player.userID].RemoveFriends[friend.userID]) <= configData.BlockTimeToAddFriendAgain * 60)
-                    {
-                        GetMsg(player, "CANT.SEND.REQUEST.YOU.COOLDOWN.OLD.FRIENDS", new List<object>() { friend.displayName, GetTime(configData.BlockTimeToAddFriendAgain * 60 - (ToEpochTime(DateTime.Now) - PlayerTempData[player.userID].RemoveFriends[friend.userID])) });
-                        return;
-                    }
-                    
-                    if (PlayerTempData.ContainsKey(friend.userID) && PlayerTempData[friend.userID].RemoveFriends.ContainsKey(player.userID) && (ToEpochTime(DateTime.Now) - PlayerTempData[friend.userID].RemoveFriends[player.userID]) <= configData.BlockTimeToAddFriendAgain * 60)
-                    {
-                        GetMsg(player, "CANT.SEND.REQUEST.TARGET.COOLDOWN.OLD.FRIENDS", new List<object>() { friend.displayName, GetTime(configData.BlockTimeToAddFriendAgain * 60 - (ToEpochTime(DateTime.Now) - PlayerTempData[friend.userID].RemoveFriends[player.userID])) });
-                        return;
-                    }
-                    
-/*                    if (PlayerTempData.ContainsKey(player.userID) && PlayerTempData[player.userID].CountAddFriends >= configData.LimitToAddFrinds)
-                    {
-                        GetMsg(player, "CANT.SEND.REQUEST.YOU.LIMIT.ADD.FRIENDS");
-                        return;
-                    }*/
-                    
-                    if (PlayerTempData.ContainsKey(friend.userID) && PlayerTempData[friend.userID].CountAddFriends >= configData.LimitToAddFrinds)
-                    {
-                        GetMsg(player, "CANT.SEND.REQUEST.TARGET.LIMIT.ADD.FRIENDS", new List<object>() { friend.displayName } );
-                        return;
-                    }
-                    
-                    TryAddFrind(player, friend);                                                                                
-                    return;
-                }   
-                
-                if (args[0].ToLower() == "accept")
-                {               
-                    foreach(var pair in FriendsWaitAccept.Where(x=> x.Value.Contains(player.userID)).ToDictionary(x=> x.Key, x=> x.Value))
-                    {
-                        if (!FriendsWipeData.ContainsKey(pair.Key))
-                            FriendsWipeData.Add(pair.Key, new List<ulong>());
-                        
-                        FriendsWipeData[pair.Key].Add(player.userID);
-                        
-                        if (!FriendsWipeData.ContainsKey(player.userID))
-                            FriendsWipeData.Add(player.userID, new List<ulong>());
-                        
-                        FriendsWipeData[player.userID].Add(pair.Key);
-                                            
-                        (FriendsWaitAccept[pair.Key]).Remove(player.userID);                                        
-                                            
-                        var friend = BasePlayer.FindByID(pair.Key);
-                        var friendName = FindPlayerName(pair.Key);
-                        
-                        GetMsg(player, "YOU.ADDED.PLAYER", new List<object>() { friendName } );                 
-                        GetMsg(friend, "PLAYER.ADDED.YOU", new List<object>() { player.displayName });                                                                                                                          
-                        
-                        if (!PlayerTempData.ContainsKey(player.userID))
-                            PlayerTempData.Add(player.userID, new PlayerInfo());
-                        
-                        PlayerTempData[player.userID].CountAddFriends++;
-                        
-                        if (!PlayerTempData.ContainsKey(pair.Key))
-                            PlayerTempData.Add(pair.Key, new PlayerInfo());
-                        
-                        PlayerTempData[pair.Key].CountAddFriends++;
-                        
-                        /*GetMsg(player, "PLAYER.ADDED.YOU.LIMIT", new List<object>() { PlayerTempData[player.userID].CountAddFriends, configData.LimitToAddFrinds });
-                        GetMsg(friend, "PLAYER.ADDED.YOU.LIMIT", new List<object>() { PlayerTempData[pair.Key].CountAddFriends, configData.LimitToAddFrinds });*/
-                                
-                        Interface.Oxide.CallHook("OnFriendAdded", player.userID.ToString(), pair.Key.ToString());
-                        Interface.Oxide.CallHook("OnFriendAdded", pair.Key.ToString(), player.userID.ToString());                                       
-                        
-                        CallSomeOvhHooks(player.userID);
-                        CallSomeOvhHooks(pair.Key);
-                        
-                        PlayerTempData[player.userID].TurrentAuthorization = true;
-                        PlayerTempData[player.userID].CodeAuthorization = true;
-                        PlayerTempData[player.userID].AttackFriend = true;
-                        SaveTmpData();
-                        return;
-                    }
-                    
-                    GetMsg(player, "YOU.NO.REQUEST");
-                    return;             
-                }   
-                
-                if (args[0].ToLower() == "deny")
-                {               
-                    foreach(var pair in FriendsWaitAccept.Where(x=> x.Value.Contains(player.userID)).ToDictionary(x=> x.Key, x=> x.Value))
-                    {                                                                               
-                        (FriendsWaitAccept[pair.Key]).Remove(player.userID);    
-
-                        var friend = BasePlayer.FindByID(pair.Key);                 
-                        
-                        GetMsg(player, "YOU.REFUSE.REQUEST");                   
-                        GetMsg(friend, "PLAYER.REFUSE.REQUEST", new List<object>() { player.displayName }); 
-                                                    
-                        return;
-                    }
-                    
-                    GetMsg(player, "YOU.NO.REQUEST");
-                    return;             
-                }   
-                
-                if (args[0].ToLower() == "remove")
-                {
-                    if (args.Length < 2)
-                    {
-                        GetMsg(player, "FRIEND.REMOVE.HELP");                   
-                        return;
-                    }                               
-                                    
-                    string nameOrId = "";
-                    for(int ii=1;ii<args.Length;ii++)
-                        nameOrId += args[ii] + " ";
-                    nameOrId = nameOrId.Trim(' ');
-                                    
-                    var friendID = FindYourFriend(player, nameOrId);
-                    if (friendID == 0) return;                                                              
-                    
-                    if (friendID == player.userID)
-                    {
-                        GetMsg(player, "CANT.SEND.REMOVE.YOURSELF");                    
-                        return;
-                    }
-                    
-                    if (!FriendsWipeData.ContainsKey(player.userID) || (FriendsWipeData.ContainsKey(player.userID) && !FriendsWipeData[player.userID].Contains(friendID)))
-                    {
-                        GetMsg(player, "PLAYER.NOTFOUND.FRIEND", new List<object>() { FindPlayerName(friendID) });
-                        return;
-                    } 
-                    
-                    if (FriendsWipeData.ContainsKey(player.userID))
-                        FriendsWipeData[player.userID].Remove(friendID);
-                    
-                    if (FriendsWipeData.ContainsKey(friendID))
-                        FriendsWipeData[friendID].Remove(player.userID);
-                    else
-                    {
-                        LoadFriendList(friendID);
-                        if (FriendsWipeData.ContainsKey(friendID))
-                            FriendsWipeData[friendID].Remove(player.userID);
-                    }
-                    
-                    var friend = BasePlayer.FindByID(friendID);
-                    
-                    GetMsg(player, "YOU.REMOVED.FRIEND", new List<object>() { FindPlayerName(friendID) } );             
-                    GetMsg(friend, "FRIEND.REMOVED.YOU", new List<object>() { player.displayName });    
-                    
-                    if (!PlayerTempData.ContainsKey(player.userID))
-                        PlayerTempData.Add(player.userID, new PlayerInfo());
-                    
-                    if (!PlayerTempData[player.userID].RemoveFriends.ContainsKey(friendID))
-                        PlayerTempData[player.userID].RemoveFriends.Add(friendID, ToEpochTime(DateTime.Now));
-                    else
-                        PlayerTempData[player.userID].RemoveFriends[friendID] = ToEpochTime(DateTime.Now);
-                    
-                    PlayerTempData[player.userID].LastRemoveFriends = ToEpochTime(DateTime.Now);
-                                    
-                    if (!PlayerTempData.ContainsKey(friendID))
-                        PlayerTempData.Add(friendID, new PlayerInfo());
-                    
-                    if (!PlayerTempData[friendID].RemoveFriends.ContainsKey(player.userID))
-                        PlayerTempData[friendID].RemoveFriends.Add(player.userID, ToEpochTime(DateTime.Now));
-                    else
-                        PlayerTempData[friendID].RemoveFriends[player.userID] = ToEpochTime(DateTime.Now);
-                    
-                    PlayerTempData[friendID].LastRemoveFriends = ToEpochTime(DateTime.Now);
-                    
-                    Interface.Oxide.CallHook("OnFriendRemoved", player.userID.ToString(), friendID.ToString());
-                    Interface.Oxide.CallHook("OnFriendRemoved", friendID.ToString(), player.userID.ToString());
-                    
-                    CallSomeOvhHooks(player.userID);
-                    CallSomeOvhHooks(friendID);
-                    
-                    PlayerTempData[player.userID].TurrentAuthorization = false;
-                    PlayerTempData[player.userID].CodeAuthorization = false;
-                    PlayerTempData[player.userID].AttackFriend = false;
-                    SaveTmpData();          
-                    return;
-                }   
-                
-                if (args[0].ToLower() == "removeall")
-                {               
-                    if (!FriendsWipeData.ContainsKey(player.userID) || FriendsWipeData[player.userID].Count == 0)
-                    {
-                        GetMsg(player, "YOU.NOT.FRIEND");
-                        return;
-                    } 
-                    
-                    if (!PlayerTempData.ContainsKey(player.userID))
-                        PlayerTempData.Add(player.userID, new PlayerInfo());
-                    
-                    foreach(var friendID in FriendsWipeData[player.userID].ToList())
-                    {                           
-                        FriendsWipeData[player.userID].Remove(friendID);
-                        
-                        if (FriendsWipeData.ContainsKey(friendID))
-                            FriendsWipeData[friendID].Remove(player.userID);
-                        else
-                        {
-                            LoadFriendList(friendID);
-                            if (FriendsWipeData.ContainsKey(friendID))
-                                FriendsWipeData[friendID].Remove(player.userID);
-                        }
-                        
-                        var friend = BasePlayer.FindByID(friendID);
-                                            
-                        GetMsg(friend, "FRIEND.REMOVED.YOU", new List<object>() { player.displayName });                                            
-                        
-                        if (!PlayerTempData[player.userID].RemoveFriends.ContainsKey(friendID))
-                            PlayerTempData[player.userID].RemoveFriends.Add(friendID, ToEpochTime(DateTime.Now));
-                        else
-                            PlayerTempData[player.userID].RemoveFriends[friendID] = ToEpochTime(DateTime.Now);
-                                                                                
-                        if (!PlayerTempData.ContainsKey(friendID))
-                            PlayerTempData.Add(friendID, new PlayerInfo());
-                        
-                        if (!PlayerTempData[friendID].RemoveFriends.ContainsKey(player.userID))
-                            PlayerTempData[friendID].RemoveFriends.Add(player.userID, ToEpochTime(DateTime.Now));
-                        else
-                            PlayerTempData[friendID].RemoveFriends[player.userID] = ToEpochTime(DateTime.Now);                                      
-                        
-                        PlayerTempData[friendID].LastRemoveFriends = ToEpochTime(DateTime.Now);
-                        
-                        Interface.Oxide.CallHook("OnFriendRemoved", player.userID.ToString(), friendID.ToString());
-                        Interface.Oxide.CallHook("OnFriendRemoved", friendID.ToString(), player.userID.ToString());
-                        
-                        CallSomeOvhHooks(player.userID);
-                        CallSomeOvhHooks(friendID);
-                    }
-                    
-                    PlayerTempData[player.userID].LastRemoveFriends = ToEpochTime(DateTime.Now);                
-                    GetMsg(player, "YOU.REMOVED.FRIENDS");
-                    
-                    PlayerTempData[player.userID].TurrentAuthorization = false;
-                    PlayerTempData[player.userID].CodeAuthorization = false;
-                    PlayerTempData[player.userID].AttackFriend = false;
-                    SaveTmpData();          
-                    return;
-                }
-                
-                GetMsg(player, "CMD.FRIEND.HELP");      
-            }
-
-            private void CallSomeOvhHooks(ulong userID)
-            {
-                var result = new List<BasePlayer>();
-                            
-                var players = BasePlayer.activePlayerList.ToList();
-                            
-                foreach(var friend2 in GetFriends(userID).Where(x=> players.Exists(y=> y != null && y.userID == x)))
-                    result.Add(BasePlayer.FindByID(friend2));       
-                        
-                if (players.Exists(y=> y != null && y.userID == userID))                                                                                
-                    Interface.Oxide.CallHook("OnActiveFriendsUpdate", BasePlayer.FindByID(userID), result);                     
-                else                                                                                    
-                    Interface.Oxide.CallHook("OnActiveFriendsUpdateUserId", userID, result);    
-            }
-            
-            private void TryAddFrind(BasePlayer player, BasePlayer friend)
-            {
-                if (!FriendsWaitAccept.ContainsKey(player.userID)) FriendsWaitAccept.Add(player.userID, new List<ulong>());
-
-                FriendsWaitAccept[player.userID].Add(friend.userID);
-                GetMsg(player, "YOU.SEND.REQUEST", new List<object>() { friend.displayName } );
-                GetMsg(friend, "PLAYER.SEND.REQUEST.YOU", new List<object>() { player.displayName } );
-                
-                var playerID = player.userID;
-                var friendID = friend.userID;
-                var friendName = friend.displayName;
-                
-                timer.Once(configData.TimeToAnswer, ()=>
-                {
-                    if (FriendsWaitAccept.ContainsKey(playerID) && FriendsWaitAccept[playerID].Contains(friendID))
-                    {                               
-                        (FriendsWaitAccept[playerID]).Remove(friendID);
-                        GetMsg(player, "PLAYER.CANCELED.WAIT.REQUEST", new List<object>() { friendName } );
-                        GetMsg(friend, "YOU.CANCELED.WAIT.REQUEST");
-                    }   
-                });                                 
-            }
-            
-            private static void LoadFriendList(ulong userID)
-            {
-                if (!FriendsWipeData.ContainsKey(userID) && FriendsData.ContainsKey(userID))                        
-                    FriendsWipeData.Add(userID, FriendsData[userID]);                                                           
-            }
-
-            private string GetPlayerName(ulong userID)
-            {
-                var data = permission.GetUserData(userID.ToString());                                                           
-                return data.LastSeenNickname;
-            }
-            
-            private string FindPlayerName(ulong userID, bool isFull = false)
-            {            
-                var player = BasePlayer.activePlayerList.FirstOrDefault(x=>x.userID == userID);
-                
-                if (player == null)
-                {
-                    player = BasePlayer.sleepingPlayerList.FirstOrDefault(x=>x.userID == userID);
-                    if (player == null)
-                    {
-                        var name = GetPlayerName(userID);                   
-
-                        if (name != "Unnamed")
-                            return isFull ? (name + " (" + userID.ToString() + ")") : name;
-                        else
-                            return isFull ? ("Без имени" + " (" + userID.ToString() + ")") : "Без имени";
-                    }   
-                }                           
-
-                return isFull ? (player.displayName + " (" + userID.ToString() + ")") : player.displayName;
-            }       
-            
-            private BasePlayer FindOnlinePlayer(BasePlayer player, string nameOrID)
-            {
-                if (nameOrID.IsSteamId())
-                {
-                    var target = BasePlayer.FindByID((ulong)Convert.ToInt64(nameOrID));
-                    if (target == null)
-                    {                   
-                        GetMsg(player, "PLAYER.NOTFOUND", new List<object>() { nameOrID });
-                        return null;
-                    }
-                    
-                    return target;
-                }
-                
-                var targets = BasePlayer.activePlayerList.Where(x=> x.displayName == nameOrID).ToList();
-                
-                if (targets.Count() == 1)
-                    return targets[0];
-                
-                if (targets.Count() > 1)
-                {
-                    GetMsg(player, "PLAYER.MULTIPLE.FOUND", new List<object>() { targets.Count() });
-                    return null;
-                }
-                
-                targets = BasePlayer.activePlayerList.Where(x=> x.displayName.ToLower() == nameOrID.ToLower()).ToList();
-                
-                if (targets.Count() == 1)
-                    return targets[0];
-                
-                if (targets.Count() > 1)
-                {
-                    GetMsg(player, "PLAYER.MULTIPLE.FOUND", new List<object>() { targets.Count() });
-                    return null;
-                }   
-                        
-                targets = BasePlayer.activePlayerList.Where(x=> x.displayName.Contains(nameOrID)).ToList();
-                
-                if (targets.Count() == 1)
-                    return targets[0];
-                
-                if (targets.Count() > 1)
-                {
-                    GetMsg(player, "PLAYER.MULTIPLE.FOUND", new List<object>() { targets.Count() });
-                    return null;
-                }
-                
-                targets = BasePlayer.activePlayerList.Where(x=> x.displayName.ToLower().Contains(nameOrID.ToLower())).ToList();
-                
-                if (targets.Count() == 1)
-                    return targets[0];
-                
-                if (targets.Count() > 1)
-                {
-                    GetMsg(player, "PLAYER.MULTIPLE.FOUND", new List<object>() { targets.Count() });
-                    return null;
-                }
-                
-                GetMsg(player, "PLAYER.NOTFOUND", new List<object>() { nameOrID });
-                return null;
-            }
-            
-            private ulong FindYourFriend(BasePlayer player, string nameOrID)
-            {
-                if (!FriendsWipeData.ContainsKey(player.userID))
-                {
-                    GetMsg(player, "YOU.NOT.FRIEND");
-                    return 0;
-                }
-                
-                var friends = FriendsWipeData[player.userID];
-
-                if (friends.Count() == 0)
-                {
-                    GetMsg(player, "YOU.NOT.FRIEND");
-                    return 0;
-                }
-                
-                if (nameOrID.IsSteamId())
-                {
-                    var targetID = (ulong)Convert.ToInt64(nameOrID);
-                    if (!friends.Contains(targetID))
-                    {                   
-                        GetMsg(player, "PLAYER.NOTFOUND.FRIEND", new List<object>() { FindPlayerName(targetID) });
-                        return 0;
-                    }
-                    
-                    return targetID;
-                }
-                
-                var targets = friends.Where(x=> FindPlayerName(x) == nameOrID).ToList();
-                
-                if (targets.Count() == 1)
-                    return targets[0];
-                
-                if (targets.Count() > 1)
-                {
-                    GetMsg(player, "PLAYER.MULTIPLE.FOUND", new List<object>() { targets.Count() });
-                    return 0;
-                }
-                
-                targets = friends.Where(x=> FindPlayerName(x).ToLower() == nameOrID.ToLower()).ToList();
-                
-                if (targets.Count() == 1)
-                    return targets[0];
-                
-                if (targets.Count() > 1)
-                {
-                    GetMsg(player, "PLAYER.MULTIPLE.FOUND", new List<object>() { targets.Count() });
-                    return 0;
-                }
-                
-                targets = friends.Where(x=> FindPlayerName(x).Contains(nameOrID)).ToList();
-                
-                if (targets.Count() == 1)
-                    return targets[0];
-                
-                if (targets.Count() > 1)
-                {
-                    GetMsg(player, "PLAYER.MULTIPLE.FOUND", new List<object>() { targets.Count() });
-                    return 0;
-                }
-                
-                targets = friends.Where(x=> FindPlayerName(x).ToLower().Contains(nameOrID.ToLower())).ToList();
-                
-                if (targets.Count() == 1)
-                    return targets[0];
-                
-                if (targets.Count() > 1)
-                {
-                    GetMsg(player, "PLAYER.MULTIPLE.FOUND", new List<object>() { targets.Count() });
-                    return 0;
-                }
-                
-                GetMsg(player, "PLAYER.NOTFOUND.FRIEND.LIST", new List<object>() { nameOrID });
-                return 0;
-            }                               
-            
-            private static string GetTime(long time)
-            {            
-                TimeSpan elapsedTime = TimeSpan.FromSeconds(time);
-                int hours = elapsedTime.Hours;
-                int minutes = elapsedTime.Minutes;
-                int seconds = elapsedTime.Seconds;
-                int days = Mathf.FloorToInt((float)elapsedTime.TotalDays);
-                string s = "";
-                int cnt = 0;
-                
-                if (days > 0) { s += $"{GetStringCount(days, new List<string>() {"день","дня","дней"})} "; cnt+=1; }
-                if (hours > 0) { s += (cnt == 1 ? "и " : "") + $@"{GetStringCount(hours, new List<string>() {"час","часа","часов"})} "; cnt+=2; }
-                if (cnt == 1 || cnt == 3) return s.TrimEnd(' ');
-                
-                if (minutes > 0) { s += (cnt == 2 ? "и " : "") + $"{GetStringCount(minutes, new List<string>() {"минута","минуты","минут"})} "; cnt+=4; }           
-                if (cnt == 2 || cnt == 6) return s.TrimEnd(' ');
-                
-                if (seconds > 0) s += (cnt == 4 ? "и " : "") + $"{GetStringCount(seconds, new List<string>() {"секунда","секунды","секунд"})} ";                                    
-                if (string.IsNullOrEmpty(s)) return "несколько секунд";
-                
-                return s.TrimEnd(' ');
-            }               
-            
-            private static string GetStringCount(long count, List<string> words)
-            {   
-                switch(count)
-                {
-                    case 11: 
-                    case 12: 
-                    case 13: 
-                    case 14: return $"{count} {words[2]}";
-                }
-                
-                var countString = count.ToString();         
-                switch(countString[countString.Length-1])
-                {
-                    case '1': return $"{count} {words[0]}";
-                    case '2': 
-                    case '3': 
-                    case '4': return $"{count} {words[1]}";             
-                }
-                
-                return $"{count} {words[2]}";
-            }               
-            
-            private long ToEpochTime(DateTime dateTime)
-            {
-                var date = dateTime.ToLocalTime();
-                var ticks = date.Ticks - new DateTime(1970, 1, 1, 0, 0, 0, 0).Ticks;
-                var ts = ticks / TimeSpan.TicksPerSecond;
-                return ts;
-            }
-            
-            private void GetMsg(BasePlayer player, string key, List<object> params_ = null)
-            {
-                var message = GetLangMessage(key, player.IPlayer.Id);
-                if (params_ != null) for(int ii=0;ii<params_.Count;ii++) message = message.Replace("{"+ii+"}", Convert.ToString(params_[ii]));
-                if (player != null) SendReply(player, message);                     
-            }
-            
-            private void LoadDefaultMessages()
-            {
-                lang.RegisterMessages(new Dictionary<string, string>
-                {                
-                    { "CMD.FRIEND.HELP", "<size=14>Команды для <color=#EA2E5D>управления</color> друзьями:</size>\n<size=12>/friend add <color=#EA2E5D>[Имя игрока]</color> - Добавить в список друзей\n/friend remove <color=#EA2E5D>[Имя игрока]</color> - Удалить из списка друзей\n/friend removeall - Очистить список друзей\n/friend list - Показать список друзей</size>"},
-                    { "FRIEND.REMOVE.HELP", "Используете /friend remove <color=#EA2E5D>[Имя игрока]</color> чтобы удалить игрока из списка друзей."},
-                    { "FRIEND.ADD.HELP", "Используйте /friend add <color=#EA2E5D>[Имя игрока]</color> чтобы добавить игрока в список друзей"},
-                    { "YOUR.ACTIVE.REQUEST", "Вы уже отправили игроку <color=#EA2E5D>{0}</color> предложение дружбы, дождитесь ответа."},
-                    { "PLAYER.ACTIVE.REQUEST", "Игрок <color=#EA2E5D>{0}</color> имеет активное предложение дружбы от <color=#EA2E5D>{1}</color>, попробуйте позже."},
-                    { "PLAYER.SEND.YOU.REQUEST", "<size=14>Игрок <color=#EA2E5D>{0}</color> уже отправил вам предложение дружбы.</size>\n<size=12>\nИспользуйте <color=#EA2E5D>/friend accept</color> чтобы принять предложение или <color=#EA2E5D>/friend deny</color> чтобы отменить предложение.</size>"},
-                    { "PLAYER.ALREADY.FRIENDS", "Игрок <color=#EA2E5D>{0}</color> уже есть в списке друзей."},
-                    { "CANT.SEND.REQUEST.YOURSELF", "Вы не можете отправить предложение дружбы самому себе."},
-                    { "CANT.SEND.REMOVE.YOURSELF", "Вы не можете удалять самого себя."},
-                    { "CANT.SEND.REQUEST.YOU.COOLDOWN", "Вы не можете отправлять предложения дружбы, вы недавно удалили из списка одного из друзей, подождите <color=#EA2E5D>{0}</color>."},
-                    { "CANT.SEND.REQUEST.TARGET.COOLDOWN", "Вы не можете отправить предложение дружбы игроку <color=#EA2E5D>{0}</color>, так как он недавно удалил из списка одного из друзей, подождите <color=#EA2E5D>{1}</color>."},
-                    { "CANT.SEND.REQUEST.YOU.COOLDOWN.OLD.FRIENDS", "Вы не можете отправить предложение дружбы игроку <color=#EA2E5D>{0}</color>, так как вы недавно удалили его из списка друзей, подождите <color=#EA2E5D>{1}</color>."},
-                    { "CANT.SEND.REQUEST.TARGET.COOLDOWN.OLD.FRIENDS", "Вы не можете отправить предложение дружбы игроку <color=#EA2E5D>{0}</color>, так как он недавно удалил вас из списка друзей, подождите <color=#EA2E5D>{1}</color>."},           
-                    { "CANT.SEND.REQUEST.YOU.LIMIT.ADD.FRIENDS", "Вы не можете отправлять предложения дружбы, вы исчерпали лимит на количество добавлений в друзья."},
-                    { "CANT.SEND.REQUEST.TARGET.LIMIT.ADD.FRIENDS", "Вы не можете отправить предложение дружбы игроку <color=#EA2E5D>{0}</color>, он исчерпал лимит на количество добавлений в друзья."},
-                    { "YOUR.FRIENDS.LIMIT", "Вы имеете максимальное количество друзей <color=#EA2E5D>{0}</color>."},
-                    { "PLAYER.FRIENDS.LIMIT", "Игрок <color=#EA2E5D>{0}</color> имеет максимальное количество друзей <color=#EA2E5D>{1}</color>."},
-                    { "YOU.NO.REQUEST", "У вас нет предложений дружбы."},
-                    { "YOU.REFUSE.REQUEST", "Вы отказались от предложения дружбы."},
-                    { "PLAYER.REFUSE.REQUEST", "Игрок <color=#EA2E5D>{0}</color> отказался от предложения дружбы."},
-                    { "PLAYER.CANCELED.WAIT.REQUEST", "Игрок <color=#EA2E5D>{0}</color> не ответил на предложение дружбы."},
-                    { "YOU.CANCELED.WAIT.REQUEST", "Вы не ответили на предложение дружбы."},
-                    { "YOU.SEND.REQUEST", "Предложение дружбы для <color=#EA2E5D>{0}</color> успешно отправлено."},
-                    { "PLAYER.SEND.REQUEST.YOU", "<size=14>Игрок <color=#EA2E5D>{0}</color> отправил вам предложение дружбы.</size>\n<size=12>Используйте <color=#EA2E5D>/friend accept</color> чтобы принять предложение или <color=#EA2E5D>/friend deny</color> чтобы отменить предложение.</size>"},
-                    { "YOU.ADDED.PLAYER", "Игрок <color=#EA2E5D>{0}</color> добавлен в список друзей."},
-                    { "PLAYER.ADDED.YOU", "Игрок <color=#EA2E5D>{0}</color> добавил вас в список друзей."},
-                    { "PLAYER.NOTFOUND.FRIEND", "Игрок <color=#EA2E5D>{0}</color> не является вашим другом."},
-                    { "YOU.REMOVED.FRIEND", "Игрок <color=#EA2E5D>{0}</color> удален из списка друзей."},
-                    { "YOU.REMOVED.FRIENDS", "Вы очистили свой список друзей."},
-                    { "FRIEND.REMOVED.YOU", "Игрок <color=#EA2E5D>{0}</color> удалил вас из списка друзей."},
-                    { "FRIEND.LIST", "<size=14>Список друзей:</size>\n<size=12>{0}</size>"},
-                    { "YOU.NOT.FRIEND", "У вас нет друзей."},
-                    { "PLAYER.NOTFOUND", "Игрок <color=#EA2E5D>{0}</color> не найден, возможно он отключён."},
-                    { "PLAYER.NOTFOUND.FRIEND.LIST", "Игрок <color=#EA2E5D>{0}</color> не найден в списке ваших друзей."},
-                    { "PLAYER.MULTIPLE.FOUND", "Найдено <color=#EA2E5D>{0}</color> похожих игроков, уточните запрос или используйте steam id игрока."}  
-                }, this, "ru");
-
-                lang.RegisterMessages(new Dictionary<string, string>
-                {                
-                    { "CMD.FRIEND.HELP", "<size=14>Commands to <color=#EA2E5D>manage</color> friends:</size>\n<size=12>/friend add <color=#EA2E5D>[Player name]</color> - Add to friends list\n/friend remove <color=#EA2E5D>[Player name]</color> - Remove from friends list\n/friend removeall - Clear friends list\n/friend list - Show friends list</size>."},
-                    { "FRIEND.REMOVE.HELP", "Use /friend remove <color=#EA2E5D>[Player Name]</color> to remove a player from your friends list."},
-                    { "FRIEND.ADD.HELP", "Use /friend add <color=#EA2E5D>[Player Name]</color> to add a player to your friends list"},
-                    { "YOUR.ACTIVE.REQUEST", "You have already sent player <color=#EA2E5D>{0}</color> a friendship offer, wait for a reply."},
-                    { "PLAYER.ACTIVE.REQUEST", "Player <color=#EA2E5D>{0}</color> has an active friendship offer from <color=#EA2E5D>{1}</color>, try again later."},
-                    { "PLAYER.SEND.YOU.REQUEST", "<size=14>A player <color=#EA2E5D>{0}</color> has already sent you a friendship offer.</size>\n<size=12>nUse <color=#EA2E5D>/friend accept</color> to accept the offer or <color=#EA2E5D>/friend deny</color> to decline the offer.</size>"},
-                    { "PLAYER.ALREADY.FRIENDS", "Player <color=#EA2E5D>{0}</color> is already in your friends list."},
-                    { "CANT.SEND.REQUEST.YOURSELF", "You can't send a friendship offer to yourself."},
-                    { "CANT.SEND.REMOVE.YOURSELF", "You can't delete yourself."},
-                    { "CANT.SEND.REQUEST.YOU.COOLDOWN", "You can't send friendship offers, you recently removed one of your friends from your list, wait <color=#EA2E5D>{0}</color>."},
-                    { "CANT.SEND.REQUEST.TARGET.COOLDOWN", "You can't send a friendship offer to player <color=#EA2E5D>{0}</color> because he recently removed one of his friends from the list, wait <color=#EA2E5D>{1}</color>."},
-                    { "CANT.SEND.REQUEST.YOU.COOLDOWN.OLD.FRIENDS", "You cannot send a friendship offer to player <color=#EA2E5D>{0}</color> because you recently removed him from your friends list, wait <color=#EA2E5D>{1}</color>."},
-                    { "CANT.SEND.REQUEST.TARGET.COOLDOWN.OLD.FRIENDS", "You can't send a friendship offer to player <color=#EA2E5D>{0}</color> because he recently removed you from his friends list, wait <color=#EA2E5D>{1}</color>."},           
-                    { "CANT.SEND.REQUEST.YOU.LIMIT.ADD.FRIENDS", "You can't send friendship offers, you've exhausted your friend add limit."},
-                    { "CANT.SEND.REQUEST.TARGET.LIMIT.ADD.FRIENDS", "You cannot send a friendship offer to player <color=#EA2E5D>{0}</color>, he has reached the limit on the number of friendships he can add."},
-                    { "YOUR.FRIENDS.LIMIT", "You have a maximum number of friends <color=#EA2E5D>{0}</color>."},
-                    { "PLAYER.FRIENDS.LIMIT", "Player <color=#EA2E5D>{0}</color> has a maximum of <color=#EA2E5D>{1}</color> friends."},
-                    { "YOU.NO.REQUEST", "You have no offers of friendship."},
-                    { "YOU.REFUSE.REQUEST", "You turned down an offer of friendship."},
-                    { "PLAYER.REFUSE.REQUEST", "Player <color=#EA2E5D>{0}</color> declined the offer of friendship."},
-                    { "PLAYER.CANCELED.WAIT.REQUEST", "Player <color=#EA2E5D>{0}</color> has not responded to the offer of friendship."},
-                    { "YOU.CANCELED.WAIT.REQUEST", "You haven't responded to the offer of friendship."},
-                    { "YOU.SEND.REQUEST", "The friendship offer for <color=#EA2E5D>{0}</color> has been successfully sent."},
-                    { "PLAYER.SEND.REQUEST.YOU", "<size=14>A player <color=#EA2E5D>{0}</color> has sent you a friendship offer.</size>\n<size=12>Use <color=#EA2E5D>/friend accept</color> to accept the offer or <color=#EA2E5D>/friend deny</color> to cancel the offer.</size>>"},
-                    { "YOU.ADDED.PLAYER", "Player <color=#EA2E5D>{0}</color> has been added to your friends list."},
-                    { "PLAYER.ADDED.YOU", "Player <color=#EA2E5D>{0}</color> has added you to his friends list."},
-                    { "PLAYER.NOTFOUND.FRIEND", "Player <color=#EA2E5D>{0}</color> is not your friend."},
-                    { "YOU.REMOVED.FRIEND", "Player <color=#EA2E5D>{0}</color> has been removed from his friends list."},
-                    { "YOU.REMOVED.FRIENDS", "You've cleared your friends list."},
-                    { "FRIEND.REMOVED.YOU", "Player <color=#EA2E5D>{0}</color> has removed you from his friends list."},
-                    { "FRIEND.LIST", "<size=14>Friends list:</size>\n<size=12>{0}</size>"},
-                    { "YOU.NOT.FRIEND", "You have no friends."},
-                    { "PLAYER.NOTFOUND", "Player <color=#EA2E5D>{0}</color> is not found, he may be disabled."},
-                    { "PLAYER.NOTFOUND.FRIEND.LIST", "Player <color=#EA2E5D>{0}</color> is not found in your friends list."},
-                    { "PLAYER.MULTIPLE.FOUND", "Found <color=#EA2E5D>{0}</color> similar players, refine your query or use the player's SteamID64."}  
-                }, this, "en");
-            }
-
-            private string GetLangMessage(string key, string steamID = null) => lang.GetMessage(key, this, steamID);
-
-            private static ConfigData configData;
-            
-            private class ConfigData
-            {
-                [JsonProperty(PropertyName = "Максимальное количество друзей")]
-                public int MaxFriends;
-                [JsonProperty(PropertyName = "Время для ответа на предложение дружбы (в секундах)")]
-                public int TimeToAnswer;
-                [JsonProperty(PropertyName = "Блокировка добавления игроков в друзья после удаления (в минутах)")]
-                public int BlockTimeToAddAgain;         
-                [JsonProperty(PropertyName = "Блокировка добавления удаленного игрока в друзья после удаления (в минутах)")]
-                public int BlockTimeToAddFriendAgain;           
-                [JsonProperty(PropertyName = "Лимит на количество добавлений в друзья")]
-                public int LimitToAddFrinds;                        
-            }
-            
-            private void LoadVariables() => configData = Config.ReadObject<ConfigData>();        
-            
-            protected override void LoadDefaultConfig()
-            {
-                var config = new ConfigData
-                {
-                    MaxFriends = 15,
-                    TimeToAnswer = 20,
-                    BlockTimeToAddAgain = 5,
-                    BlockTimeToAddFriendAgain = 10,
-                    LimitToAddFrinds = 20
                 };
-                SaveConfig(config);
-                timer.Once(0.3f, ()=>SaveConfig(config));
-            }        
-            
-            private void SaveConfig(ConfigData config) => Config.WriteObject(config, true);             
-            
-            
-            private void LoadData() => FriendsData = Interface.GetMod().DataFileSystem.ReadObject<Dictionary<ulong, List<ulong>>>("Friends/FriendsMainData");
-            private void SaveData() => Interface.GetMod().DataFileSystem.WriteObject("Friends/FriendsMainData", FriendsData);
-            private void LoadTmpData() => PlayerTempData = Interface.GetMod().DataFileSystem.ReadObject<Dictionary<ulong, PlayerInfo>>("Friends/FriendsTempData");
-            private void SaveTmpData() => Interface.GetMod().DataFileSystem.WriteObject("Friends/FriendsTempData", PlayerTempData);
-            private void LoadWipeData() => FriendsWipeData = Interface.GetMod().DataFileSystem.ReadObject<Dictionary<ulong, List<ulong>>>("Friends/FriendsWipeData");
-            private void SaveWipeData() => Interface.GetMod().DataFileSystem.WriteObject("Friends/FriendsWipeData", FriendsWipeData);
 
-            private bool HasFriend(ulong playerId, ulong friendId) 
-            {
-                if (!FriendsWipeData.ContainsKey(playerId)) return false;
-                return FriendsWipeData[playerId].Contains(friendId);
-            }
-
-            private bool HasFriendS(string playerS, string friendS)
-            {
-                if (string.IsNullOrEmpty(playerS) || string.IsNullOrEmpty(friendS)) return false;           
-                if (!playerS.IsSteamId() || !friendS.IsSteamId()) return false;
-                var playerId = Convert.ToUInt64(playerS);
-                var friendId = Convert.ToUInt64(friendS);
-                return HasFriend(playerId, friendId);           
-            }                       
-
-            private bool AreFriends(ulong playerId, ulong friendId)
-            {
-                if (!FriendsWipeData.ContainsKey(playerId)) return false;
-                if (!FriendsWipeData.ContainsKey(friendId)) return false;
-                return FriendsWipeData[playerId].Contains(friendId) && FriendsWipeData[friendId].Contains(playerId);
-            }
-
-            private bool AreFriendsS(string playerS, string friendS)
-            {
-                if (string.IsNullOrEmpty(playerS) || string.IsNullOrEmpty(friendS)) return false;           
-                if (!playerS.IsSteamId() || !friendS.IsSteamId()) return false;
-                var playerId = Convert.ToUInt64(playerS);
-                var friendId = Convert.ToUInt64(friendS);
-                return AreFriends(playerId, friendId);
-            }
-
-            private bool HadFriend(ulong playerId, ulong friendId) => HasFriend(playerId, friendId);
-            private bool HadFriendS(string playerS, string friendS) => HasFriendS(playerS, friendS);
-            private bool WereFriends(ulong playerId, ulong friendId) => AreFriends(playerId, friendId);
-            private bool WereFriendsS(string playerS, string friendS) => AreFriendsS(playerS, friendS);
-            private bool IsFriend(ulong playerId, ulong friendId) => HasFriend(playerId, friendId);
-            private bool IsFriendS(string playerS, string friendS) => HasFriendS(playerS, friendS);
-            private bool WasFriend(ulong playerId, ulong friendId) => AreFriends(playerId, friendId);
-            private bool WasFriendS(string playerS, string friendS) => AreFriendsS(playerS, friendS);          
-            
-            private ulong[] GetFriends(ulong playerId) 
-            {
-                if (!FriendsWipeData.ContainsKey(playerId)) return null;
-                return FriendsWipeData[playerId].ToArray();
-            }               
-
-            private string[] GetFriendsS(string playerS)
-            {
-                if (string.IsNullOrEmpty(playerS)) return null;
-                if (!playerS.IsSteamId()) return null;
-                
-                var playerId = Convert.ToUInt64(playerS);
-                if (!FriendsWipeData.ContainsKey(playerId)) return null;
-                return FriendsWipeData[playerId].ToList().ConvertAll(f => f.ToString()).ToArray();
-            }
-
-            private string[] GetFriendList(ulong playerId)
-            {
-                if (!FriendsWipeData.ContainsKey(playerId)) return null;
-                            
-                var players = new List<string>();
-                foreach (var friendID in FriendsWipeData[playerId]) players.Add(FindPlayerName(friendID));
-                return players.ToArray();
-            }
-
-            private string[] GetFriendListS(string playerS)
-            {
-                if (string.IsNullOrEmpty(playerS)) return null;
-                if (!playerS.IsSteamId()) return null;
-                return GetFriendList(Convert.ToUInt64(playerS));
-            }
-
-            private ulong[] IsFriendOf(ulong playerId)
-            {
-                return FriendsWipeData.Where(x=> x.Value.Contains(playerId)).Select(x=> x.Key).ToArray();
-            }
-
-            private string[] IsFriendOfS(string playerS)
-            {
-                if (string.IsNullOrEmpty(playerS)) return null;
-                if (!playerS.IsSteamId()) return null;
-                
-                var playerId = Convert.ToUInt64(playerS);
-                var friends = IsFriendOf(playerId);
-                return friends.ToList().ConvertAll(f => f.ToString()).ToArray();
-            }
-
-            // ApiIsFriend(ulong playerId, ulong targetId) return true / null - являются ли игроки друзьями
-            private bool ApiIsFriend(ulong playerId, ulong targetId) => AreFriends(playerId, targetId);
-            
-            // ApiGetFriends(ulong playerId) return List<ulong> / null - получить список друзей     
-            private List<ulong> ApiGetFriends(ulong playerId) 
-            {
-                var friends = GetFriends(playerId);
-                if (friends != null) return friends.ToList();
-                return null;
-            }
-            
-            // ApiGetActiveFriends(BasePlayer player) return List<ulong> / null - список друзей онлайн
-            private List<ulong> ApiGetActiveFriends(BasePlayer player)
-            {
-                var result = new List<ulong>();
-                if (player != null)
+                configuration.gui.panelRequest = new CuiRectTransformComponent
                 {
-                    var players = BasePlayer.activePlayerList.ToList();
-                    var friends = GetFriends(player.userID);                
-                    if (friends != null) foreach(var friend in friends.Where(x=> players.Exists(y=> y != null && y.userID == x))) result.Add(friend);
-                    else return null;
-                }
-                
-                return result;
-            }
-            
-            // ApiGetActiveFriendsUserId(ulong userId) return List<ulong> / null - список друзей онлайн
-            private List<ulong> ApiGetActiveFriendsUserId(ulong userId)
-            {
-                var result = new List<ulong>();                                 
-                var friends = GetFriends(userId);
-                var players = BasePlayer.activePlayerList.ToList();
-                
-                if (friends != null) foreach(var friend in friends.Where(x=> players.Exists(y=> y != null && y.userID == x))) result.Add(friend);                   
-                else return null;
-                
-                return result;
-            }
+                    AnchorMin = "0.75 0.07",
+                    AnchorMax = "0.75 0.07",
 
-            private List<PlayerEntry> GetFriends(BasePlayer player)
-            {
-                var playerID = player.userID;
-                List<PlayerEntry> list = new List<PlayerEntry>();
+                    OffsetMin = "-120 -31",
+                    OffsetMax = "100 25"
+                };
 
-                if (5 > 0) if (friends.TryGetValue(playerID, out list)) return list;
+                configuration.cooldowns.permissionCooldown.Add("friends.vip", 30f);
+                configuration.cooldowns.permissionCooldown.Add("friends.premium", 10f);
 
-                list = new List<PlayerEntry>();
-                if (GetFriends(playerID) != null)
-                {
-                    foreach (var value in GetFriends(playerID))
-                    {
-                        var data = permission.GetUserData(value.ToString());
-                        var displayName = data.LastSeenNickname;
-                        if (displayName == "Unnamed")
-                        {
-                            var target = BasePlayer.FindByID(value) ?? BasePlayer.FindSleeping(value);
-                            if (target != null)
-                            {
-                                displayName = target.displayName;
-                            }
-                        }
-                    
-                        list.Add(new PlayerEntry
-                        {
-                            name = displayName,
-                            id = value,
-                        });
-                    }
-                }
-
-                if (5 > 0) friends.Add(playerID, list);
-
-                return list;
-            }
-
-
-            private static string HexToCuiColor(string hex)
-            {
-                if (string.IsNullOrEmpty(hex))
-                {
-                    hex = "#FFFFFFFF";
-                }
-
-                var str = hex.Trim('#');
-
-                if (str.Length == 6)
-                    str += "FF";
-
-                if (str.Length != 8)
-                {
-                    throw new Exception(hex);
-                    throw new InvalidOperationException("Cannot convert a wrong format.");
-                }
-
-                var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
-                var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
-                var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
-                var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
-
-                Color color = new Color32(r, g, b, a);
-
-                return $"{color.r:F2} {color.g:F2} {color.b:F2} {color.a:F2}";
-            }
-            
-            private float[] SquarePos(int number, double count, float AmountUIonLine, float ToRaiseORLower, float StretchSide, float StretchUP, float DistanceBetweenA, float DistanceBetweenB, float MoveUIinLeft)
-            {
-                float offsetY = 0; float offsetX = 0;
-                
-                Vector2 position = new Vector2(AmountUIonLine, ToRaiseORLower); 
-                Vector2 dimensions = new Vector2(StretchSide, StretchUP);
-                
-                int colum = (int)Math.Floor((decimal)((1 - position.x * 2) / dimensions.x));
-                int row = (int)Math.Floor((decimal)(number / colum));
-                
-                if(colum*(row + 1) > count) count = count - colum * row;
-                if(count > colum) count = colum;
-                
-                position.x = (float)(1 - ((MoveUIinLeft + dimensions.x) * count)) / 2;
-                
-                offsetY = (DistanceBetweenB - dimensions.y) * row;
-                offsetX = (DistanceBetweenA + dimensions.x) * (number - (row* colum));
-                
-                Vector2 offset = new Vector2(offsetX, offsetY);
-                Vector2 posMin = position + offset;
-                Vector2 posMax = posMin + dimensions;
-                
-                return new float[] { posMin.x, posMin.y, posMax.x, posMax.y };
+                return configuration;
             }
         }
+
+        protected override void LoadDefaultConfig() => _config = Configuration.GetDefault();
+
+        protected override void SaveConfig() => Config.WriteObject(_config);
+
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+
+            try
+            {
+                _config = Config.ReadObject<Configuration>();
+            }
+            catch
+            {
+                LoadDefaultConfig();
+            }
+
+            NextTick(SaveConfig);
+        }
+
+        #endregion
+
+        #region Дата
+
+        private DataFile _data;
+
+        private class DataFile
+        {
+            public Dictionary<ulong, PlayerData> playersData = new Dictionary<ulong, PlayerData>();
+
+            public class PlayerData
+            {
+                public List<FriendInfo> friends = new List<FriendInfo>();
+
+                public List<uint> entitiesCupboard = new List<uint>();
+                public List<uint> entitiesTurret = new List<uint>();
+
+                public bool enableAuthorizeLocks, enableAuthorizeCupboards, enableAuthorizeTurrets, enableFF;
+
+                public class FriendInfo
+                {
+                    public ulong id;
+                    public string name;
+                }
+            }
+
+            public PlayerData GetPlayerData(ulong userID)
+            {
+                PlayerData data;
+
+                if (playersData.ContainsKey(userID)) data = playersData[userID];
+                else
+                {
+                    data = new DataFile.PlayerData();
+                    SetPlayerData(userID, data);
+                }
+
+                return data;
+            }
+
+            public void SetPlayerData(ulong userID, PlayerData data)
+            {
+                if (playersData.ContainsKey(userID)) playersData.Remove(userID);
+
+                playersData.Add(userID, data);
+            }
+        }
+
+        protected void LoadData()
+        {
+            try
+            {
+                _data = Interface.Oxide.DataFileSystem.ReadObject<DataFile>("Friends");
+            }
+            catch
+            {
+                _data = new DataFile();
+            }
+
+            NextTick(() => SaveData());
+        }
+
+        protected void SaveData(bool needLog = false)
+        {
+            Interface.Oxide.DataFileSystem.WriteObject("Friends", _data);
+
+            if (needLog) Puts("Дата-файл сохранен.");
+        }
+
+        #endregion
+
+        #region Локализация
+
+        protected override void LoadDefaultMessages()
+        {
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["Error_EnterName"] = "Введите никнейм игрока!",
+                ["Error_NoPlayerFounded"] = "Не удалось найти игрока с таким никнеймом, возможно он не в сети!",
+                ["Error_PlayerAlreadyFriend"] = "Игрок {0} уже у вас в друзьях!",
+                ["Error_MaxFriends"] = "Вы достигли максимального кол-ва друзей!",
+                ["Error_CooldownTime"] = "Подождите {0} секунд, прежде чем снова отправить заявку!",
+                ["Error_HasIncoming"] = "У игрока уже есть другая входящая заявка в друзья!",
+                ["Error_CantDelete"] = "Не удалось удалить друга!",
+                ["Error_CantAccept"] = "Не удалось принять заявку в друзья!",
+                ["Error_NoIncoming"] = "У вас нет входящих заявок в друзья!",
+                ["Success_RequestSended"] = "Заявка успешно отправлена игроку {0}",
+                ["Success_FriendDeleted"] = "Игрок {0} успешно удален из списка друзей!",
+                ["Success_RequestDeclined"] = "Вы отклонили заявку в друзья",
+                ["Success_RequestDeclined_Player"] = "Вы отклонили заявку в друзья от игрока {0}",
+                ["Notice_FriendDeleted"] = "Игрок {0} удалил вас из списка друзей!",
+                ["Notice_FriendClaimed_Target"] = "Игрок {0} теперь у вас в друзьях!",
+                ["Notice_FriendClaimed_Player"] = "Теперь {0} является вашим другом!",
+                ["Notice_RequestDeclined"] = "Игрок {0} отклонил вашу заявку в друзья",
+                ["Notice_RequestOut_Target"] = "Время на принятие заявки истекло!",
+                ["Notice_RequestOut_Sender"] = "Игрок {0} не принял вашу заявку вовремя!",
+                ["Info_FF"] = "Огонь по друзьям: {0}",
+                ["Info_Locks"] = "Авторизация в замках: {0}",
+                ["Info_Turrets"] = "Авторизация в турелях: {0}",
+                ["Info_Cupboard"] = "Авторизация в шкафах: {0}",
+                ["Status_Enabled"] = "Включено",
+                ["Status_Disabled"] = "Отключено",
+                ["GUI_Header_Text"] = "HuntFriends",
+                ["GUI_Settings"] = "Настройки",
+                ["GUI_FriendList"] = "Список друзей",
+                ["GUI_FriendAdd"] = "Добавить в друзья",
+                ["GUI_Auth_Locks"] = "Авторизация в замках",
+                ["GUI_Auth_Cupboard"] = "Авторизация в шкафах",
+                ["GUI_Auth_Turret"] = "Авторизация в турелях",
+                ["GUI_FF"] = "Урон по друзьям",
+                ["GUI_FriendAdd_Nickname"] = "Введите никнейм",
+                ["GUI_FriendAdd_SendRequest"] = "Отправить заявку в друзья",
+                ["GUI_Disable_Text"] = "Выкл.",
+                ["GUI_Enable_Text"] = "Вкл.",
+                ["GUI_Request_Info"] = "Заявка в друзья от {0}",
+                ["GUI_Request_Accept"] = "Принять",
+                ["GUI_Request_Decline"] = "Отклонить",
+                ["GUI_Card_Button_Remove"] = "Удалить"
+            }, this, "ru");
+
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["Error_EnterName"] = "Enter player nickname!",
+                ["Error_NoPlayerFounded"] = "Couldn't find a player with that nickname, maybe he's offline!",
+                ["Error_PlayerAlreadyFriend"] = "Player {0} is already your friend!",
+                ["Error_MaxFriends"] = "You have reached the maximum number of friends!",
+                ["Error_CooldownTime"] = "Wait {0} seconds before send your friend request again!",
+                ["Error_HasIncoming"] = "The player already has another incoming friend request!",
+                ["Error_CantDelete"] = "Failed to delete friend!",
+                ["Error_CantAccept"] = "Failed to accept friend request!",
+                ["Error_NoIncoming"] = "You have no incoming friend requests!",
+                ["Success_RequestSended"] = "The request has been successfully sent to player {0}",
+                ["Success_FriendDeleted"] = "Player {0} has been successfully removed from your friends list!",
+                ["Success_RequestDeclined"] = "You declined a friend request",
+                ["Success_RequestDeclined_Player"] = "You declined a friend request from player {0}",
+                ["Notice_FriendDeleted"] = "Player {0} has removed you from the friends list!",
+                ["Notice_FriendClaimed_Target"] = "Player {0} is now your friend!",
+                ["Notice_FriendClaimed_Player"] = "Now {0} is your friend!",
+                ["Notice_RequestDeclined"] = "Player {0} has rejected your friend request",
+                ["Notice_RequestOut_Target"] = "The time for accepting friend request has expired!",
+                ["Notice_RequestOut_Sender"] = "Player {0} did not accept your friend request on time!",
+                ["Info_FF"] = "Friendly Fire: {0}",
+                ["Info_Locks"] = "Locks auth: {0}",
+                ["Info_Turrets"] = "Turrets auth: {0}",
+                ["Info_Cupboard"] = "Cupboards auth: {0}",
+                ["Status_Enabled"] = "Enabled",
+                ["Status_Disabled"] = "Disabled",
+                ["GUI_Header_Text"] = "HuntRUST",
+                ["GUI_Settings"] = "Settings",
+                ["GUI_FriendList"] = "Friends List",
+                ["GUI_FriendAdd"] = "Add as Friend",
+                ["GUI_Auth_Locks"] = "Locks auth",
+                ["GUI_Auth_Cupboard"] = "Cupboards auth",
+                ["GUI_Auth_Turret"] = "Turrets auth",
+                ["GUI_FF"] = "Friendly Fire",
+                ["GUI_FriendAdd_Nickname"] = "Enter nickname",
+                ["GUI_FriendAdd_SendRequest"] = "Send friend request",
+                ["GUI_Disable_Text"] = "Off",
+                ["GUI_Enable_Text"] = "On",
+                ["GUI_Request_Info"] = "Friend request from {0}",
+                ["GUI_Request_Accept"] = "Accept",
+                ["GUI_Request_Decline"] = "Decline",
+                ["GUI_Card_Button_Remove"] = "Remove"
+            }, this, "en");
+        }
+
+        private string GetMessage(string key, BasePlayer player) => lang.GetMessage(key, this, player.UserIDString);
+
+        #endregion
+
+        #region Методы
+
+        [ChatCommand("friends")]
+        private void chatCommand(BasePlayer player, string command, string[] args)
+        {
+            if (args == null || args?.Length == 0)
+            {
+                OpenMenu(player);
+            }
+            else
+            {
+                if (args[0] == "add")
+                {
+                    if (args.Length != 1)
+                    {
+                        var nickname = args.ToList();
+                        nickname.Remove("add");
+
+                        var data = _data.GetPlayerData(player.userID);
+                        var target = (BasePlayer)null;
+
+                        foreach (var playerFind in BasePlayer.activePlayerList)
+                        {
+                            if (playerFind.displayName.Contains(string.Join(" ", nickname.ToArray())))
+                            {
+                                target = playerFind;
+                                break;
+                            }
+                        }
+
+                        if (target == null) target = BasePlayer.Find(string.Join(" ", nickname.ToArray()));
+
+                        if (target == null)
+                        {
+                            player.ChatMessage(GetMessage("Error_NoPlayerFounded", player));
+
+                            return;
+                        }
+
+                        if (data.friends.Count + 2 > _config.maxFriends)
+                        {
+                            player.ChatMessage(GetMessage("Error_MaxFriends", player));
+                        }
+
+                        if (_requestCooldown.ContainsKey(player.userID))
+                        {
+                            if (_requestCooldown[player.userID] > UnityEngine.Time.realtimeSinceStartup)
+                            {
+                                player.ChatMessage(string.Format(GetMessage("Error_CooldownTime", player), Mathf.RoundToInt(_requestCooldown[player.userID] - UnityEngine.Time.realtimeSinceStartup)));
+
+                                return;
+                            }
+                            else _requestCooldown.Remove(player.userID);
+                        }
+
+                        var comp = target.GetComponent<PlayerPendingRequest>();
+
+                        if (comp != null)
+                        {
+                            player.ChatMessage(GetMessage("Error_HasIncoming", player));
+
+                            return;
+                        }
+
+                        comp = target.gameObject.AddComponent<PlayerPendingRequest>();
+
+                        comp.from = player.userID;
+                        comp.to = target.userID;
+
+                        comp.cooldownTime = _config.addTime;
+
+                        RenderRequest(target, player);
+
+                        foreach (var perm in _config.cooldowns.permissionCooldown.Keys)
+                        {
+                            if (permission.UserHasPermission(player.UserIDString, perm))
+                            {
+                                _requestCooldown.Add(player.userID, UnityEngine.Time.realtimeSinceStartup + _config.cooldowns.permissionCooldown[perm]);
+
+                                return;
+                            }
+                        }
+
+                        _requestCooldown.Add(player.userID, UnityEngine.Time.realtimeSinceStartup + _config.cooldowns.cooldown);
+
+                        player.ChatMessage(string.Format(GetMessage("Success_RequestSended", player), target.displayName));
+                    }
+                    else
+                    {
+                        player.ChatMessage(GetMessage("Error_EnterName", player));
+
+                        return;
+                    }
+                }
+
+                if (args[0] == "remove")
+                {
+                    if (args.Length != 1)
+                    {
+                        var target = BasePlayer.Find(args[1]);
+
+
+                        if (target == null)
+                        {
+                            player.ChatMessage(GetMessage("Error_CantDelete", player));
+
+                            return;
+                        }
+                        else
+                        {
+                            var data = _data.GetPlayerData(player.userID);
+
+                            if (data.friends.Where(x => x.id == target.userID)?.Count() != 0)
+                            {
+                                data.friends.RemoveAll(x => x.id == target.userID);
+                            }
+
+                            _data.SetPlayerData(player.userID, data);
+
+                            player.ChatMessage(string.Format(GetMessage("Success_FriendDeleted", player), target.displayName));
+
+                            if (target.IsConnected) target.ChatMessage(string.Format(GetMessage("Notice_FriendDeleted", player), target.displayName));
+
+                            var targetData = _data.GetPlayerData(target.userID);
+
+                            targetData.friends.RemoveAll(x => x.id == player.userID);
+
+                            _data.SetPlayerData(target.userID, targetData);
+
+                            if (_config.logs.enableLogs)
+                            {
+                                if (_config.logs.logRemoveFriends)
+                                {
+                                    LogToFile("Log", $"Игрок {player} удалил из друзей игрока {target} | Друзей: {data.friends.Count}", this);
+                                }
+                            }
+
+                            DeAuthFriend(player.userID, target.userID);
+                            API_OnFriendRemoved(player.userID, target.userID);
+
+                            SaveData();
+                        }
+                    }
+                    else
+                    {
+                        player.ChatMessage(GetMessage("Error_EnterName", player));
+
+                        return;
+                    }
+                }
+
+                if (args[0] == "accept")
+                {
+                    if (_pendingRequests.ContainsKey(player.userID))
+                    {
+                        string targetID = _pendingRequests[player.userID].ToString();
+
+                        var target = BasePlayer.Find(targetID);
+
+
+                        if (target == null)
+                        {
+                            CuiHelper.DestroyUi(player, "Friends_Accept");
+
+                            player.ChatMessage(GetMessage("Error_CantAccept", player));
+
+                            _pendingRequests.Remove(player.userID);
+                        }
+                        else
+                        {
+                            CuiHelper.DestroyUi(player, "Friends_Accept");
+
+                            var data = _data.GetPlayerData(player.userID);
+
+                            if (data.friends.Where(x => x.id == target.userID)?.Count() == 0)
+                            {
+                                data.friends.Add(new DataFile.PlayerData.FriendInfo
+                                {
+                                    id = target.userID,
+                                    name = target.displayName
+                                });
+                            }
+
+                            var data2 = _data.GetPlayerData(target.userID);
+
+                            if (data2.friends.Where(x => x.id == player.userID)?.Count() == 0)
+                            {
+                                data2.friends.Add(new DataFile.PlayerData.FriendInfo
+                                {
+                                    id = player.userID,
+                                    name = player.displayName
+                                });
+                            }
+
+                            _data.SetPlayerData(player.userID, data);
+                            _data.SetPlayerData(target.userID, data2);
+
+                            if (player.IsConnected) player.ChatMessage(string.Format(GetMessage("Notice_FriendClaimed_Player", player), target.displayName));
+                            if (target.IsConnected) target.ChatMessage(string.Format(GetMessage("Notice_FriendClaimed_Target", target), player.displayName));
+
+                            _pendingRequests.Remove(target.userID);
+
+                            if (target.GetComponent<PlayerPendingRequest>() != null)
+                                UnityEngine.Object.Destroy(target.GetComponent<PlayerPendingRequest>());
+
+                            if (_config.logs.enableLogs)
+                            {
+                                if (_config.logs.logAddFriends)
+                                {
+                                    LogToFile("Log", $"Игрок {player} добавил в друзья игрока {target} | Друзей: {data.friends.Count}", this);
+                                }
+                            }
+
+                            AuthFriend(target.userID, player.userID);
+                            API_OnFriendAdded(player.userID, target.userID);
+
+                            SaveData();
+                        }
+                    }
+                    else
+                    {
+                        player.ChatMessage(GetMessage("Error_NoIncoming", player));
+
+                        return;
+                    }
+                }
+
+                var playerData = _data.GetPlayerData(player.userID);
+
+                if (args[0] == "ff")
+                {
+                    playerData.enableFF = !playerData.enableFF;
+
+                    _data.SetPlayerData(player.userID, playerData);
+
+                    player.ChatMessage(string.Format(GetMessage("Info_FF", player), ConvertBool(playerData.enableFF, player).ToLower()));
+                }
+
+                if (args[0] == "locks")
+                {
+                    playerData.enableAuthorizeLocks = !playerData.enableAuthorizeLocks;
+
+                    _data.SetPlayerData(player.userID, playerData);
+
+                    player.ChatMessage(string.Format(GetMessage("Info_Locks", player), ConvertBool(playerData.enableAuthorizeLocks, player).ToLower()));
+
+                    return;
+                }
+
+                if (args[0] == "turrets")
+                {
+                    playerData.enableAuthorizeTurrets = !playerData.enableAuthorizeTurrets;
+
+                    _data.SetPlayerData(player.userID, playerData);
+
+                    player.ChatMessage(string.Format(GetMessage("Info_Turrets", player), ConvertBool(playerData.enableAuthorizeTurrets, player).ToLower()));
+
+                    return;
+                }
+
+                if (args[0] == "cupboard")
+                {
+                    playerData.enableAuthorizeCupboards = !playerData.enableAuthorizeCupboards;
+
+                    _data.SetPlayerData(player.userID, playerData);
+
+                    player.ChatMessage(string.Format(GetMessage("Info_Cupboard", player), ConvertBool(playerData.enableAuthorizeCupboards, player).ToLower()));
+
+                    return;
+                }
+            }
+        }
+
+        [ConsoleCommand("friends")]
+        private void ConsoleCommand(ConsoleSystem.Arg arg)
+        {
+            if (arg.Player() != null)
+            {
+                var player = arg.Player();
+
+                if (arg.HasArgs())
+                {
+                    if (arg.Args[0] == "close")
+                    {
+                        CuiHelper.DestroyUi(player, "Friends_Background");
+                    }
+
+                    if (arg.Args[0] == "command")
+                    {
+                        if (arg.HasArgs(2))
+                        {
+                            string args = "";
+
+                            if (arg.HasArgs(3))
+                            {
+                                for (int i = 3; i < arg.Args.Length; i++)
+                                {
+                                    args = args + $"\"{arg.Args[i]}\"";
+                                }
+                            }
+
+                            rust.RunClientCommand(player, $"chat.say", new string[] { $"/{arg.Args[1]} {args}" });
+                        }
+                    }
+
+                    if (arg.Args[0] == "deauthorize")
+                    {
+                        if (arg.HasArgs(2))
+                        {
+                            var playerData = _data.GetPlayerData(player.userID);
+
+                            if (arg.Args[1] == "locks")
+                            {
+                                if (playerData.enableAuthorizeLocks) playerData.enableAuthorizeLocks = false;
+                                else return;
+                            }
+
+                            if (arg.Args[1] == "turrets")
+                            {
+                                if (playerData.enableAuthorizeTurrets) playerData.enableAuthorizeTurrets = false;
+                                else return;
+                            }
+
+                            if (arg.Args[1] == "cupboard")
+                            {
+                                if (playerData.enableAuthorizeCupboards) playerData.enableAuthorizeCupboards = false;
+                                else return;
+                            }
+
+                            _data.SetPlayerData(player.userID, playerData);
+                            RenderText(player, arg.Args[1] == "locks", arg.Args[1] == "turrets", false, arg.Args[1] == "cupboard");
+                        }
+                    }
+
+                    if (arg.Args[0] == "authorize")
+                    {
+                        if (arg.HasArgs(2))
+                        {
+                            var playerData = _data.GetPlayerData(player.userID);
+
+                            if (arg.Args[1] == "locks")
+                            {
+                                if (!playerData.enableAuthorizeLocks) playerData.enableAuthorizeLocks = true;
+                                else return;
+                            }
+
+                            if (arg.Args[1] == "turrets")
+                            {
+                                if (!playerData.enableAuthorizeTurrets) playerData.enableAuthorizeTurrets = true;
+                                else return;
+                            }
+
+                            if (arg.Args[1] == "cupboard")
+                            {
+                                if (!playerData.enableAuthorizeCupboards) playerData.enableAuthorizeCupboards = true;
+                                else return;
+                            }
+
+                            _data.SetPlayerData(player.userID, playerData);
+                            RenderText(player, arg.Args[1] == "locks", arg.Args[1] == "turrets", false, arg.Args[1] == "cupboard");
+                        }
+                    }
+
+                    if (arg.Args[0] == "ff")
+                    {
+                        if (arg.HasArgs(2))
+                        {
+                            var playerData = _data.GetPlayerData(player.userID);
+
+                            if (arg.Args[1] == "enable")
+                            {
+                                if (!playerData.enableFF) playerData.enableFF = true;
+                                else return;
+                            }
+
+                            if (arg.Args[1] == "disable")
+                            {
+                                if (playerData.enableFF) playerData.enableFF = false;
+                                else return;
+                            }
+
+                            _data.SetPlayerData(player.userID, playerData);
+                            RenderText(player, false, false, true, false);
+                        }
+                    }
+
+                    if (arg.Args[0] == "insert")
+                    {
+                        if (arg.HasArgs(2))
+                        {
+                            if (_lastInput.ContainsKey(player.userID)) _lastInput.Remove(player.userID);
+
+                            _lastInput.Add(player.userID, arg.Args[1]);
+                        }
+                    }
+
+                    if (arg.Args[0] == "add")
+                    {
+                        if (_lastInput.ContainsKey(player.userID))
+                        {
+                            var nickname = _lastInput[player.userID];
+
+                            var target = (BasePlayer)null;
+                            var data = _data.GetPlayerData(player.userID);
+
+                            foreach (var playerFind in BasePlayer.activePlayerList)
+                            {
+                                if (playerFind.displayName.Contains(nickname))
+                                {
+                                    target = playerFind;
+                                    break;
+                                }
+                            }
+
+                            if (target == null) target = BasePlayer.Find(nickname);
+
+                            if (target == null)
+                            {
+                                RenderNotice(player, GetMessage("Error_NoPlayerFounded", player));
+                            }
+                            else
+                            {
+                                if (data.friends.Where(x => x.id == target.userID)?.Count() != 0)
+                                {
+                                    RenderNotice(player, string.Format(GetMessage("Error_PlayerAlreadyFriend", player), target.displayName));
+                                }
+                                else
+                                {
+                                    if (data.friends.Count + 2 > _config.maxFriends)
+                                    {
+                                        RenderNotice(player, GetMessage("Error_MaxFriends", player));
+                                    }
+                                    else
+                                    {
+                                        if (_requestCooldown.ContainsKey(player.userID))
+                                        {
+                                            if (_requestCooldown[player.userID] > UnityEngine.Time.realtimeSinceStartup)
+                                            {
+                                                RenderNotice(player, string.Format(GetMessage("Error_CooldownTime", player), Mathf.RoundToInt(_requestCooldown[player.userID] - UnityEngine.Time.realtimeSinceStartup)));
+
+                                                return;
+                                            }
+                                            else _requestCooldown.Remove(player.userID);
+                                        }
+
+                                        var comp = target.GetComponent<PlayerPendingRequest>();
+
+                                        if (comp != null)
+                                        {
+                                            RenderNotice(player, GetMessage("Error_HasIncoming", player));
+                                            return;
+                                        }
+
+                                        comp = target.gameObject.AddComponent<PlayerPendingRequest>();
+
+                                        comp.from = player.userID;
+                                        comp.to = target.userID;
+
+                                        comp.cooldownTime = _config.addTime;
+
+                                        RenderNotice(player, string.Format(GetMessage("Success_RequestSended", player), target.displayName));
+                                        RenderRequest(target, player);
+
+                                        foreach (var perm in _config.cooldowns.permissionCooldown.Keys)
+                                        {
+                                            if (permission.UserHasPermission(player.UserIDString, perm))
+                                            {
+                                                _requestCooldown.Add(player.userID, UnityEngine.Time.realtimeSinceStartup + _config.cooldowns.permissionCooldown[perm]);
+
+                                                return;
+                                            }
+                                        }
+
+                                        _requestCooldown.Add(player.userID, UnityEngine.Time.realtimeSinceStartup + _config.cooldowns.cooldown);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (arg.Args[0] == "remove")
+                    {
+                        if (arg.HasArgs(2))
+                        {
+                            var target = BasePlayer.Find(arg.Args[1]);
+
+
+                            if (target == null)
+                            {
+                                RenderNotice(player, GetMessage("Error_CantDelete", player));
+                            }
+                            else
+                            {
+                                var data = _data.GetPlayerData(player.userID);
+
+                                if (data.friends.Where(x => x.id == target.userID)?.Count() != 0)
+                                {
+                                    data.friends.RemoveAll(x => x.id == target.userID);
+                                }
+
+                                _data.SetPlayerData(player.userID, data);
+
+                                OpenMenu(player, 1, false);
+                                RenderNotice(player, string.Format(GetMessage("Success_FriendDeleted", player), target.displayName));
+
+                                if (target.IsConnected) target.ChatMessage(string.Format(GetMessage("Notice_FriendDeleted", target), player.displayName));
+
+                                var targetData = _data.GetPlayerData(target.userID);
+
+                                targetData.friends.RemoveAll(x => x.id == player.userID);
+
+                                _data.SetPlayerData(target.userID, targetData);
+
+                                if (_config.logs.enableLogs)
+                                {
+                                    if (_config.logs.logRemoveFriends)
+                                    {
+                                        LogToFile("Log", $"Игрок {player} удалил из друзей игрока {target} | Друзей: {data.friends.Count}", this);
+                                    }
+                                }
+
+                                DeAuthFriend(player.userID, target.userID);
+                                API_OnFriendRemoved(player.userID, target.userID);
+
+                                SaveData();
+                            }
+                        }
+                    }
+
+                    if (arg.Args[0] == "accept")
+                    {
+                        if (_pendingRequests.ContainsKey(player.userID))
+                        {
+                            string targetID = _pendingRequests[player.userID].ToString();
+
+                            var target = BasePlayer.Find(targetID);
+
+
+                            if (target == null)
+                            {
+                                CuiHelper.DestroyUi(player, "Friends_Accept");
+
+                                player.ChatMessage(GetMessage("Error_CantAccept", player));
+
+                                _pendingRequests.Remove(player.userID);
+                            }
+                            else
+                            {
+                                CuiHelper.DestroyUi(player, "Friends_Accept");
+
+                                var data = _data.GetPlayerData(player.userID);
+
+                                if (data.friends.Where(x => x.id == target.userID)?.Count() == 0)
+                                {
+                                    data.friends.Add(new DataFile.PlayerData.FriendInfo
+                                    {
+                                        id = target.userID,
+                                        name = target.displayName
+                                    });
+                                }
+
+                                var data2 = _data.GetPlayerData(target.userID);
+
+                                if (data2.friends.Where(x => x.id == player.userID)?.Count() == 0)
+                                {
+                                    data2.friends.Add(new DataFile.PlayerData.FriendInfo
+                                    {
+                                        id = player.userID,
+                                        name = player.displayName
+                                    });
+                                }
+
+                                _data.SetPlayerData(player.userID, data);
+                                _data.SetPlayerData(target.userID, data2);
+
+                                if (player.IsConnected) player.ChatMessage(string.Format(GetMessage("Notice_FriendClaimed_Player", player), target.displayName));
+                                if (target.IsConnected) target.ChatMessage(string.Format(GetMessage("Notice_FriendClaimed_Target", target), player.displayName));
+
+                                _pendingRequests.Remove(target.userID);
+
+                                if (target.GetComponent<PlayerPendingRequest>() != null)
+                                    UnityEngine.Object.Destroy(target.GetComponent<PlayerPendingRequest>());
+
+                                if (_config.logs.enableLogs)
+                                {
+                                    if (_config.logs.logAddFriends)
+                                    {
+                                        LogToFile("Log", $"Игрок {player} добавил в друзья игрока {target} | Друзей: {data.friends.Count}", this);
+                                    }
+                                }
+
+                                AuthFriend(target.userID, player.userID);
+                                API_OnFriendAdded(player.userID, target.userID);
+
+                                SaveData();
+                            }
+                        }
+                    }
+
+                    if (arg.Args[0] == "noaccept")
+                    {
+                        if (_pendingRequests.ContainsKey(player.userID))
+                        {
+                            CuiHelper.DestroyUi(player, "Friends_Accept");
+
+                            ulong targetID = _pendingRequests[player.userID];
+
+                            var target = BasePlayer.Find(targetID.ToString());
+
+
+                            if (target != null) target.ChatMessage(string.Format(GetMessage("Notice_RequestDeclined", target), player.displayName));
+
+                            _pendingRequests.Remove(player.userID);
+
+                            if (target.GetComponent<PlayerPendingRequest>() != null)
+                                UnityEngine.Object.Destroy(target.GetComponent<PlayerPendingRequest>());
+
+                            if (target != null) player.ChatMessage(string.Format(GetMessage("Success_RequestDeclined_Player", player), target.displayName));
+                            else player.ChatMessage(GetMessage("Success_RequestDeclined", player));
+                        }
+                    }
+
+                    if (arg.Args[0] == "page+")
+                    {
+                        if (!_viewingNow.ContainsKey(player.userID)) return;
+                        else
+                        {
+                            int page = _viewingNow[player.userID];
+                            int allFriends = _data.GetPlayerData(player.userID).friends.Count;
+
+                            if (10 * page < allFriends)
+                            {
+                                _viewingNow.Remove(player.userID);
+                                _viewingNow.Add(player.userID, page + 1);
+
+                                RenderFriends(player, null, page + 1);
+                            }
+                            else return;
+                        }
+                    }
+
+                    if (arg.Args[0] == "page-")
+                    {
+                        if (!_viewingNow.ContainsKey(player.userID)) return;
+                        else
+                        {
+                            int page = _viewingNow[player.userID];
+
+                            if (page <= 1) return;
+                            else
+                            {
+                                _viewingNow.Remove(player.userID);
+                                _viewingNow.Add(player.userID, page - 1);
+
+                                RenderFriends(player, null, page - 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region GUI
+
+        private string ConvertBool(bool value, BasePlayer player)
+        {
+            if (value) return GetMessage("Status_Enabled", player);
+            else return GetMessage("Status_Disabled", player);
+        }
+
+        private static string HexToRustFormat(string hex)
+        {
+            Color color;
+            ColorUtility.TryParseHtmlString(hex, out color);
+
+            var sb = new StringBuilder();
+            return sb.AppendFormat("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a).ToString();
+        }
+
+        private void OpenMenu(BasePlayer player, int page = 1, bool recreateBackground = true)
+        {
+            var data = _data.GetPlayerData(player.userID);
+
+            CuiElementContainer container = new CuiElementContainer();
+
+            if (recreateBackground)
+            {
+                if (_config.gui.image.enableImage)
+                {
+                    if (ImageLibrary != null)
+                    {
+                        container.Add(new CuiElement
+                        {
+                            Name = "Friends_Background",
+                            Parent = "Overlay",
+
+                            Components =
+                            {
+                                new CuiRawImageComponent
+                                {
+                                    Png = ImageLibrary.Call<string>("GetImage", "Friends_Background"),
+                                    Color = HexToRustFormat(_config.gui.bgColor)
+                                },
+
+                                new CuiNeedsCursorComponent(),
+
+                                new CuiRectTransformComponent
+                                {
+                                    AnchorMin = "0 0",
+                                    AnchorMax = "1 1"
+                                },
+                            }
+                        });
+                    }
+                    else
+                    {
+                        container.Add(new CuiElement
+                        {
+                            Name = "Friends_Background",
+                            Parent = "Overlay",
+
+                            Components =
+                            {
+                                new CuiRawImageComponent
+                                {
+                                    Url = _config.gui.image.imageUrl,
+                                    Color = HexToRustFormat(_config.gui.bgColor)
+                                },
+
+                                new CuiNeedsCursorComponent(),
+
+                                new CuiRectTransformComponent
+                                {
+                                    AnchorMin = "0 0",
+                                    AnchorMax = "1 1"
+                                },
+                            }
+                        });
+                    }
+                }
+                else
+                {
+                    container.Add(new CuiElement
+                    {
+                        Name = "Friends_Background",
+                        Parent = "Overlay",
+
+                        Components =
+                        {
+                            new CuiImageComponent
+                            {
+                                Color = HexToRustFormat(_config.gui.bgColor)
+                            },
+
+                            new CuiNeedsCursorComponent(),
+
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = "0 0",
+                                AnchorMax = "1 1"
+                            },
+                        }
+                    });
+                }
+            }
+
+            container.Add(new CuiElement
+            {
+                Name = "Friends_Main",
+                Parent = "Friends_Background",
+
+                Components =
+                {
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Main_Panel",
+                Parent = "Friends_Main",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelMainColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-400 -250",
+                        OffsetMax = "400 250"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Main_Header",
+                Parent = "Main_Panel",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelSecondColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-395 205",
+                        OffsetMax = "395 245"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Header_Text",
+                Parent = "Main_Header",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Header_Text", player),
+                        FontSize = 23,
+                        Align = TextAnchor.MiddleLeft
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-385 -20",
+                        OffsetMax = "0 20"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Header_Button",
+                Parent = "Main_Header",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends close",
+                        Color = "0.7372549 0.3803922 0.3803922 1"
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "355 -15",
+                        OffsetMax = "390 15"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Header_Button_Text",
+                Parent = "Header_Button",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = "X",
+                        FontSize = 20,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Main_Friends",
+                Parent = "Main_Panel",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelSecondColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-395 -245",
+                        OffsetMax = "180 175"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Main_Options",
+                Parent = "Main_Panel",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelSecondColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "185 -65",
+                        OffsetMax = "395 175"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Option_Text_Locks",
+                Parent = "Main_Options",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Auth_Locks", player),
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 1",
+                        AnchorMax = "0.5 1",
+
+                        OffsetMin = "-105 -30",
+                        OffsetMax = "105 0"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Option_Panel_Locks",
+                Parent = "Main_Options",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelThirdColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 1",
+                        AnchorMax = "0.5 1",
+
+                        OffsetMin = "-105 -60",
+                        OffsetMax = "105 -30"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Locks_Status_Text",
+                Parent = "Option_Panel_Locks",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = ConvertBool(data.enableAuthorizeLocks, player),
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-100 -15",
+                        OffsetMax = "-10 15"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Locks_Button_Disable",
+                Parent = "Option_Panel_Locks",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends deauthorize locks",
+                        Color = HexToRustFormat(_config.gui.redButtonsColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "50 -10",
+                        OffsetMax = "100 10"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Locks_Text_Disable",
+                Parent = "Locks_Button_Disable",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Disable_Text", player),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Locks_Button_Enable",
+                Parent = "Option_Panel_Locks",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends authorize locks",
+                        Color = HexToRustFormat(_config.gui.greenButtonsColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "0 -10",
+                        OffsetMax = "45 10"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Locks_Text_Enable",
+                Parent = "Locks_Button_Enable",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Enable_Text", player),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Option_Text_Cupboard",
+                Parent = "Main_Options",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Auth_Cupboard", player),
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 1",
+                        AnchorMax = "0.5 1",
+
+                        OffsetMin = "-105 -90",
+                        OffsetMax = "105 -60"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Option_Panel_Cupboard",
+                Parent = "Main_Options",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelThirdColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 1",
+                        AnchorMax = "0.5 1",
+
+                        OffsetMin = "-105 -120",
+                        OffsetMax = "105 -90"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Cupboard_Status_Text",
+                Parent = "Option_Panel_Cupboard",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = ConvertBool(data.enableAuthorizeCupboards, player),
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-100 -15",
+                        OffsetMax = "-10 15"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Cupboard_Button_Disable",
+                Parent = "Option_Panel_Cupboard",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends deauthorize cupboard",
+                        Color = HexToRustFormat(_config.gui.redButtonsColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "50 -10",
+                        OffsetMax = "100 10"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Cupboard_Text_Disable",
+                Parent = "Cupboard_Button_Disable",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Disable_Text", player),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Cupboard_Button_Enable",
+                Parent = "Option_Panel_Cupboard",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends authorize cupboard",
+                        Color = HexToRustFormat(_config.gui.greenButtonsColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "0 -10",
+                        OffsetMax = "45 10"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Cupboard_Text_Enable",
+                Parent = "Cupboard_Button_Enable",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Enable_Text", player),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Option_Text_Turrets",
+                Parent = "Main_Options",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Auth_Turret", player),
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 1",
+                        AnchorMax = "0.5 1",
+
+                        OffsetMin = "-105 -150",
+                        OffsetMax = "105 -120"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Option_Panel_Turrets",
+                Parent = "Main_Options",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelThirdColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 1",
+                        AnchorMax = "0.5 1",
+
+                        OffsetMin = "-105 -180",
+                        OffsetMax = "105 -150"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Turrets_Status_Text",
+                Parent = "Option_Panel_Turrets",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = ConvertBool(data.enableAuthorizeTurrets, player),
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-100 -15",
+                        OffsetMax = "-10 15"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Turrets_Button_Disable",
+                Parent = "Option_Panel_Turrets",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends deauthorize turrets",
+                        Color = HexToRustFormat(_config.gui.redButtonsColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "50 -10",
+                        OffsetMax = "100 10"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Turrets_Disable_Text",
+                Parent = "Turrets_Button_Disable",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Disable_Text", player),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Turrets_Button_Enable",
+                Parent = "Option_Panel_Turrets",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends authorize turrets",
+                        Color = HexToRustFormat(_config.gui.greenButtonsColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "0 -10",
+                        OffsetMax = "45 10"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Turrets_Text_Enable",
+                Parent = "Turrets_Button_Enable",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Enable_Text", player),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1",
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Option_Text_FF",
+                Parent = "Main_Options",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_FF", player),
+                        Align = TextAnchor.MiddleCenter,
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 1",
+                        AnchorMax = "0.5 1",
+
+                        OffsetMin = "-105 -210",
+                        OffsetMax = "105 -180"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Option_Panel_FF",
+                Parent = "Main_Options",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelThirdColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 1",
+                        AnchorMax = "0.5 1",
+
+                        OffsetMin = "-105 -240",
+                        OffsetMax = "105 -210"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FF_Status_Text",
+                Parent = "Option_Panel_FF",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = ConvertBool(data.enableFF, player),
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-100 -15",
+                        OffsetMax = "-10 15"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FF_Button_Disable",
+                Parent = "Option_Panel_FF",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends ff disable",
+                        Color = HexToRustFormat(_config.gui.redButtonsColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "50 -10",
+                        OffsetMax = "100 10"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FF_Text_Disable",
+                Parent = "FF_Button_Disable",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Disable_Text", player),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FF_Button_Enable",
+                Parent = "Option_Panel_FF",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends ff enable",
+                        Color = HexToRustFormat(_config.gui.greenButtonsColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "0 -10",
+                        OffsetMax = "45 10"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FF_Text_Enable",
+                Parent = "FF_Button_Enable",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Enable_Text", player),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Main_FriendsAdd",
+                Parent = "Main_Panel",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelSecondColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "185 -205",
+                        OffsetMax = "395 -105"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FriendsAdd_Nickname_Text",
+                Parent = "Main_FriendsAdd",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_FriendAdd_Nickname", player),
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-100 20",
+                        OffsetMax = "100 45"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FriendsAdd_InputField_Background",
+                Parent = "Main_FriendsAdd",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelThirdColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-100 -10",
+                        OffsetMax = "100 15"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FriendsAdd_InputField",
+                Parent = "FriendsAdd_InputField_Background",
+
+                Components =
+                {
+                    new CuiInputFieldComponent
+                    {
+                        Command = "friends insert",
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FriendsAdd_Button",
+                Parent = "Main_FriendsAdd",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends add",
+                        Color = HexToRustFormat(_config.gui.greenButtonsColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-100 -40",
+                        OffsetMax = "100 -15"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "FriendsAdd_Button_Text",
+                Parent = "FriendsAdd_Button",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_FriendAdd_SendRequest", player),
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Main_PagesPanel",
+                Parent = "Main_Panel",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = "0 0 0 0"
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "185 -245",
+                        OffsetMax = "395 -210"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Pages_ButtonLeft",
+                Parent = "Main_PagesPanel",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends page-",
+                        Color = HexToRustFormat(_config.gui.panelThirdColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "0.49 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Pages_ButtonLeft_Text",
+                Parent = "Pages_ButtonLeft",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = "<<<",
+                        FontSize = 16,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Pages_ButtonRight",
+                Parent = "Main_PagesPanel",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = "friends page+",
+                        Color = HexToRustFormat(_config.gui.panelThirdColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.51 0",
+                        AnchorMax = "0.999 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Pages_ButtonRight_Text",
+                Parent = "Pages_ButtonRight",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = ">>>",
+                        FontSize = 16,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Main_Text_Options",
+                Parent = "Main_Panel",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Settings", player),
+                        FontSize = 16,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "190 175",
+                        OffsetMax = "390 205"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Main_Text_FriendsList",
+                Parent = "Main_Panel",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_FriendList", player),
+                        Align = TextAnchor.MiddleCenter,
+                        FontSize = 16,
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-395 175",
+                        OffsetMax = "180 205"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Main_Text_AddFriend",
+                Parent = "Main_Panel",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_FriendAdd", player),
+                        FontSize = 16,
+                        Align = TextAnchor.MiddleCenter
+                    },
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "185 -100",
+                        OffsetMax = "395 -70"
+                    }
+                }
+            });
+
+            RenderFriends(player, container, page);
+        }
+
+        private void RenderText(BasePlayer player, bool locks = false, bool turrets = false, bool ff = false, bool cupboards = false)
+        {
+            var data = _data.GetPlayerData(player.userID);
+
+            if (locks)
+            {
+                CuiHelper.DestroyUi(player, "Locks_Status_Text");
+
+                CuiHelper.AddUi(player, new List<CuiElement>
+                {
+                    new CuiElement
+                    {
+                        Name = "Locks_Status_Text",
+                        Parent = "Option_Panel_Locks",
+
+                        Components =
+                        {
+                            new CuiTextComponent
+                            {
+                                Text = ConvertBool(data.enableAuthorizeLocks, player),
+                                Align = TextAnchor.MiddleCenter
+                            },
+
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = _middleAnchor,
+                                AnchorMax = _middleAnchor,
+
+                                OffsetMin = "-100 -15",
+                                OffsetMax = "-10 15"
+                            }
+                        }
+                    }
+                });
+            }
+
+            if (turrets)
+            {
+                CuiHelper.DestroyUi(player, "Turrets_Status_Text");
+
+                CuiHelper.AddUi(player, new List<CuiElement>
+                {
+                    new CuiElement
+                    {
+                        Name = "Turrets_Status_Text",
+                        Parent = "Option_Panel_Turrets",
+
+                        Components =
+                        {
+                            new CuiTextComponent
+                            {
+                                Text = ConvertBool(data.enableAuthorizeTurrets, player),
+                                Align = TextAnchor.MiddleCenter
+                            },
+
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = _middleAnchor,
+                                AnchorMax = _middleAnchor,
+
+                                OffsetMin = "-100 -15",
+                                OffsetMax = "-10 15"
+                            }
+                        }
+                    }
+                });
+            }
+
+            if (ff)
+            {
+                CuiHelper.DestroyUi(player, "FF_Status_Text");
+
+                CuiHelper.AddUi(player, new List<CuiElement>
+                {
+                    new CuiElement
+                    {
+                        Name = "FF_Status_Text",
+                        Parent = "Option_Panel_FF",
+
+                        Components =
+                        {
+                            new CuiTextComponent
+                            {
+                                Text = ConvertBool(data.enableFF, player),
+                                Align = TextAnchor.MiddleCenter
+                            },
+
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = _middleAnchor,
+                                AnchorMax = _middleAnchor,
+
+                                OffsetMin = "-100 -15",
+                                OffsetMax = "-10 15"
+                            }
+                        }
+                    }
+                });
+            }
+
+            if (cupboards)
+            {
+                CuiHelper.DestroyUi(player, "Cupboard_Status_Text");
+
+                CuiHelper.AddUi(player, new List<CuiElement>
+                {
+                    new CuiElement
+                    {
+                        Name = "Cupboard_Status_Text",
+                        Parent = "Option_Panel_Cupboard",
+
+                        Components =
+                        {
+                            new CuiTextComponent
+                            {
+                                Text = ConvertBool(data.enableAuthorizeCupboards, player),
+                                Align = TextAnchor.MiddleCenter
+                            },
+
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = _middleAnchor,
+                                AnchorMax = _middleAnchor,
+
+                                OffsetMin = "-100 -15",
+                                OffsetMax = "-10 15"
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        private void RenderFriends(BasePlayer player, CuiElementContainer mainGUI = null, int page = 1)
+        {
+            CuiHelper.DestroyUi(player, "Main_Friends");
+
+            CuiHelper.AddUi(player, new List<CuiElement>
+            {
+                new CuiElement
+                {
+                    Name = "Main_Friends",
+                    Parent = "Main_Panel",
+
+                    Components =
+                    {
+                        new CuiImageComponent
+                        {
+                            Color = HexToRustFormat(_config.gui.panelSecondColor)
+                        },
+
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = _middleAnchor,
+                            AnchorMax = _middleAnchor,
+
+                            OffsetMin = "-395 -245",
+                            OffsetMax = "180 175"
+                        }
+                    }
+                }
+            });
+
+            List<CuiElement> elements = new List<CuiElement>();
+
+            var data = _data.GetPlayerData(player.userID);
+
+            if (mainGUI != null)
+            {
+                foreach (var element in mainGUI)
+                {
+                    elements.Add(element);
+                }
+            }
+
+            if (data.friends.Count != 0)
+            {
+                int currentIndex = -1;
+
+                for (int i = 0; i < 10; i++)
+                {
+                    if (data.friends.Count <= i + (10 * (page - 1))) break;
+
+                    var friendInfo = data.friends[i + (10 * (page - 1))];
+
+                    currentIndex++;
+
+                    var card = GetCard(player, $"-280 -{32.5 + (40 * currentIndex)}", $"280 -{12.5 + (40 * currentIndex)}", (currentIndex + 1 + (10 * (page - 1))).ToString(), friendInfo.name, friendInfo.id);
+
+                    foreach (var element in card)
+                    {
+                        elements.Add(element);
+                    }
+                }
+            }
+
+            if (_viewingNow.ContainsKey(player.userID)) _viewingNow.Remove(player.userID);
+            _viewingNow.Add(player.userID, page);
+
+            CuiHelper.AddUi(player, elements);
+        }
+
+        private void RenderRequest(BasePlayer to, BasePlayer from)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+
+            container.Add(new CuiElement
+            {
+                Name = "Friends_Accept",
+                Parent = "Overlay",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = "0.3114566 0.3114566 0.3114566 1"
+                    },
+
+                    _config.gui.panelRequest
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "MainAccept_Header",
+                Parent = "Friends_Accept",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = "0.1943554 0.1943554 0.1943554 1"
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 0.6",
+                        AnchorMax = "0.5 0.6",
+
+                        OffsetMin = "-110 -5",
+                        OffsetMax = "110 23"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "MainAccept_Header_Text",
+                Parent = "MainAccept_Header",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = string.Format(GetMessage("GUI_Request_Info", to), from.displayName),
+                        FontSize = 11,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "MainAccept_Button_Accept",
+                Parent = "Friends_Accept",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = $"friends accept",
+                        Color = "0.2990798 0.4561759 0.2835915 1"
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 0.5",
+                        AnchorMax = "0.5 0.5",
+
+                        OffsetMin = "-110 -28",
+                        OffsetMax = "0 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "MainAccept_Button_AcceptText",
+                Parent = "MainAccept_Button_Accept",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Request_Accept", to),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "MainAccept_Button_NoAccept",
+                Parent = "Friends_Accept",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Command = $"friends noaccept",
+                        Color = "0.4956286 0.314086 0.314086 1"
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 0.5",
+                        AnchorMax = "0.5 0.5",
+
+                        OffsetMin = "0 -28",
+                        OffsetMax = "110 1"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "MainAccept_Button_NoAcceptText",
+                Parent = "MainAccept_Button_NoAccept",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Request_Decline", to),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            CuiHelper.AddUi(to, container);
+
+            if (_pendingRequests.ContainsKey(to.userID)) _pendingRequests.Remove(to.userID);
+            _pendingRequests.Add(to.userID, from.userID);
+        }
+
+        private void RenderNotice(BasePlayer player, string notice)
+        {
+            CuiHelper.DestroyUi(player, "Header_Notice_Text");
+
+            CuiHelper.AddUi(player, new List<CuiElement>
+            {
+                new CuiElement
+                {
+                    Name = "Header_Notice_Text",
+                    Parent = "Main_Header",
+
+                    Components =
+                    {
+                        new CuiTextComponent
+                        {
+                            Text = notice,
+                            Align = TextAnchor.MiddleRight
+                        },
+
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = _middleAnchor,
+                            AnchorMax = _middleAnchor,
+
+                            OffsetMin = "-245 -15",
+                            OffsetMax = "345 15"
+                        }
+                    }
+                }
+            });
+        }
+
+        private CuiElementContainer GetCard(BasePlayer viewer, string offsetMin, string offsetMax, string number, string friendName, ulong friendID)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+
+            container.Add(new CuiElement
+            {
+                Name = "Friend_Card",
+                Parent = "Main_Friends",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.panelThirdColor)
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0.5 0.97",
+                        AnchorMax = "0.5 1",
+
+                        OffsetMin = offsetMin,
+                        OffsetMax = offsetMax
+                    }
+                }
+            });
+
+            string circleColor = "1 1 1 1";
+
+            if (BasePlayer.FindByID(friendID) != null) circleColor = "0.4078431 0.7607843 0.4588235 1";
+
+            container.Add(new CuiElement
+            {
+                Name = "Card_OnlineIcon",
+                Parent = "Friend_Card",
+
+                Components =
+                {
+                    new CuiImageComponent
+                    {
+                        Sprite = "assets/icons/circle_closed.png",
+                        Color = circleColor
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-275 -12",
+                        OffsetMax = "-250 12"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Card_Nickname",
+                Parent = "Friend_Card",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = $"{number}. {friendName}",
+                        Align = TextAnchor.MiddleLeft
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "-243 -12",
+                        OffsetMax = "0 12"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Card_Button_Remove",
+                Parent = "Friend_Card",
+
+                Components =
+                {
+                    new CuiButtonComponent
+                    {
+                        Color = HexToRustFormat(_config.gui.redButtonsColor),
+                        Command = $"friends remove {friendID}"
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = _middleAnchor,
+                        AnchorMax = _middleAnchor,
+
+                        OffsetMin = "210 -12",
+                        OffsetMax = "275 12"
+                    }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Name = "Button_Remove_Text",
+                Parent = "Card_Button_Remove",
+
+                Components =
+                {
+                    new CuiTextComponent
+                    {
+                        Text = GetMessage("GUI_Card_Button_Remove", viewer),
+                        FontSize = 13,
+                        Align = TextAnchor.MiddleCenter
+                    },
+
+                    new CuiRectTransformComponent
+                    {
+                        AnchorMin = "0 0",
+                        AnchorMax = "1 1"
+                    }
+                }
+            });
+
+            if (_config.friendButtons.Count != 0)
+            {
+                var first = _config.friendButtons[0];
+
+                container.Add(new CuiElement
+                {
+                    Name = "Card_Button1",
+                    Parent = "Friend_Card",
+
+                    Components =
+                    {
+                        new CuiButtonComponent
+                        {
+                            Color = HexToRustFormat(_config.gui.additionalButtonsColor),
+                            Command = $"friends command {first.command.Replace("%FRIEND_ID%", friendID.ToString()).Replace("%FRIEND_NAME%", friendName)}"
+                        },
+
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = _middleAnchor,
+                            AnchorMax = _middleAnchor,
+
+                            OffsetMin = "125 -12",
+                            OffsetMax = "200 12"
+                        }
+                    }
+                });
+
+                container.Add(new CuiElement
+                {
+                    Name = "Card_Button1_Text",
+                    Parent = "Card_Button1",
+
+                    Components =
+                    {
+                        new CuiTextComponent
+                        {
+                            Text = first.name,
+                            Align = TextAnchor.MiddleCenter
+                        },
+
+                        new CuiRectTransformComponent
+                        {
+                            AnchorMin = "0 0",
+                            AnchorMax = "1 1"
+                        }
+                    }
+                });
+
+                if (_config.friendButtons.Count >= 2)
+                {
+                    var second = _config.friendButtons[1];
+
+                    container.Add(new CuiElement
+                    {
+                        Name = "Card_Button2",
+                        Parent = "Friend_Card",
+
+                        Components =
+                        {
+                            new CuiButtonComponent
+                            {
+                                Color = HexToRustFormat(_config.gui.additionalButtonsColor),
+                                Command = $"friends command {second.command.Replace("%FRIEND_ID%", friendID.ToString()).Replace("%FRIEND_NAME%", friendName)}"
+                            },
+
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = _middleAnchor,
+                                AnchorMax = _middleAnchor,
+
+                                OffsetMin = "40 -12",
+                                OffsetMax = "115 12"
+                            }
+                        }
+                    });
+
+                    container.Add(new CuiElement
+                    {
+                        Name = "Card_Button2_Text",
+                        Parent = "Card_Button2",
+
+                        Components =
+                        {
+                            new CuiTextComponent
+                            {
+                                Text = second.name,
+                                Align = TextAnchor.MiddleCenter
+                            },
+
+                            new CuiRectTransformComponent
+                            {
+                                AnchorMin = "0 0",
+                                AnchorMax = "1 1"
+                            }
+                        }
+                    });
+
+                    if (_config.friendButtons.Count >= 3)
+                    {
+                        var third = _config.friendButtons[2];
+
+                        container.Add(new CuiElement
+                        {
+                            Name = "Card_Button3",
+                            Parent = "Friend_Card",
+
+                            Components =
+                            {
+                                new CuiButtonComponent
+                                {
+                                    Command = $"friends command {third.command.Replace("%FRIEND_ID%", friendID.ToString()).Replace("%FRIEND_NAME%", friendName)}",
+                                    Color = HexToRustFormat(_config.gui.additionalButtonsColor)
+                                },
+
+                                new CuiRectTransformComponent
+                                {
+                                    AnchorMin = _middleAnchor,
+                                    AnchorMax = _middleAnchor,
+
+                                    OffsetMin = "-45 -12",
+                                    OffsetMax = "30 12"
+                                }
+                            }
+                        });
+
+                        container.Add(new CuiElement
+                        {
+                            Name = "Card_Button3_Text",
+                            Parent = "Card_Button3",
+
+                            Components =
+                            {
+                                new CuiTextComponent
+                                {
+                                    Text = third.name,
+                                    Align = TextAnchor.MiddleCenter
+                                },
+
+                                new CuiRectTransformComponent
+                                {
+                                    AnchorMin = "0 0",
+                                    AnchorMax = "1 1"
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+
+            return container;
+        }
+
+        #endregion
+
+        #region Хуки
+
+        private void OnNewSave()
+        {
+            foreach (var info in _data.playersData.Values)
+            {
+                info.entitiesTurret = new List<uint>();
+                info.entitiesCupboard = new List<uint>();
+            }
+        }
+
+        private void OnEntityBuilt(Planner plan, GameObject go)
+        {
+            var baseEnt = go.GetComponent<BaseNetworkable>();
+
+            if (baseEnt == null || plan?.GetOwnerPlayer() == null) return;
+
+            if (!(baseEnt is BuildingPrivlidge) && !(baseEnt is AutoTurret)) return;
+
+            var player = plan.GetOwnerPlayer();
+            var data = _data.GetPlayerData(player.userID);
+
+            if (baseEnt is BuildingPrivlidge)
+            {
+                var cupboard = baseEnt as BuildingPrivlidge;
+
+                if (!data.entitiesCupboard.Contains(cupboard.net.ID))
+                {
+                    data.entitiesCupboard.Add(cupboard.net.ID);
+
+                    _data.SetPlayerData(player.userID, data);
+
+                    if (_config.logs.enableLogs)
+                    {
+                        if (_config.logs.logCupboardAdd)
+                        {
+                            LogToFile("Log", $"Игрок {player} установил шкаф (NET_ID: {baseEnt.net.ID}) | Шкафов: {data.entitiesCupboard.Count}", this);
+                        }
+                    }
+
+                    foreach (var friend in data.friends)
+                    {
+                        BasePlayer friendPlayer = BasePlayer.FindByID(friend.id);
+
+
+                        if (friendPlayer == null) continue;
+
+                        if (Interface.CallHook("OnCupboardAuthorize", cupboard, friendPlayer) != null)
+                        {
+                            PrintWarning($"{friendPlayer} не был добавлен в шкаф {cupboard}, другой плагин отклонил авторизацию.");
+
+                            continue;
+                        }
+
+                        cupboard.AddChild(friendPlayer);
+                        cupboard.SendNetworkUpdateImmediate();
+                    }
+                }
+            }
+
+            if (baseEnt is AutoTurret)
+            {
+                var turret = baseEnt as AutoTurret;
+
+                if (!data.entitiesTurret.Contains(turret.net.ID))
+                {
+                    data.entitiesTurret.Add(turret.net.ID);
+
+                    _data.SetPlayerData(player.userID, data);
+
+                    if (_config.logs.enableLogs)
+                    {
+                        if (_config.logs.logTurretsAdd)
+                        {
+                            LogToFile("Log", $"Игрок {player} установил турель (NET_ID: {baseEnt.net.ID}) | Шкафов: {data.entitiesTurret.Count}", this);
+                        }
+                    }
+
+                    foreach (var friend in data.friends)
+                    {
+                        BasePlayer friendPlayer = BasePlayer.FindByID(friend.id);
+
+
+                        if (friendPlayer == null) continue;
+
+                        if (Interface.CallHook("OnTurretAuthorize", turret, friendPlayer) != null)
+                        {
+                            PrintWarning($"{friendPlayer} не был авторизован в турели {turret}, другой плагин отклонил авторизацию.");
+
+                            continue;
+                        }
+
+                        turret.authorizedPlayers.RemoveAll(x => x.userid == friendPlayer.userID);
+                        turret.authorizedPlayers.Add(new ProtoBuf.PlayerNameID()
+                        {
+                            userid = friendPlayer.userID,
+                            username = friendPlayer.displayName
+                        });
+
+                        turret.SendNetworkUpdate();
+                    }
+                }
+            }
+        }
+
+        private object CanUseLockedEntity(BasePlayer player, BaseLock baseLock)
+        {
+            if (player == null || baseLock == null) return null;
+
+            if (baseLock.OwnerID != 0)
+            {
+                var data = _data.GetPlayerData(baseLock.OwnerID);
+
+                if (IsFriend(player.userID, baseLock.OwnerID) && data.enableAuthorizeLocks)
+                {
+                    if (baseLock is CodeLock)
+                    {
+                        var codeLock = baseLock as CodeLock;
+
+                        if (codeLock.effectUnlocked.isValid)
+                        {
+                            Effect.server.Run(codeLock.effectUnlocked.resourcePath, baseLock.transform.position);
+                        }
+                    }
+
+                    return true;
+                }
+            }
+
+            return null;
+        }
+
+        private void Loaded()
+        {
+            LoadData();
+
+            foreach (var perm in _config.cooldowns.permissionCooldown.Keys)
+            {
+                permission.RegisterPermission(perm, this);
+            }
+
+            if (ImageLibrary != null && _config.gui.image.enableImage) ImageLibrary.Call("AddImage", _config.gui.image.imageUrl, "Friends_Background");
+        }
+
+        private void Unload()
+        {
+            BasePlayer.activePlayerList.ToList().ForEach(x => CuiHelper.DestroyUi(x, "Friends_Background"));
+            _pendingRequests.ToList().ForEach(x => OnRequestIgnored(x.Key, x.Value));
+
+            SaveData(true);
+        }
+
+        private void AuthFriend(ulong player, ulong friend)
+        {
+            var playerData = _data.GetPlayerData(player);
+
+            var friendPlayer = BasePlayer.FindByID(friend);
+
+
+            if (friendPlayer == null) return;
+
+            if (playerData.enableAuthorizeCupboards)
+            {
+                foreach (var entID in playerData.entitiesCupboard)
+                {
+                    var ent = BaseNetworkable.serverEntities.Find(entID);
+
+                    if (ent != null)
+                    {
+                        var cupboard = ent as BuildingPrivlidge;
+
+                        if (Interface.CallHook("OnCupboardAuthorize", cupboard, friendPlayer) != null)
+                        {
+                            PrintWarning($"{friendPlayer} не был добавлен в шкаф {cupboard}, другой плагин отклонил авторизацию.");
+
+                            continue;
+                        }
+
+                        cupboard.AddChild(friendPlayer);
+                        cupboard.SendNetworkUpdateImmediate();
+                    }
+                }
+            }
+
+            if (playerData.enableAuthorizeTurrets)
+            {
+                foreach (var entID in playerData.entitiesTurret)
+                {
+                    var ent = BaseNetworkable.serverEntities.Find(entID);
+
+                    if (ent != null)
+                    {
+                        var turret = ent as AutoTurret;
+
+                        if (Interface.CallHook("OnTurretAuthorize", turret, friendPlayer) != null)
+                        {
+                            PrintWarning($"{friendPlayer} не был авторизован в турели {turret}, другой плагин отклонил авторизацию.");
+
+                            continue;
+                        }
+
+                        turret.authorizedPlayers.RemoveAll(x => x.userid == friendPlayer.userID);
+                        turret.authorizedPlayers.Add(new ProtoBuf.PlayerNameID()
+                        {
+                            userid = friendPlayer.userID,
+                            username = friendPlayer.displayName
+                        });
+
+                        turret.SendNetworkUpdateImmediate();
+                    }
+                }
+            }
+        }
+
+        private void DeAuthFriend(ulong player, ulong friend)
+        {
+            var playerData = _data.GetPlayerData(player);
+
+            foreach (var entID in playerData.entitiesCupboard)
+            {
+                var ent = BaseNetworkable.serverEntities.Find(entID);
+
+                if (ent != null)
+                {
+                    var cupboard = ent as BuildingPrivlidge;
+
+                    cupboard.authorizedPlayers.RemoveAll(x => x.userid == friend);
+
+                    cupboard.SendNetworkUpdate();
+                }
+            }
+
+            foreach (var entID in playerData.entitiesTurret)
+            {
+                var ent = BaseNetworkable.serverEntities.Find(entID);
+
+                if (ent != null)
+                {
+                    var turret = ent as AutoTurret;
+
+                    turret.authorizedPlayers.RemoveAll(x => x.userid == friend);
+
+                    turret.SendNetworkUpdate();
+                }
+            }
+        }
+
+        private object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {
+            if (info?.InitiatorPlayer == null || entity == null) return null;
+
+            if (entity is BasePlayer && info.InitiatorPlayer.userID.IsSteamId() && !info.InitiatorPlayer.IsNpc)
+            {
+                var target = entity.ToPlayer();
+                var data = _data.GetPlayerData(info.InitiatorPlayer.userID);
+
+                if (!data.enableFF)
+                {
+                    if (IsFriend(target.userID, info.InitiatorPlayer.userID))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private void OnRequestIgnored(ulong from, ulong to)
+        {
+            BasePlayer target = BasePlayer.FindByID(to);
+            BasePlayer sender = BasePlayer.FindByID(from);
+
+            if (target == null || sender == null) return;
+
+            if (_pendingRequests.ContainsKey(from)) _pendingRequests.Remove(from);
+            else return;
+
+            if (AreFriends(target.userID, sender.userID)) return;
+
+            target.ChatMessage(GetMessage("Notice_RequestOut_Target", target));
+            sender.ChatMessage(string.Format(GetMessage("Notice_RequestOut_Sender", sender), target.displayName));
+
+            CuiHelper.DestroyUi(target, "Friends_Accept");
+
+            if (_config.logs.enableLogs)
+            {
+                if (_config.logs.logIgnoreRequest)
+                {
+                    LogToFile("Log", $"Игрок {target} проигнорировал запрос в друзья от игрока {sender}", this);
+                }
+            }
+        }
+
+        private void OnPlayerConnected(BasePlayer player)
+        {
+            var found = _data.playersData.Where(x => x.Value.friends.Where(y => y.id == player.userID && y.name != player.displayName)?.Count() != 0);
+
+            if (found?.Count() != 0)
+            {
+                var foundList = found.ToList();
+
+                foreach (var obj in foundList)
+                {
+                    obj.Value.friends.RemoveAll(x => x.id == player.userID);
+                    obj.Value.friends.Add(new DataFile.PlayerData.FriendInfo
+                    {
+                        id = player.userID,
+                        name = player.displayName
+                    });
+
+                    _data.SetPlayerData(obj.Key, obj.Value);
+                }
+            }
+        }
+
+        #endregion
+
+        #region API
+
+        private void API_OnFriendAdded(ulong player, ulong friend) => Interface.Oxide.CallHook("OnFriendAdded", player, friend);
+
+        private void API_OnFriendRemoved(ulong player, ulong friend) => Interface.Oxide.CallHook("OnFriendRemoved", player, friend);
+
+        private bool HasFriend(ulong player, ulong friend) => _data.GetPlayerData(player).friends.Where(x => x.id == friend)?.Count() != 0;
+        private bool HasFriend(string player, string friend)
+        {
+            ulong playerID, friendID;
+
+            if (ulong.TryParse(player, out playerID) && ulong.TryParse(friend, out friendID))
+            {
+                return HasFriend(playerID, friendID);
+            }
+
+            return false;
+        }
+
+        private bool AreFriends(ulong player, ulong friend) => HasFriend(player, friend);
+        private bool AreFriends(string player, string friend)
+        {
+            ulong playerID, friendID;
+
+            if (ulong.TryParse(player, out playerID) && ulong.TryParse(friend, out friendID))
+            {
+                return HasFriend(playerID, friendID);
+            }
+
+            return false;
+        }
+
+        private bool IsFriend(ulong player, ulong friend) => HasFriend(player, friend);
+        private bool IsFriend(string player, string friend)
+        {
+            ulong playerID, friendID;
+
+            if (ulong.TryParse(player, out playerID) && ulong.TryParse(friend, out friendID))
+            {
+                return HasFriend(playerID, friendID);
+            }
+
+            return false;
+        }
+
+        private ulong[] GetFriends(ulong player)
+        {
+            List<ulong> friends = new List<ulong>();
+
+            foreach (var friend in _data.GetPlayerData(player).friends)
+            {
+                friends.Add(friend.id);
+            }
+
+            return friends.ToArray();
+        }
+
+        private string[] GetFriends(string player)
+        {
+            ulong playerID;
+
+            if (ulong.TryParse(player, out playerID))
+            {
+                List<string> friends = new List<string>();
+
+                foreach (var friend in _data.GetPlayerData(playerID).friends)
+                {
+                    friends.Add(friend.id.ToString());
+                }
+
+                return friends.ToArray();
+            }
+
+            return new string[] { };
+        }
+
+        private ulong[] GetFriendList(ulong player) => GetFriends(player);
+        private string[] GetFriendList(string player) => GetFriends(player);
+
+        private int GetMaxFriends() => _config.maxFriends;
+
+        #endregion
+
+        #region Вспомогательный класс
+
+        private class PlayerPendingRequest : MonoBehaviour
+        {
+            public ulong from, to;
+            public float cooldownTime;
+
+            private void Update()
+            {
+                cooldownTime -= Time.deltaTime;
+
+                if (cooldownTime <= 0)
+                {
+                    Interface.Oxide.CallHook("OnRequestIgnored", from, to);
+                    UnityEngine.Object.Destroy(this);
+                }
+            }
+        }
+
+        #endregion
     }
+}

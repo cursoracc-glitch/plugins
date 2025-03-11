@@ -10,7 +10,7 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("SkipNight", "Sempai#3239", "3.0.0")]
+    [Info("SkipNight", "A1M41K", "2.2.11")]
     [Description("Плагин для пропуска ночи")]
     public class SkipNight : RustPlugin
     {

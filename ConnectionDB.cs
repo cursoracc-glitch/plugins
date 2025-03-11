@@ -82,7 +82,7 @@ namespace Oxide.Plugins
                 }
             }
         }
-        void OnPlayerConnected(BasePlayer player)
+        void OnPlayerInit(BasePlayer player)
         {
             InitPlayer(player);
         }

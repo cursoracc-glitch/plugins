@@ -2,24 +2,18 @@
 using System.Collections.Generic;
 using System.Globalization;
 using Newtonsoft.Json;
-using Oxide.Core;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("IQMenu", "Sempai#3239", "0.0.4")]
+    [Info("IQMenu", "Mercury", "0.0.1")]
     [Description("Ясно клоун")]
     class IQMenu : RustPlugin
     {
-
-        ///Фикс гуи
-        ///Добавлена возможность отключить показ онлайна в панеле (Настроить в конфиге)
-        ///Фикс 2 ероров
-        ///Это было очень легко!
         #region Reference
-        [PluginReference] Plugin ImageLibrary, IQFakeActive;
+        [PluginReference] Plugin ImageLibrary;
         private string GetImage(string fileName, ulong skin = 0)
         {
             var imageId = (string)plugins.Find("ImageLibrary").CallHook("GetImage", fileName, skin);
@@ -28,13 +22,7 @@ namespace Oxide.Plugins
             return string.Empty;
         }
         public bool AddImage(string url, string shortname, ulong skin = 0) => (bool)ImageLibrary?.Call("AddImage", url, shortname, skin);
-        int FakeOnline => (int)IQFakeActive?.Call("GetOnline");
-        void SyncReservedFinish()
-        {
-            if (!config.UseIQFakeActive) return;
-            PrintWarning("IQMenu - успешно синхронизирована с IQFakeActive");
-            PrintWarning("=============SYNC==================");
-        }
+
         #endregion
 
         #region Vars
@@ -50,8 +38,6 @@ namespace Oxide.Plugins
             [JsonProperty("Название сервера для главного меню")] public string ServerName;
             [JsonProperty("Название кнопки главного меню")] public string ButtonName;
             [JsonProperty("Настройка броадкаста")] public List<string> BroadCastList = new List<string>();
-            [JsonProperty("Поддержка IQFakeActive")] public bool UseIQFakeActive;
-            [JsonProperty("Показывать онлайн в панеле?")] public bool UseOnlineInMenu;
 
             internal class MenuClass
             {
@@ -67,8 +53,6 @@ namespace Oxide.Plugins
                     ServerName = "<b><size=26>СУПЕР <color=#85C84F>СЕРВЕР</color> | MAX 3</size></b>",
                     ButtonName = "<b><size=18>МЕНЮ</size></b>",
                     UrlMenu = "https://i.imgur.com/chc6Jfs.png",
-                    UseIQFakeActive = false,
-                    UseOnlineInMenu = true,
                     MenuSettings = new List<MenuClass>
                     {
                         new MenuClass
@@ -138,7 +122,7 @@ namespace Oxide.Plugins
             {
                 RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = "0 -60", OffsetMax = "300 0" },
                 Image = { Color = "0 0 0 0" }
-            }, "Hud.Menu", MENU_PARENT);
+            }, "Overlay", MENU_PARENT);
 
             container.Add(new CuiElement
             {
@@ -146,7 +130,7 @@ namespace Oxide.Plugins
                 Components =
                         {
                         new CuiRawImageComponent { Png = GetImage(config.ButtonName),  Color = HexToRustFormat("#FFFFFF8B") },
-                        new CuiRectTransformComponent{  AnchorMin = $"0.2 0.06484989", AnchorMax = $"0.2888888 0.4727159" },
+                        new CuiRectTransformComponent{  AnchorMin = $"0.2 0.06484989", AnchorMax = $"0.2888888 0.4727611" },
                         }
             });
 
@@ -158,21 +142,17 @@ namespace Oxide.Plugins
 
             container.Add(new CuiButton
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "0.2022330 0.5515152" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "0.2022 0.5515152" },
                 Button = { Command = $"pmenu open", Color = "0 0 0 0" },
                 Text = { Text = config.ButtonName, Color = HexToRustFormat("#FFFFFF8B"), Align = TextAnchor.MiddleCenter }
             },  MENU_PARENT);
 
-            if (config.UseOnlineInMenu)
+            container.Add(new CuiLabel
             {
-                int Online = config.UseIQFakeActive ? IQFakeActive ? FakeOnline : BasePlayer.activePlayerList.Count : BasePlayer.activePlayerList.Count;
+                RectTransform = { AnchorMin = "0.242223 0", AnchorMax = "0.5311611 0.5515152" },
+                Text = { Text = $"<b><size=14>Онлайн</size></b>\n<b><size=12>{BasePlayer.activePlayerList.Count}/{ConVar.Server.maxplayers}</size></b>", Font = "robotocondensed-regular.ttf", Align = TextAnchor.UpperCenter, Color = HexToRustFormat("#FFFFFF8B") }
+            }, MENU_PARENT, "ONLINE_TEXT");
 
-                container.Add(new CuiLabel
-                {
-                    RectTransform = { AnchorMin = "0.242223330 0", AnchorMax = "0.5311159 0.5515152" },
-                    Text = { Text = $"<b><size=14>Онлайн</size></b>\n<b><size=12>{Online}/{ConVar.Server.maxplayers}</size></b>", Font = "robotocondensed-regular.ttf", Align = TextAnchor.UpperCenter, Color = HexToRustFormat("#FFFFFF8B") }
-                }, MENU_PARENT, "ONLINE_TEXT");
-            }
             CuiHelper.AddUi(player, container);
         }
 
@@ -180,7 +160,6 @@ namespace Oxide.Plugins
         {
             timer.Every(30f, () =>
              {
-                 int Online = config.UseIQFakeActive ? IQFakeActive ? FakeOnline : BasePlayer.activePlayerList.Count : BasePlayer.activePlayerList.Count;
                  for (int i = 0; i < BasePlayer.activePlayerList.Count; i++)
                  {
                      var player = BasePlayer.activePlayerList[i];
@@ -189,7 +168,7 @@ namespace Oxide.Plugins
                      container.Add(new CuiLabel
                      {
                          RectTransform = { AnchorMin = "0.242223 0", AnchorMax = "0.5311111 0.5515152" },
-                         Text = { Text = $"<b><size=14>Онлайн</size></b>\n<b><size=12>{Online}/{ConVar.Server.maxplayers}</size></b>", Font = "robotocondensed-regular.ttf", Align = TextAnchor.UpperCenter, Color = HexToRustFormat("#FFFFFF8B") }
+                         Text = { Text = $"<b><size=14>Онлайн</size></b>\n<b><size=12>{BasePlayer.activePlayerList.Count}/{ConVar.Server.maxplayers}</size></b>", Font = "robotocondensed-regular.ttf", Align = TextAnchor.UpperCenter, Color = HexToRustFormat("#FFFFFF8B") }
                      }, MENU_PARENT, "ONLINE_TEXT");
                      CuiHelper.AddUi(player, container);
                  }
@@ -207,7 +186,6 @@ namespace Oxide.Plugins
                     CuiElementContainer container = new CuiElementContainer();
                     container.Add(new CuiLabel
                     {
-
                         RectTransform = { AnchorMin = "0 0", AnchorMax = "0 0", OffsetMin = "0 0", OffsetMax = "300 20" },
                         Text = { Text = $"{config.BroadCastList[UnityEngine.Random.Range(0, config.BroadCastList.Count)]}", Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter, Color = HexToRustFormat("#FFFFFF8B") }
                     }, "Overlay", BROADCAST_PARENT);
@@ -259,28 +237,26 @@ namespace Oxide.Plugins
         #region Hooks
         private void OnServerInitialized()
         {
-            if (config.UseIQFakeActive)
-                if (!IQFakeActive)
-                {
-                    PrintError("Плагин IQFakeActive не найден, но включен в конфигурации. Отключите пункт в конфигурации или загрузите плагин");
-                    Interface.Oxide.UnloadPlugin(Name);
-                    return;
-                }
-                else { PrintWarning("Добавлена поддержка IQFakeActive"); }
             LoadImage();
             for (int i = 0; i < BasePlayer.activePlayerList.Count; i++) 
             { 
                 var player = BasePlayer.activePlayerList[i];
                 InterfaceMenu(player);
             }
-            if (config.BroadCastList.Count > 0)
-                BroadCast();
-            if(config.UseOnlineInMenu)
-                UpdateOnlineLabel();
+            BroadCast();
+            UpdateOnlineLabel();
         }
 
-        void OnPlayerConnected(BasePlayer player)
+        private void OnPlayerInit(BasePlayer player)
         {
+            if (player.IsReceivingSnapshot)
+            {
+                NextTick(() =>
+                {
+                    OnPlayerInit(player);
+                    return;
+                });
+            }
             InterfaceMenu(player);
         }
 

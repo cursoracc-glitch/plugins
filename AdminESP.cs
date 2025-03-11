@@ -5,13 +5,9 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using UnityEngine;
-
-///Скачано с дискорд сервера Rust Edit [PRO+]
-///discord.gg/9vyTXsJyKR
-
 namespace Oxide.Plugins
 {
-    [Info("AdminESP", "discord.gg/9vyTXsJyKR", "0.0.11")]
+    [Info("AdminESP", "OxideBro", "0.0.11")]
     public class AdminESP : RustPlugin
     {
         static Dictionary<ulong, PlayerSetting> PlayerSettings = new Dictionary<ulong, PlayerSetting>();
@@ -147,7 +143,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (!PlayerSettings.ContainsKey(player.userID)) OnPlayerConnected(player);
+            if (!PlayerSettings.ContainsKey(player.userID)) OnPlayerInit(player);
             var data = PlayerSettings[player.userID];
             if (args.Length < 1)
             {
@@ -244,16 +240,16 @@ namespace Oxide.Plugins
             permission.RegisterPermission(AdminPermission, this);
             foreach (var plobj in BasePlayer.activePlayerList)
             {
-                OnPlayerConnected(plobj);
+                OnPlayerInit(plobj);
             }
         }
 
-        void OnPlayerConnected(BasePlayer player)
+        void OnPlayerInit(BasePlayer player)
         {
             if (player == null) return;
              if (player.HasPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot))
             {
-                timer.In(1f, () => OnPlayerConnected(player));
+                timer.In(1f, () => OnPlayerInit(player));
                 return;
             }
             if (PlayerSettings.ContainsKey(player.userID) && !permission.UserHasPermission(player.UserIDString, AdminPermission))
@@ -414,7 +410,7 @@ namespace Oxide.Plugins
 
 
             }
-            if (!PlayerSettings.ContainsKey(player.userID)) OnPlayerConnected(player);
+            if (!PlayerSettings.ContainsKey(player.userID)) OnPlayerInit(player);
             var data = PlayerSettings[player.userID];
 
 
@@ -819,18 +815,18 @@ namespace Oxide.Plugins
                 {
                     case "text":
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, true);
-                            player.SendConsoleCommand("ddraw.text", data.UpdateTime + Time.deltaTime, Color.white, target.eyes.position + new Vector3(0, 0.4f, 0), messages);
+                            player.SendConsoleCommand("ddraw.text", data.UpdateTime + Time.deltaTime, Color.cyan, target.eyes.position + new Vector3(0, 0.4f, 0), messages);
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, false);
                         break;
                     case "box":
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, true);
-                        player.SendConsoleCommand("ddraw.box", data.UpdateTime + Time.deltaTime, Color.white, target.transform.position + new Vector3(0f, 1f, 0f), target.GetHeight(target.modelState.ducked));
+                        player.SendConsoleCommand("ddraw.box", data.UpdateTime + Time.deltaTime, Color.cyan, target.transform.position + new Vector3(0f, 1f, 0f), target.GetHeight(target.modelState.ducked));
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, false);
 
                         break;
                     case "line":
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, true);
-                        player.SendConsoleCommand("ddraw.line", data.UpdateTime + Time.deltaTime, Color.white, target.eyes.position, target.eyes.position + target.eyes.HeadRay().direction * data.EyeLineDistance);
+                        player.SendConsoleCommand("ddraw.line", data.UpdateTime + Time.deltaTime, Color.cyan, target.eyes.position, target.eyes.position + target.eyes.HeadRay().direction * data.EyeLineDistance);
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, false);
 
                         break;
@@ -934,9 +930,7 @@ namespace Oxide.Plugins
             int r = int.Parse(parts[0], CultureInfo.InvariantCulture);
             int g = int.Parse(parts[1], CultureInfo.InvariantCulture);
             int b = int.Parse(parts[2], CultureInfo.InvariantCulture);
-            float a = float.Parse(parts[3], CultureInfo.InvariantCulture);
-            var finish = System.Drawing.Color.FromArgb((int)(a * 255), r, g, b);
-            cssColor = "#" + finish.R.ToString("X2") + finish.G.ToString("X2") + finish.B.ToString("X2") + finish.A.ToString("X2");
+            float a = float.Parse(parts[3], CultureInfo.InvariantCulture);                      
             var str = cssColor.Trim('#');
             if (str.Length == 6)
                 str += "FF";

@@ -9,12 +9,10 @@ using Oxide.Core.Configuration;
 using Oxide.Core.Plugins;
 using UnityEngine;
 using System.Linq;
-using Newtonsoft.Json.Converters;
 
 namespace Oxide.Plugins
 {
-    [Info("AdminMenu", "k1iloy", "0.1.51")]
-    [Description("Manage groups, permissions, and commands from a GUI menu")]
+    [Info("AdminMenu", "k1lly0u", "0.1.30", ResourceId = 0)]
     class AdminMenu : RustPlugin
     {
         #region Fields 
@@ -25,41 +23,19 @@ namespace Oxide.Plugins
         private Dictionary<string, string> uiColors = new Dictionary<string, string>();
 
         private enum MenuType { Permissions, Groups, Commands }
-
         private enum SelectType { Player, String }
-
         private enum PermSub { View, Player, Group }
-
-        [JsonConverter(typeof(StringEnumConverter))]
-        private enum CommSub { Chat, Console, Give, Player }  
-        
-        private enum GroupSub { View, UserGroups, AddGroup, CloneGroup, RemoveGroup }
-
-        private enum ItemType { Weapon, Construction, Items, Resources, Attire, Tool, Medical, Food, Ammunition, Traps, Misc, Component, Electrical, Fun }
+        private enum CommSub { Chat, Console, Give }        
+        private enum GroupSub { View, UserGroups, AddGroup, RemoveGroup }
+        private enum ItemType { Weapon, Construction, Items, Resources, Attire, Tool, Medical, Food, Ammunition, Traps, Misc, Component }
 
         private Dictionary<ItemType, List<KeyValuePair<string, ItemDefinition>>> itemList = new Dictionary<ItemType, List<KeyValuePair<string, ItemDefinition>>>();
-        private Hash<ulong, SelectionData> selectData = new Hash<ulong, SelectionData>();
-        private Hash<ulong, GroupData> groupCreator = new Hash<ulong, GroupData>();
+        private Dictionary<ulong, SelectionData> selectData = new Dictionary<ulong, SelectionData>();
+        private Dictionary<ulong, GroupData> groupCreator = new Dictionary<ulong, GroupData>();
         private Hash<ulong, Timer> popupTimers = new Hash<ulong, Timer>();
         private string[] charFilter = new string[] { "~", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z" };
 
         private List<KeyValuePair<string, bool>> permissionList = new List<KeyValuePair<string, bool>>();
-
-        private const string USE_PERMISSION = "adminmenu.use";
-        private const string PERM_PERMISSION = "adminmenu.permissions";
-        private const string GROUP_PERMISSION = "adminmenu.groups";
-        private const string GIVE_PERMISSION = "adminmenu.give";
-        private const string GIVE_SELF_PERMISSION = "adminmenu.give.selfonly";
-        private const string PLAYER_PERMISSION = "adminmenu.players";
-
-        private const string PLAYER_KICKBAN_PERMISSION = "adminmenu.players.kickban";
-        private const string PLAYER_MUTE_PERMISSION = "adminmenu.players.mute";
-        private const string PLAYER_BLUERPRINTS_PERMISSION = "adminmenu.players.blueprints";
-        private const string PLAYER_HURT_PERMISSION = "adminmenu.players.hurt";
-        private const string PLAYER_HEAL_PERMISSION = "adminmenu.players.heal";
-        private const string PLAYER_KILL_PERMISSION = "adminmenu.players.kill";
-        private const string PLAYER_STRIP_PERMISSION = "adminmenu.players.strip";
-        private const string PLAYER_TELEPORT_PERMISSION = "adminmenu.players.teleport";
         #endregion
 
         #region Classes
@@ -71,37 +47,15 @@ namespace Oxide.Plugins
             public int pageNum, listNum;
         }
 
-        private class GroupData { public string fromname = string.Empty, name = string.Empty, title = string.Empty, rank = string.Empty; public bool copyusers = false, isClone = false; }
+        private class GroupData { public string name = string.Empty, title = string.Empty, rank = string.Empty; }
         #endregion
 
         #region Oxide Hooks
         private void Loaded()
         {
-            permission.RegisterPermission(USE_PERMISSION, this);
-            permission.RegisterPermission(PERM_PERMISSION, this);
-            permission.RegisterPermission(GROUP_PERMISSION, this);
-            permission.RegisterPermission(GIVE_PERMISSION, this);
-            permission.RegisterPermission(PLAYER_PERMISSION, this);
-
-            permission.RegisterPermission(GIVE_SELF_PERMISSION, this);
-            permission.RegisterPermission(PLAYER_KICKBAN_PERMISSION, this);
-            permission.RegisterPermission(PLAYER_MUTE_PERMISSION, this);
-            permission.RegisterPermission(PLAYER_BLUERPRINTS_PERMISSION, this);
-            permission.RegisterPermission(PLAYER_HURT_PERMISSION, this);
-            permission.RegisterPermission(PLAYER_HEAL_PERMISSION, this);
-            permission.RegisterPermission(PLAYER_KILL_PERMISSION, this);
-            permission.RegisterPermission(PLAYER_STRIP_PERMISSION, this);
-            permission.RegisterPermission(PLAYER_TELEPORT_PERMISSION, this);
-
-            foreach(CustomCommands customCommand in configData.PlayerInfoCommands)
-            {
-                foreach(PlayerInfoCommandEntry command in customCommand.Commands)
-                {
-                    if (command.RequiredPermission.StartsWith("adminmenu.", StringComparison.OrdinalIgnoreCase))
-                        permission.RegisterPermission(command.RequiredPermission, this);
-                }
-            }
-
+            permission.RegisterPermission("adminmenu.use", this);
+            permission.RegisterPermission("adminmenu.permissions", this);
+            permission.RegisterPermission("adminmenu.groups", this);
             lang.RegisterMessages(Messages, this);
 
             data = Interface.Oxide.DataFileSystem.GetFile("AdminMenu/offline_players");
@@ -110,6 +64,7 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             ins = this;
+            LoadVariables();
             LoadData();
 
             if (storedData == null || storedData.offlinePlayers == null)
@@ -128,10 +83,10 @@ namespace Oxide.Plugins
             }
 
             foreach (BasePlayer player in BasePlayer.activePlayerList)
-                OnPlayerConnected(player);
+                OnPlayerInit(player);
         }
 
-        private void OnPlayerConnected(BasePlayer player) => storedData.OnPlayerInit(player.UserIDString);
+        private void OnPlayerInit(BasePlayer player) => storedData.OnPlayerInit(player.UserIDString);
 
         private void OnPlayerDisconnected(BasePlayer player)
         {
@@ -231,16 +186,6 @@ namespace Oxide.Plugins
                 });
             }
 
-            public static void Toggle(ref CuiElementContainer container, string panel, string color, int fontSize, string aMin, string aMax, string command, bool isOn)
-            {
-                UI.Panel(ref container, panel, color, aMin, aMax);
-
-                if (isOn)
-                    UI.Label(ref container, panel, "✔", fontSize, aMin, aMax);
-
-                UI.Button(ref container, panel, "0 0 0 0", string.Empty, 0, aMin, aMax, command);
-            }
-
             static public string Color(string hexColor, float alpha)
             {
                 if (hexColor.StartsWith("#"))
@@ -260,8 +205,7 @@ namespace Oxide.Plugins
               
         private void OpenAdminMenu(BasePlayer player)
         {
-            DestroyUI(player);
-            CuiElementContainer container = UI.Container(UIMain, uiColors["bg1"], "0.05 0.08", "0.95 0.92", true);
+            var container = UI.Container(UIMain, uiColors["bg1"], "0.05 0.08", "0.95 0.92", true);
             CuiHelper.AddUi(player, container);
 
             CreateMenuCommands(player, CommSub.Chat);
@@ -273,13 +217,10 @@ namespace Oxide.Plugins
             UI.Label(ref container, UIElement, string.Format(msg("title", playerId), Version), 24, "0.02 0.93", "0.25 0.98", TextAnchor.UpperLeft);
             
             UI.Button(ref container, UIElement, menuType == MenuType.Commands ? uiColors["button3"] : uiColors["button1"], msg(MenuType.Commands.ToString(), playerId), 16, "0.27 0.93", "0.42 0.985", menuType == MenuType.Commands ? "" : "amui.switchelement commands");
-
-            if (HasPermission(playerId, PERM_PERMISSION))
+            if (HasPermission(playerId, "adminmenu.permissions"))
                 UI.Button(ref container, UIElement, menuType == MenuType.Permissions ? uiColors["button3"] : uiColors["button1"], msg(MenuType.Permissions.ToString(), playerId), 16, "0.425 0.93", "0.575 0.985", menuType == MenuType.Permissions ? "" : "amui.switchelement permissions");
-
-            if (HasPermission(playerId, GROUP_PERMISSION))
+            if (HasPermission(playerId, "adminmenu.groups"))
                 UI.Button(ref container, UIElement, menuType == MenuType.Groups ? uiColors["button3"] : uiColors["button1"], msg(MenuType.Groups.ToString(), playerId), 16, "0.58 0.93", "0.73 0.985", menuType == MenuType.Groups ? "" : "amui.switchelement groups");
-            
             UI.Button(ref container, UIElement, uiColors["button1"], msg("exit", playerId), 16, "0.855 0.93", "0.985 0.985", "amui.switchelement exit");
         }
 
@@ -296,34 +237,23 @@ namespace Oxide.Plugins
                     return;
                 case MenuType.Groups:
                     GroupSub groupSub = ParseType<GroupSub>(subType);
-
-                    UI.Button(ref container, UIElement, groupSub == GroupSub.View ? uiColors["button3"] : uiColors["button1"], msg("view", playerId), 16, "0.115 0.875", "0.265 0.915", groupSub == GroupSub.View ? "" : "amui.switchelement groups view");
-
-                    UI.Button(ref container, UIElement, groupSub == GroupSub.AddGroup ? uiColors["button3"] : uiColors["button1"], msg("addgroup", playerId), 16, "0.27 0.875", "0.42 0.915", groupSub == GroupSub.AddGroup ? "" : "amui.switchelement groups addgroup");
-
-                    UI.Button(ref container, UIElement, groupSub == GroupSub.CloneGroup ? uiColors["button3"] : uiColors["button1"], msg("clonegroup", playerId), 16, "0.425 0.875", "0.575 0.915", groupSub == GroupSub.CloneGroup ? "" : "amui.switchelement groups clonegroup");
-
-                    UI.Button(ref container, UIElement, groupSub == GroupSub.RemoveGroup ? uiColors["button3"] : uiColors["button1"], msg("removegroup", playerId), 16, "0.58 0.875", "0.73 0.915", groupSub == GroupSub.RemoveGroup ? "" : "amui.switchelement groups removegroup");
-
-                    UI.Button(ref container, UIElement, groupSub == GroupSub.UserGroups ? uiColors["button3"] : uiColors["button1"], msg("usergroups", playerId), 16, "0.735 0.875", "0.885 0.915", groupSub == GroupSub.UserGroups ? "" : "amui.switchelement groups usergroups");
+                    UI.Button(ref container, UIElement, groupSub == GroupSub.View ? uiColors["button3"] : uiColors["button1"], msg("view", playerId), 16, "0.2025 0.875", "0.3525 0.915", groupSub == GroupSub.View ? "" : "amui.switchelement groups view");
+                    UI.Button(ref container, UIElement, groupSub == GroupSub.AddGroup ? uiColors["button3"] : uiColors["button1"], msg("addgroup", playerId), 16, "0.3575 0.875", "0.4975 0.915", groupSub == GroupSub.AddGroup ? "" : "amui.switchelement groups addgroup");
+                    UI.Button(ref container, UIElement, groupSub == GroupSub.RemoveGroup ? uiColors["button3"] : uiColors["button1"], msg("removegroup", playerId), 16, "0.5025 0.875", "0.6525 0.915", groupSub == GroupSub.RemoveGroup ? "" : "amui.switchelement groups removegroup");
+                    UI.Button(ref container, UIElement, groupSub == GroupSub.UserGroups ? uiColors["button3"] : uiColors["button1"], msg("usergroups", playerId), 16, "0.6575 0.875", "0.8075 0.915", groupSub == GroupSub.UserGroups ? "" : "amui.switchelement groups usergroups");
                     return;
                 case MenuType.Commands:
                     CommSub commSub = ParseType<CommSub>(subType);
-                    UI.Button(ref container, UIElement, commSub == CommSub.Chat ? uiColors["button3"] : uiColors["button1"], msg("chat", playerId), 16, "0.1925 0.875", "0.3425 0.915"/*"0.27 0.875", "0.42 0.915"*/, commSub == CommSub.Chat ? "" : "amui.switchelement commands chat");
-                    UI.Button(ref container, UIElement, commSub == CommSub.Console ? uiColors["button3"] : uiColors["button1"], msg("console", playerId), 16, "0.3475 0.875", "0.4975 0.915"/*"0.425 0.875", "0.575 0.915"*/, commSub == CommSub.Console ? "" : "amui.switchelement commands console");
-
-                    if (HasPermission(playerId, GIVE_PERMISSION))
-                        UI.Button(ref container, UIElement, commSub == CommSub.Give ? uiColors["button3"] : uiColors["button1"], msg("give", playerId), 16, "0.5025 0.875", "0.6525 0.915"/*"0.58 0.875", "0.73 0.915"*/, commSub == CommSub.Give ? "" : "amui.switchelement commands give");
-
-                    if (HasPermission(playerId, PLAYER_PERMISSION))
-                        UI.Button(ref container, UIElement, commSub == CommSub.Player ? uiColors["button3"] : uiColors["button1"], msg("playerinfo", playerId), 16, "0.6575 0.875", "0.8075 0.915", commSub == CommSub.Player ? "" : "amui.switchelement commands player");
+                    UI.Button(ref container, UIElement, commSub == CommSub.Chat ? uiColors["button3"] : uiColors["button1"], msg("chat", playerId), 16, "0.27 0.875", "0.42 0.915", commSub == CommSub.Chat ? "" : "amui.switchelement commands chat");
+                    UI.Button(ref container, UIElement, commSub == CommSub.Console ? uiColors["button3"] : uiColors["button1"], msg("console", playerId), 16, "0.425 0.875", "0.575 0.915", commSub == CommSub.Console ? "" : "amui.switchelement commands console");
+                    UI.Button(ref container, UIElement, commSub == CommSub.Give ? uiColors["button3"] : uiColors["button1"], msg("give", playerId), 16, "0.58 0.875", "0.73 0.915", commSub == CommSub.Give ? "" : "amui.switchelement commands give");
                     return;
             }
         }
 
         private void CreateMenuPermissions(BasePlayer player, int page = 0, string filter = "")
         {
-            CuiElementContainer container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
+            var container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
             CreateMenuButtons(ref container, MenuType.Permissions, player.UserIDString);
             CreateSubMenu(ref container, MenuType.Permissions, player.UserIDString, "view");
             CreateCharacterFilter(ref container, player.userID, filter, $"amui.switchelement permissions view 0");
@@ -366,7 +296,7 @@ namespace Oxide.Plugins
 
         private void CreateMenuGroups(BasePlayer player, GroupSub subType, int page = 0, string filter = "")
         {
-            CuiElementContainer container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
+            var container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
             CreateMenuButtons(ref container, MenuType.Groups, player.UserIDString);
             CreateSubMenu(ref container, MenuType.Groups, player.UserIDString, subType.ToString());
 
@@ -387,7 +317,8 @@ namespace Oxide.Plugins
                         string groupId = groupList[i];
                         float[] position = CalculateButtonPos(count);
 
-                        UI.Button(ref container, UIElement, uiColors["button1"], groupId, 10, $"{position[0]} {position[1]}", $"{position[2]} {position[3]}", $"amui.switchelement groups view 0 {groupId}");
+                        UI.Panel(ref container, UIElement, uiColors["button1"], $"{position[0]} {position[1]}", $"{position[2]} {position[3]}");
+                        UI.Label(ref container, UIElement, $"{groupId}", 10, $"{position[0]} {position[1]}", $"{position[2]} {position[3]}");
                         ++count;
 
                         if (count >= 72)
@@ -397,84 +328,37 @@ namespace Oxide.Plugins
                 case GroupSub.UserGroups:
                     break;                
                 case GroupSub.AddGroup:
+                    GroupData groupData;
+                    if (!groupCreator.TryGetValue(player.userID, out groupData))
                     {
-                        GroupData groupData;
-                        if (!groupCreator.TryGetValue(player.userID, out groupData))
-                        {
-                            groupCreator.Add(player.userID, new GroupData());
-                            groupData = groupCreator[player.userID];
-                        }
-
-                        UI.Label(ref container, UIElement, msg("inputhelper", player.UserIDString), 18, "0.1 0.75", "0.9 0.85");
-
-                        UI.Label(ref container, UIElement, msg("groupname", player.UserIDString), 16, "0.1 0.62", "0.3 0.7", TextAnchor.MiddleLeft);
-                        UI.Label(ref container, UIElement, msg("uiwarning", player.UserIDString), 8, "0.1 0.15", "0.9 0.2", TextAnchor.MiddleLeft);
-                        UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.63", "0.9 0.69");
-                        if (string.IsNullOrEmpty(groupData.name))
-                            UI.Input(ref container, UIElement, "", groupData.name, 16, "amui.registergroup input name", "0.32 0.63", "0.9 0.69");
-                        else UI.Label(ref container, UIElement, groupData.name, 16, "0.32 0.63", "0.9 0.69", TextAnchor.MiddleLeft);
-
-                        UI.Label(ref container, UIElement, msg("grouptitle", player.UserIDString), 16, "0.1 0.54", "0.3 0.62", TextAnchor.MiddleLeft);
-                        UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.55", "0.9 0.61");
-                        if (string.IsNullOrEmpty(groupData.title))
-                            UI.Input(ref container, UIElement, "", groupData.title, 16, "amui.registergroup input title", "0.32 0.55", "0.9 0.61");
-                        else UI.Label(ref container, UIElement, groupData.title, 16, "0.32 0.55", "0.9 0.61", TextAnchor.MiddleLeft);
-
-                        UI.Label(ref container, UIElement, msg("grouprank", player.UserIDString), 16, "0.1 0.46", "0.3 0.54", TextAnchor.MiddleLeft);
-                        UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.47", "0.9 0.53");
-                        if (string.IsNullOrEmpty(groupData.rank))
-                            UI.Input(ref container, UIElement, "", groupData.rank, 16, "amui.registergroup input rank", "0.32 0.47", "0.9 0.53");
-                        else UI.Label(ref container, UIElement, groupData.rank, 16, "0.32 0.47", "0.9 0.53", TextAnchor.MiddleLeft);
-
-
-                        UI.Button(ref container, UIElement, uiColors["button2"], msg("reset", player.UserIDString), 16, "0.345 0.38", "0.495 0.44", "amui.registergroup reset");
-                        UI.Button(ref container, UIElement, uiColors["button3"], msg("create", player.UserIDString), 16, "0.505 0.38", "0.655 0.44", "amui.registergroup create");
-                        break;
+                        groupCreator.Add(player.userID, new GroupData());
+                        groupData = groupCreator[player.userID];
                     }
-                case GroupSub.CloneGroup:
-                    {
-                        GroupData groupData;
-                        if (!groupCreator.TryGetValue(player.userID, out groupData))
-                        {
-                            groupCreator.Add(player.userID, groupData = new GroupData() { isClone = true });
-                            groupData = groupCreator[player.userID];
-                        }
 
-                        UI.Label(ref container, UIElement, msg("clonehelper", player.UserIDString), 18, "0.1 0.75", "0.9 0.85");
-                        UI.Label(ref container, UIElement, msg("uiwarning", player.UserIDString), 8, "0.1 0.1", "0.9 0.15", TextAnchor.MiddleLeft);
+                    UI.Label(ref container, UIElement, msg("inputhelper", player.UserIDString), 18, "0.1 0.75", "0.9 0.85");
+                                       
+                    UI.Label(ref container, UIElement, msg("groupname", player.UserIDString), 16, "0.1 0.62", "0.3 0.7", TextAnchor.MiddleLeft);
+                    UI.Label(ref container, UIElement, msg("uiwarning", player.UserIDString), 8, "0.1 0.15", "0.9 0.2", TextAnchor.MiddleLeft);
+                    UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.63", "0.9 0.69");
+                    if (string.IsNullOrEmpty(groupData.name))
+                        UI.Input(ref container, UIElement, "", groupData.name, 16, "amui.registergroup input name", "0.32 0.63", "0.9 0.69");
+                    else UI.Label(ref container, UIElement, groupData.name, 16, "0.32 0.63", "0.9 0.69", TextAnchor.MiddleLeft);
 
-                        UI.Label(ref container, UIElement, msg("fromgroupname", player.UserIDString), 16, "0.1 0.62", "0.3 0.7", TextAnchor.MiddleLeft);
-                        UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.63", "0.9 0.69");
-                        if (string.IsNullOrEmpty(groupData.fromname))
-                            UI.Input(ref container, UIElement, "", groupData.fromname, 16, "amui.registergroup input fromname", "0.32 0.63", "0.9 0.69");
-                        else UI.Label(ref container, UIElement, groupData.fromname, 16, "0.32 0.63", "0.9 0.69", TextAnchor.MiddleLeft);
+                    UI.Label(ref container, UIElement, msg("grouptitle", player.UserIDString), 16, "0.1 0.54", "0.3 0.62", TextAnchor.MiddleLeft);
+                    UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.55", "0.9 0.61");
+                    if (string.IsNullOrEmpty(groupData.title))
+                        UI.Input(ref container, UIElement, "", groupData.title, 16, "amui.registergroup input title", "0.32 0.55", "0.9 0.61");
+                    else UI.Label(ref container, UIElement, groupData.title, 16, "0.32 0.55", "0.9 0.61", TextAnchor.MiddleLeft);
 
-                        UI.Label(ref container, UIElement, msg("groupname", player.UserIDString), 16, "0.1 0.54", "0.3 0.62", TextAnchor.MiddleLeft);
-                        UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.55", "0.9 0.61");
-                        if (string.IsNullOrEmpty(groupData.name))
-                            UI.Input(ref container, UIElement, "", groupData.name, 16, "amui.registergroup input name", "0.32 0.55", "0.9 0.61");
-                        else UI.Label(ref container, UIElement, groupData.name, 16, "0.32 0.55", "0.9 0.61", TextAnchor.MiddleLeft);
+                    UI.Label(ref container, UIElement, msg("grouprank", player.UserIDString), 16, "0.1 0.46", "0.3 0.54", TextAnchor.MiddleLeft);
+                    UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.47", "0.9 0.53");
+                    if (string.IsNullOrEmpty(groupData.rank))
+                        UI.Input(ref container, UIElement, "", groupData.rank, 16, "amui.registergroup input rank", "0.32 0.47", "0.9 0.53");
+                    else UI.Label(ref container, UIElement, groupData.rank, 16, "0.32 0.47", "0.9 0.53", TextAnchor.MiddleLeft);
 
-                        UI.Label(ref container, UIElement, msg("grouptitle", player.UserIDString), 16, "0.1 0.46", "0.3 0.54", TextAnchor.MiddleLeft);
-                        UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.47", "0.9 0.53");
-                        if (string.IsNullOrEmpty(groupData.title))
-                            UI.Input(ref container, UIElement, "", groupData.title, 16, "amui.registergroup input title", "0.32 0.47", "0.9 0.53");
-                        else UI.Label(ref container, UIElement, groupData.title, 16, "0.32 0.47", "0.9 0.53", TextAnchor.MiddleLeft);
-
-                        UI.Label(ref container, UIElement, msg("grouprank", player.UserIDString), 16, "0.1 0.38", "0.3 0.46", TextAnchor.MiddleLeft);
-                        UI.Panel(ref container, UIElement, uiColors["bg3"], "0.3 0.39", "0.9 0.45");
-                        if (string.IsNullOrEmpty(groupData.rank))
-                            UI.Input(ref container, UIElement, "", groupData.rank, 16, "amui.registergroup input rank", "0.32 0.39", "0.9 0.45");
-                        else UI.Label(ref container, UIElement, groupData.rank, 16, "0.32 0.39", "0.9 0.45", TextAnchor.MiddleLeft);
-
-                        UI.Label(ref container, UIElement, msg("copyusers", player.UserIDString), 16, "0.1 0.30", "0.3 0.38", TextAnchor.MiddleLeft);
-                        UI.Toggle(ref container, UIElement, uiColors["bg3"], 16, "0.3 0.31", "0.33 0.37", $"amui.registergroup input users {!groupData.copyusers}", groupData.copyusers);
-
-
-                        UI.Button(ref container, UIElement, uiColors["button2"], msg("reset", player.UserIDString), 16, "0.345 0.18", "0.495 0.24", "amui.registergroup reset true");
-                        UI.Button(ref container, UIElement, uiColors["button3"], msg("clone", player.UserIDString), 16, "0.505 0.18", "0.655 0.24", "amui.registergroup clone");
-                        break;
-                    }
+                    UI.Button(ref container, UIElement, uiColors["button2"], msg("reset", player.UserIDString), 16, "0.345 0.38", "0.495 0.44", "amui.registergroup reset");
+                    UI.Button(ref container, UIElement, uiColors["button3"], msg("create", player.UserIDString), 16, "0.505 0.38", "0.655 0.44", "amui.registergroup create");
+                    break;                             
             }
 
             CuiHelper.DestroyUi(player, UIElement);
@@ -483,37 +367,11 @@ namespace Oxide.Plugins
 
         private void CreateMenuCommands(BasePlayer player, CommSub subType, int page = 0, ItemType itemType = ItemType.Weapon)
         {             
-            CuiElementContainer container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
+            var container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
             CreateMenuButtons(ref container, MenuType.Commands, player.UserIDString);
             CreateSubMenu(ref container, MenuType.Commands, player.UserIDString, subType.ToString());
-
             if (subType == CommSub.Give)
                 CreateGiveMenu(ref container, itemType, page, player.UserIDString);
-            else if (subType == CommSub.Player)
-            {
-                SelectionData data;
-                if (selectData.TryGetValue(player.userID, out data) && !string.IsNullOrEmpty(data.target1_Id))                
-                    CreatePlayerMenu(ref container, data.target1_Id, player.UserIDString);                
-                else
-                {
-                    if (data == null)
-                    {
-                        data = selectData[player.userID] = new SelectionData()
-                        {
-                            menuType = MenuType.Commands,
-                            pageNum = 0,
-                            requireTarget1 = true,
-                            returnCommand = "amui.playerinfo",
-                            isGroup = false,
-                            selectDesc = msg("selectplayer", player.UserIDString),
-                            subType = "player",
-                            isOnline = true
-                        };
-                    }
-                    OpenSelectionMenu(player, SelectType.Player, data.isOnline ? covalence.Players.Connected.ToList() : storedData.GetOfflineList(), true);
-                    return;
-                }                
-            }
             else CreateCommandEntry(ref container, subType, page, player.UserIDString);
 
             CuiHelper.DestroyUi(player, UIElement);
@@ -538,7 +396,7 @@ namespace Oxide.Plugins
             for (int i = page * 32; i < commands.Count; i++)
             {
                 CommandEntry entry = commands[i];
-                bool isDivisable =  IsDivisableBy2(i);
+                bool isDivisable =  IsDivisable(i);
                 
                 UI.Label(ref container, UIElement, entry.Name, 15, $"{(isDivisable ? 0.02f : 0.52f)} {0.82f - (0.05f * count)}", $"{(isDivisable ? 0.15f : 0.65f)} {0.87f - (0.05f * count)}", TextAnchor.MiddleLeft);
                 UI.Label(ref container, UIElement, entry.Description, 15, $"{(isDivisable ? 0.15f : 0.65f)} {0.82f - (0.05f * count)}", $"{(isDivisable ? 0.4f : 0.9f)} {0.87f - (0.05f * count)}", TextAnchor.MiddleLeft);
@@ -553,186 +411,37 @@ namespace Oxide.Plugins
 
         private void CreateGiveMenu(ref CuiElementContainer container, ItemType itemType, int page, string playerId)
         {
-            UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.005", "0.995 0.055");
             UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.815", "0.995 0.865");
             int i = 0;
             foreach(var typeName in Enum.GetNames(typeof(ItemType)))
             {
-                UI.Button(ref container, UIElement, itemType.ToString() == typeName ? uiColors["button3"] : uiColors["button1"], msg(typeName.ToString(), playerId), 12, $"{0.015f + ((0.97f / 14f) * i) + 0.0025f} 0.82", $"{0.015f + ((0.97f / 14f) * (i + 1)) - 0.0025f} 0.86", itemType.ToString() == typeName ? "" : $"amui.switchelement give {typeName} 0");
+                UI.Button(ref container, UIElement, itemType.ToString() == typeName ? uiColors["button3"] : uiColors["button1"], msg(typeName.ToString(), playerId), 12, $"{0.015f + ((0.97f / 12) * i) + 0.0025f} 0.82", $"{0.015f + ((0.97f / 12) * (i + 1)) - 0.0025f} 0.86", itemType.ToString() == typeName ? "" : $"amui.switchelement give {typeName} 0");
                 i++;
             }
 
-            //63
-
-            int itemIndex = 60 * page;
-            int length = itemList[itemType].Count;
             i = 6;
-
-            List<KeyValuePair<string, ItemDefinition>> items = itemList[itemType].OrderBy(x => x.Value.displayName.english).ToList();
-            for (int y = itemIndex; y < length; y++)
+            foreach(var item in itemList[itemType].OrderBy(x => x.Key))
             {
-                if (y - itemIndex >= 60)
-                    break;
-
-                KeyValuePair<string, ItemDefinition> item = items.ElementAt(y);
                 float[] position = CalculateItemPos(i);
-                int[] amounts = configData.GiveAmounts[item.Value.category];
-
                 UI.Label(ref container, UIElement, item.Key, 10, $"{position[0]} {position[1]}", $"{position[2]} {position[3]}");
-                UI.Button(ref container, UIElement, uiColors["button3"], amounts[0].ToString(), 10, $"{position[2]} {position[1]}", $"{position[2] + (0.158f * 0.24f)} {position[3]}", $"amui.giveitem {item.Value.displayName.english.Replace(" ", "<><>")} {item.Value.shortname} {amounts[0]}");
-                UI.Button(ref container, UIElement, uiColors["button3"], amounts[1].ToString(), 10, $"{position[2] + (0.158f * 0.26f)} {position[1]}", $"{position[2] + (0.158f * 0.49f)} {position[3]}", $"amui.giveitem {item.Value.displayName.english.Replace(" ", "<><>")} {item.Value.shortname} {amounts[1]}");
-                UI.Button(ref container, UIElement, uiColors["button3"], amounts[2].ToString(), 10, $"{position[2] + (0.158f * 0.51f)} {position[1]}", $"{position[2] + (0.158f * 0.74f)} {position[3]}", $"amui.giveitem {item.Value.displayName.english.Replace(" ", "<><>")} {item.Value.shortname} {amounts[2]}");
-                UI.Button(ref container, UIElement, uiColors["button3"], amounts[3].ToString(), 10, $"{position[2] + (0.158f * 0.76f)} {position[1]}", $"{position[2] + 0.158f} {position[3]}", $"amui.giveitem {item.Value.displayName.english.Replace(" ", "<><>")} {item.Value.shortname} {amounts[3]}");
-                i += 2;               
-            }
-
-            if (itemIndex > 0)
-                UI.Button(ref container, UIElement, uiColors["button1"], msg("back", playerId), 10, "0.05 0.01", "0.15 0.05", $"amui.switchelement give {itemType.ToString()} {page - 1}");
-            if (itemIndex + 60 < itemList[itemType].Count)
-                UI.Button(ref container, UIElement, uiColors["button1"], msg("next", playerId), 10, "0.85 0.01", "0.95 0.05", $"amui.switchelement give {itemType.ToString()} {page + 1}");
-        }
-
-        private void CreatePlayerMenu(ref CuiElementContainer container, string targetId, string playerId)
-        {
-            UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.01", "0.25 0.865");
-            UI.Panel(ref container, UIElement, uiColors["bg3"], "0.255 0.01", "0.995 0.865");
-
-            IPlayer iPlayer = covalence.Players.FindPlayerById(targetId);
-            if (iPlayer == null)
-            {
-                UI.Label(ref container, UIElement, $"No data found for {targetId}", 16, "0.01 0.815", "0.24 0.855", TextAnchor.MiddleLeft);
-                return;
-            }
-
-            ulong userId = ulong.Parse(iPlayer.Id);
-            BasePlayer player = BasePlayer.FindByID(userId);
-
-            UI.Label(ref container, UIElement, $"Name: {iPlayer.Name}", 14, "0.01 0.825", "0.24 0.855", TextAnchor.MiddleLeft);
-            UI.Label(ref container, UIElement, $"ID: {iPlayer.Id}", 14, "0.01 0.79", "0.24 0.82", TextAnchor.MiddleLeft);
-            UI.Label(ref container, UIElement, $"Auth Level: {(DeveloperList.Contains(userId) ? "Developer" : (ServerUsers.Get(userId)?.group ?? ServerUsers.UserGroup.None).ToString())}", 14, "0.01 0.755", "0.24 0.785", TextAnchor.MiddleLeft);
-            UI.Label(ref container, UIElement, $"Status: {(player != null && player.IsConnected ? "Online" : "Offline")}", 14, "0.01 0.72", "0.24 0.75", TextAnchor.MiddleLeft);
-
-            if (player != null)
-            {
-                // Metabolism
-                UI.Label(ref container, UIElement, $"Position: {player.ServerPosition}", 14, "0.01 0.65", "0.24 0.68", TextAnchor.MiddleLeft);
-                UI.Label(ref container, UIElement, $"Health: {Math.Round(player.health, 2)}", 14, "0.01 0.58", "0.24 0.61", TextAnchor.MiddleLeft);
-                UI.Label(ref container, UIElement, $"Calories: {Math.Round(player.metabolism?.calories?.value ?? 0, 2)}", 14, "0.01 0.545", "0.24 0.575", TextAnchor.MiddleLeft);
-                UI.Label(ref container, UIElement, $"Hydration: {Math.Round(player.metabolism?.hydration?.value ?? 0, 2)}", 14, "0.01 0.51", "0.24 0.54", TextAnchor.MiddleLeft);
-                UI.Label(ref container, UIElement, $"Temperature: {Math.Round(player.metabolism?.temperature?.value ?? 0, 2)}", 14, "0.01 0.475", "0.24 0.505", TextAnchor.MiddleLeft);
-                UI.Label(ref container, UIElement, $"Comfort: {Math.Round(player.metabolism?.comfort?.value ?? 0, 2)}", 14, "0.01 0.44", "0.24 0.47", TextAnchor.MiddleLeft);
-                UI.Label(ref container, UIElement, $"Wetness: {Math.Round(player.metabolism?.wetness?.value ?? 0, 2)}", 14, "0.01 0.4", "0.24 0.435", TextAnchor.MiddleLeft);
-                UI.Label(ref container, UIElement, $"Bleeding: {Math.Round(player.metabolism?.bleeding?.value ?? 0, 2)}", 14, "0.01 0.365", "0.24 0.395", TextAnchor.MiddleLeft);
-                UI.Label(ref container, UIElement, $"Radiation: {Math.Round(player.metabolism?.radiation_level?.value ?? 0, 2)}", 14, "0.01 0.33", "0.24 0.36", TextAnchor.MiddleLeft);
-
-                //Actions
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_KICKBAN_PERMISSION)))
-                {
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.kick", playerId), 14, "0.26 0.825", "0.365 0.855", $"amui.performplayeraction {targetId} {PlayerAction.Kick}");
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.ban", playerId), 14, "0.37 0.825", "0.475 0.855", $"amui.performplayeraction {targetId} {PlayerAction.Ban}");
-                }
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_KILL_PERMISSION)))
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.kill", playerId), 14, "0.26 0.785", "0.365 0.815", $"amui.performplayeraction {targetId} {PlayerAction.Kill}");
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_STRIP_PERMISSION)))
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.stripinventory", playerId), 14, "0.37 0.785", "0.475 0.815", $"amui.performplayeraction {targetId} {PlayerAction.StripInventory}");
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_HEAL_PERMISSION)))
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.resetmetabolism", playerId), 14, "0.48 0.785", "0.585 0.815", $"amui.performplayeraction {targetId} {PlayerAction.ResetMetabolism}");
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_MUTE_PERMISSION)))
-                {
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.mutechat", playerId), 14, "0.26 0.745", "0.365 0.775", $"amui.performplayeraction {targetId} {PlayerAction.MuteChat}");
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.unmutechat", playerId), 14, "0.37 0.745", "0.475 0.775", $"amui.performplayeraction {targetId} {PlayerAction.UnmuteChat}");
-                }
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_BLUERPRINTS_PERMISSION)))
-                {
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.resetblueprints", playerId), 14, "0.26 0.705", "0.365 0.735", $"amui.performplayeraction {targetId} {PlayerAction.ResetBlueprints}");
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.giveblueprints", playerId), 14, "0.37 0.705", "0.475 0.735", $"amui.performplayeraction {targetId} {PlayerAction.GiveBlueprints}");
-                }
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_HURT_PERMISSION)))
-                {
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.hurt25", playerId), 14, "0.26 0.665", "0.365 0.695", $"amui.performplayeraction {targetId} {PlayerAction.Hurt25}");
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.hurt50", playerId), 14, "0.37 0.665", "0.475 0.695", $"amui.performplayeraction {targetId} {PlayerAction.Hurt50}");
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.hurt75", playerId), 14, "0.48 0.665", "0.585 0.695", $"amui.performplayeraction {targetId} {PlayerAction.Hurt75}");
-                }
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_HEAL_PERMISSION)))
-                {
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.heal25", playerId), 14, "0.26 0.625", "0.365 0.655", $"amui.performplayeraction {targetId} {PlayerAction.Heal25}");
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.heal50", playerId), 14, "0.37 0.625", "0.475 0.655", $"amui.performplayeraction {targetId} {PlayerAction.Heal50}");
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.heal75", playerId), 14, "0.48 0.625", "0.585 0.655", $"amui.performplayeraction {targetId} {PlayerAction.Heal75}");
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.heal100", playerId), 14, "0.59 0.625", "0.695 0.655", $"amui.performplayeraction {targetId} {PlayerAction.Heal100}");
-                }
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_TELEPORT_PERMISSION)))
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.teleportselfto", playerId), 14, "0.26 0.585", "0.365 0.615", $"amui.performplayeraction {targetId} {PlayerAction.TeleportSelfTo}");
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PERM_PERMISSION)))
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.permissions", playerId), 14, "0.37 0.585", "0.475 0.615", $"amui.performplayeraction {targetId} {PlayerAction.Permissions}");
-            }
-            else
-            {
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_KICKBAN_PERMISSION)))                
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.ban", playerId), 14, "0.37 0.825", "0.475 0.855", $"amui.performplayeraction {targetId} {PlayerAction.Ban}");
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PLAYER_MUTE_PERMISSION)))
-                {
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.mutechat", playerId), 14, "0.26 0.745", "0.365 0.775", $"amui.performplayeraction {targetId} {PlayerAction.MuteChat}");
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.unmutechat", playerId), 14, "0.37 0.745", "0.475 0.775", $"amui.performplayeraction {targetId} {PlayerAction.UnmuteChat}");
-                }
-
-                if (!configData.UsePlayerAdminPermissions || (configData.UsePlayerAdminPermissions && permission.UserHasPermission(playerId, PERM_PERMISSION)))
-                    UI.Button(ref container, UIElement, uiColors["button1"], msg("action.permissions", playerId), 14, "0.37 0.585", "0.475 0.615", $"amui.performplayeraction {targetId} {PlayerAction.Permissions}");
-            }
-
-            const float START_X = 0.26f;
-            const float START_Y = 0.575f;
-
-            const float WIDTH = 0.105f;
-            const float HEIGHT = 0.03f;
-
-            const float X_SPACING = 0.005f;
-            const float Y_SPACING = 0.01f;
-
-            for (int i = 0; i < configData.PlayerInfoCommands.Count; i++)
-            {
-                float yStart = START_Y - ((HEIGHT + Y_SPACING) * i);
-                float yEnd = yStart - HEIGHT;
-
-                List<PlayerInfoCommandEntry> commands = configData.PlayerInfoCommands[i].Commands;
-                for (int y = 0; y < commands.Count; y++)
-                {
-                    float xStart = START_X + ((WIDTH + X_SPACING) * y);
-                    float xEnd = xStart + WIDTH;
-
-                    PlayerInfoCommandEntry command = commands[y];
-                    if (!string.IsNullOrEmpty(command.RequiredPlugin) && !plugins.Exists(command.RequiredPlugin))
-                        continue;
-
-                    if (!string.IsNullOrEmpty(command.RequiredPermission) && !permission.UserHasPermission(player.UserIDString, command.RequiredPermission))
-                        continue;
-
-                    UI.Button(ref container, UIElement, uiColors["button1"], command.Name, 14, $"{xStart} {yEnd}", $"{xEnd} {yStart}", $"amui.performcustomplayeraction {targetId} {i} {y}");
-                }
+                UI.Button(ref container, UIElement, uiColors["button3"], "1", 10, $"{position[2]} {position[1]}", $"{position[2] + (0.158f * 0.24f)} {position[3]}", $"amui.giveitem {item.Value.displayName.english.Replace(" ", "<><>")} {item.Value.shortname} 1");
+                UI.Button(ref container, UIElement, uiColors["button3"], "10", 10, $"{position[2] + (0.158f * 0.26f)} {position[1]}", $"{position[2] + (0.158f * 0.49f)} {position[3]}", $"amui.giveitem {item.Value.displayName.english.Replace(" ", "<><>")} {item.Value.shortname} 10");
+                UI.Button(ref container, UIElement, uiColors["button3"], "100", 10, $"{position[2] + (0.158f * 0.51f)} {position[1]}", $"{position[2] + (0.158f * 0.74f)} {position[3]}", $"amui.giveitem {item.Value.displayName.english.Replace(" ", "<><>")} {item.Value.shortname} 100");
+                UI.Button(ref container, UIElement, uiColors["button3"], "1000", 10, $"{position[2] + (0.158f * 0.76f)} {position[1]}", $"{position[2] + 0.158f} {position[3]}", $"amui.giveitem {item.Value.displayName.english.Replace(" ", "<><>")} {item.Value.shortname} 1000");
+                i += 2;
             }
         }
-
-        private enum PlayerAction { Ban, Kick, Kill, MuteChat, UnmuteChat, StripInventory, ResetBlueprints, GiveBlueprints, ResetMetabolism, Hurt25, Hurt50, Hurt75, Heal25, Heal50, Heal75, Heal100, TeleportSelfTo, Permissions }
 
         private void OpenSelectionMenu(BasePlayer player, SelectType selectType, object objList, bool sortList = false)
         {
             SelectionData data = selectData[player.userID];            
 
-            CuiElementContainer container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");            
+            var container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");            
             UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.925", "0.995 0.99");
             UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.87", "0.995 0.92");
             CreateCharacterFilter(ref container, player.userID, data.character, string.Empty);
             UI.Label(ref container, UIElement, data.selectDesc, 24, "0.02 0.93", "0.8 0.985", TextAnchor.MiddleLeft);
-            UI.Button(ref container, UIElement, uiColors["button1"], msg("return", player.UserIDString), 16, "0.855 0.93", "0.985 0.985", $"amui.switchelement {(data.menuType == MenuType.Commands ? "commands" : data.menuType == MenuType.Groups ? "groups" : "permissions")} {(data.subType.Equals("player") ? "chat" : data.subType)}");
+            UI.Button(ref container, UIElement, uiColors["button1"], msg("return", player.UserIDString), 16, "0.855 0.93", "0.985 0.985", $"amui.switchelement {(data.menuType == MenuType.Commands ? "commands" : data.menuType == MenuType.Groups ? "groups" : "permissions")} {data.subType}");
 
             List<IPlayer> playerList = null;
             List<string> stringList = null;
@@ -799,7 +508,7 @@ namespace Oxide.Plugins
 
         private void OpenPermissionMenu(BasePlayer player, string groupOrUserId, string playerName, string description, int page, string filter)
         {
-            CuiElementContainer container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
+            var container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
 
             UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.925", "0.995 0.99");
             UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.87", "0.995 0.92");
@@ -847,48 +556,9 @@ namespace Oxide.Plugins
             CuiHelper.AddUi(player, container);
         }
 
-        private void OpenGroupViewMenu(BasePlayer player, string groupName, int page)
-        {
-            CuiElementContainer container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
-
-            UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.925", "0.995 0.99");
-            UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.87", "0.995 0.92");
-
-            UI.Label(ref container, UIElement, string.Format(msg("groupview", player.UserIDString), groupName), 24, "0.02 0.93", "0.8 0.985", TextAnchor.MiddleLeft);
-
-            UI.Button(ref container, UIElement, uiColors["button1"], msg("return", player.UserIDString), 16, "0.855 0.93", "0.985 0.985", $"amui.switchelement groups view");
-
-            List<KeyValuePair<string, string>> users = GetUsersInGroupFormatted(groupName);
-            users.OrderBy(x => x.Value);
-
-            if (page > 0)
-                UI.Button(ref container, UIElement, uiColors["button1"], msg("back", player.UserIDString), 16, "0.015 0.875", "0.145 0.915", $"amui.switchelement groups view {page - 1} {groupName}");
-            if (users.Count > 72 && users.Count > (72 * page + 72))
-                UI.Button(ref container, UIElement, uiColors["button1"], msg("next", player.UserIDString), 16, "0.855 0.875", "0.985 0.915", $"amui.switchelement groups view {page + 1} {groupName}");
-
-            int count = 0;
-            for (int i = page * 72; i < users.Count; i++)
-            {
-                float[] position = CalculateButtonPosVert(count);
-
-                string text = users[i].Value == "Unnamed" ? users[i].Key : users[i].Value;
-
-                UI.Panel(ref container, UIElement, uiColors["button1"], $"{position[0]} {position[1]}", $"{position[2]} {position[3]}");
-                UI.Label(ref container, UIElement, text, 12, $"{position[0]} {position[1]}", $"{position[2]} {position[3]}");
-                UI.Button(ref container, UIElement, uiColors["close"], "X", 8, $"{position[2] - 0.01f} {position[1] + 0.04f}", $"{position[2]} {position[3]}", $"amui.removefromgroup {groupName} {users[i].Key} {page}");
-                ++count;
-
-                if (count >= 72)
-                    break;
-            }
-
-            CuiHelper.DestroyUi(player, UIElement);
-            CuiHelper.AddUi(player, container);
-        }
-
         private void OpenGroupMenu(BasePlayer player, string userId, string userName, string description, int page)
         {
-            CuiElementContainer container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
+            var container = UI.Container(UIElement, "0 0 0 0", "0.05 0.08", "0.95 0.92");
 
             UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.925", "0.995 0.99");
             UI.Panel(ref container, UIElement, uiColors["bg3"], "0.005 0.87", "0.995 0.92");
@@ -1215,7 +885,7 @@ namespace Oxide.Plugins
 
         private void PopupMessage(BasePlayer player, string message)
         {
-            CuiElementContainer container = UI.Container(UIPopup, uiColors["bg2"], "0.05 0.92", "0.95 0.98");
+            var container = UI.Container(UIPopup, uiColors["bg2"], "0.05 0.92", "0.95 0.98");
             UI.Label(ref container, UIPopup, message, 17, "0 0", "1 1");
 
             Timer destroyIn;
@@ -1236,11 +906,11 @@ namespace Oxide.Plugins
         [ConsoleCommand("amui.runcommand")]
         private void ccmdUIRunCommand(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, USE_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
 
             CommSub subType = ParseType<CommSub>(arg.Args[0]);
             int listNum = arg.GetInt(1);
@@ -1296,22 +966,19 @@ namespace Oxide.Plugins
                 PopupMessage(player, string.Format(msg("commandrun", player.UserIDString), command));
 
                 selectData.Remove(player.userID);
-
-                if (entry.CloseOnRun)
-                    DestroyUI(player);
-                else CreateMenuCommands(player, subType, 0);
+                CreateMenuCommands(player, subType, 0);
             }
-            else OpenSelectionMenu(player, SelectType.Player, data.isOnline ? covalence.Players.Connected.ToList() : storedData.GetOfflineList(), true);            
+            else OpenSelectionMenu(player, SelectType.Player, data.isOnline ? covalence.Players.Connected.ToList() : storedData.GetOfflineList(), true);
         }
 
         [ConsoleCommand("amui.filterchar")]
         private void ccmdFilterChar(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, USE_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
 
             SelectionData data = selectData[player.userID];
 
@@ -1340,11 +1007,11 @@ namespace Oxide.Plugins
         [ConsoleCommand("amui.registergroup")]
         private void ccmdRegisterGroup(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, USE_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
 
             GroupData groupData = groupCreator[player.userID];
             if (!groupCreator.TryGetValue(player.userID, out groupData))
@@ -1358,9 +1025,6 @@ namespace Oxide.Plugins
                 case "input":
                     switch (arg.GetString(1))
                     {
-                        case "fromname":
-                            groupData.fromname = string.Join(" ", arg.Args.Skip(2).ToArray());
-                            break;
                         case "name":
                             groupData.name = string.Join(" ", arg.Args.Skip(2).ToArray());
                             break;
@@ -1370,65 +1034,27 @@ namespace Oxide.Plugins
                         case "rank":
                             groupData.rank = string.Join(" ", arg.Args.Skip(2).ToArray());
                             break;
-                        case "users":
-                            groupData.copyusers = Convert.ToBoolean(arg.Args[2]);
-                            break;
                     }
-                    CreateMenuGroups(player, groupData.isClone ? GroupSub.CloneGroup : GroupSub.AddGroup);
+                    CreateMenuGroups(player, GroupSub.AddGroup);
                     return;
-
                 case "create":
+                    if (string.IsNullOrEmpty(groupData.name))
                     {
-                        if (string.IsNullOrEmpty(groupData.name))
-                        {
-                            PopupMessage(player, msg("nogroupname", player.UserIDString));
-                            return;
-                        }
-                        int rank = 0;
-                        int.TryParse(groupData.rank, out rank);
-
-                        if (CreateGroup(groupData.name, groupData.title, rank))
-                            PopupMessage(player, string.Format(msg("groupcreated", player.UserIDString), groupData.name));
-
-                        CreateMenuGroups(player, GroupSub.View);
-                        groupCreator.Remove(player.userID);
+                        PopupMessage(player, msg("nogroupname", player.UserIDString));
                         return;
                     }
+                    int rank = 0;
+                    int.TryParse(groupData.rank, out rank);
 
-                case "clone":
-                    {
-                        if (string.IsNullOrEmpty(groupData.fromname))
-                        {
-                            PopupMessage(player, msg("nofromgroupname", player.UserIDString));
-                            return;
-                        }
+                    if (CreateGroup(groupData.name, groupData.title, rank))
+                        PopupMessage(player, string.Format(msg("groupcreated", player.UserIDString), groupData.name));
 
-                        if (!permission.GroupExists(groupData.fromname))
-                        {
-                            PopupMessage(player, string.Format(msg("invalidfromgroupname", player.UserIDString), groupData.fromname));
-                            return;
-                        }
-
-                        if (string.IsNullOrEmpty(groupData.name))
-                        {
-                            PopupMessage(player, msg("nogroupname", player.UserIDString));
-                            return;
-                        }
-
-                        int rank = 0;
-                        int.TryParse(groupData.rank, out rank);
-
-                        if (CloneGroup(groupData.fromname, groupData.name, groupData.title, rank, groupData.copyusers))
-                            PopupMessage(player, string.Format(msg("groupcloned", player.UserIDString), groupData.fromname, groupData.name));
-
-                        CreateMenuGroups(player, GroupSub.View);
-                        groupCreator.Remove(player.userID);
-                        return;
-                    }
-
+                    CreateMenuGroups(player, GroupSub.View);
+                    groupCreator.Remove(player.userID);
+                    return;
                 case "reset":
-                    groupCreator[player.userID] = new GroupData() { isClone = arg.Args.Length > 1 };
-                    CreateMenuGroups(player, arg.Args.Length > 1 ? GroupSub.CloneGroup : GroupSub.AddGroup);
+                    groupCreator[player.userID] = new GroupData();
+                    CreateMenuGroups(player, GroupSub.AddGroup);
                     return;
             }
         }
@@ -1436,11 +1062,11 @@ namespace Oxide.Plugins
         [ConsoleCommand("amui.selectforpermission")]
         private void ccmdSelectPermission(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, USE_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
 
             bool isGroup = arg.GetBool(0);
 
@@ -1491,11 +1117,11 @@ namespace Oxide.Plugins
         [ConsoleCommand("amui.selectforgroup")]
         private void ccmdSelectGroup(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, USE_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
                    
             SelectionData data;
             if (!selectData.TryGetValue(player.userID, out data))
@@ -1526,11 +1152,11 @@ namespace Oxide.Plugins
         [ConsoleCommand("amui.selectremovegroup")]
         private void ccmdSelectRemoveGroup(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, USE_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
                  
             SelectionData data;
             if (!selectData.TryGetValue(player.userID, out data))
@@ -1563,11 +1189,11 @@ namespace Oxide.Plugins
         [ConsoleCommand("amui.togglepermission")]
         private void ccmdTogglePermission(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, PERM_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.permissions")) return;
 
             switch (arg.Args[0])
             {
@@ -1597,11 +1223,11 @@ namespace Oxide.Plugins
         [ConsoleCommand("amui.togglegroup")]
         private void ccmdToggleGroup(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, GROUP_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.groups")) return;
 
             string userId = arg.GetString(0);
             string userName = arg.GetString(1).Replace("_-!!-_", " ");
@@ -1611,35 +1237,14 @@ namespace Oxide.Plugins
             OpenGroupMenu(player, userId, userName, string.Format(msg("togglegroupplayer", player.UserIDString), userName), arg.GetInt(2));               
         }
 
-        [ConsoleCommand("amui.removefromgroup")]
-        private void ccmdRemoveFromGroup(ConsoleSystem.Arg arg)
-        {
-            BasePlayer player = arg.Connection.player as BasePlayer;
-            if (player == null)
-                return;
-
-            if (!HasPermission(player.UserIDString, GROUP_PERMISSION))
-                return;
-
-            string groupName = arg.GetString(0);
-            ulong userId = arg.GetUInt64(1);
-
-            if (!userId.IsSteamId())
-                return;
-
-            RemoveFromGroup(userId.ToString(), groupName);
-
-            OpenGroupViewMenu(player, groupName, arg.GetInt(2));
-        }
-
         [ConsoleCommand("amui.makeselection")]
         private void ccmdMakeSelection(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, USE_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
 
             SelectionData data = selectData[player.userID];
 
@@ -1683,14 +1288,13 @@ namespace Oxide.Plugins
                     case "amui.selectforpermission":
                         rust.RunClientCommand(player, "amui.selectforpermission", data.isGroup);
                         break;
-                    //case "amui.selectremovegroup":
-                    //    rust.RunClientCommand(player, "amui.selectremovegroup");
-                    //    break;
-                    //case "amui.selectforgroup":
-                    //    rust.RunClientCommand(player, "amui.selectforgroup");
-                    //    break;
+                    case "amui.selectremovegroup":
+                        rust.RunClientCommand(player, "amui.selectremovegroup");
+                        break;
+                    case "amui.selectforgroup":
+                        rust.RunClientCommand(player, "amui.selectforgroup");
+                        break;
                     default:
-                        rust.RunClientCommand(player, data.returnCommand);
                         break;
                 }
             }
@@ -1699,11 +1303,11 @@ namespace Oxide.Plugins
         [ConsoleCommand("amui.switchelement")]
         private void ccmdUISwitch(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, USE_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
 
             if (selectData.ContainsKey(player.userID))
                 selectData.Remove(player.userID);
@@ -1744,20 +1348,13 @@ namespace Oxide.Plugins
                     switch (groupSub)
                     {
                         case GroupSub.View:
-                            if (arg.Args.Length > 2)
-                            {
-                                OpenGroupViewMenu(player, arg.GetString(3), page);
-                                return;
-                            }
-                            else break;
+                            break;
                         case GroupSub.UserGroups:
                             if (arg.Args.Length == 5)
                                 OpenGroupMenu(player, arg.GetString(3), arg.GetString(4).Replace("_-!!-_", " "), string.Format(msg("togglegroupplayer", player.UserIDString), arg.GetString(4).Replace("_-!!-_", " ")), arg.GetInt(2));
                             else rust.RunClientCommand(player, "amui.selectforgroup");
                             return;
                         case GroupSub.AddGroup:
-                            break;
-                        case GroupSub.CloneGroup:
                             break;
                         case GroupSub.RemoveGroup:
                             rust.RunClientCommand(player, "amui.selectremovegroup");
@@ -1788,18 +1385,17 @@ namespace Oxide.Plugins
         [ConsoleCommand("amui.giveitem")]
         private void ccmdGiveItem(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = arg.Connection.player as BasePlayer;
+            var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
 
-            if (!HasPermission(player.UserIDString, GIVE_PERMISSION))
-                return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
 
             string itemName = arg.GetString(0);
             string itemShortName = arg.GetString(1);
             int amount = arg.GetInt(2);
 
-            if (arg.Args.Length <= 3 && !permission.UserHasPermission(player.UserIDString, GIVE_SELF_PERMISSION))
+            if (arg.Args.Length <= 3)
             {
                 SelectionData data;
                 if (!selectData.TryGetValue(player.userID, out data))
@@ -1826,7 +1422,7 @@ namespace Oxide.Plugins
             {
                 string targetId = arg.GetString(3);
 
-                BasePlayer targetPlayer = permission.UserHasPermission(player.UserIDString, GIVE_SELF_PERMISSION) ? player : BasePlayer.FindByID(ulong.Parse(targetId));
+                BasePlayer targetPlayer = BasePlayer.FindByID(ulong.Parse(targetId));
                 if (targetPlayer != null && targetPlayer.IsConnected)
                 {
                     Item item = ItemManager.CreateByName(itemShortName, amount, 0);
@@ -1840,166 +1436,6 @@ namespace Oxide.Plugins
             }
         }
 
-        [ConsoleCommand("amui.playerinfo")]
-        private void ccmdPlayerInfo(ConsoleSystem.Arg arg)
-        {
-            BasePlayer player = arg.Connection.player as BasePlayer;
-            if (player == null)
-                return;
-
-            if (!HasPermission(player.UserIDString, PLAYER_PERMISSION))
-                return;
-
-            CreateMenuCommands(player, CommSub.Player);
-        }
-
-        [ConsoleCommand("amui.performplayeraction")]
-        private void ccmdPerformPlayerAction(ConsoleSystem.Arg arg)
-        {
-            BasePlayer player = arg.Connection.player as BasePlayer;
-            if (player == null)
-                return;
-
-            if (!HasPermission(player.UserIDString, PLAYER_PERMISSION))
-                return;
-
-            BasePlayer target = BasePlayer.FindByID(arg.GetULong(0));
-            if (target != null)
-            {
-                PlayerAction playerAction = ParseType<PlayerAction>(arg.GetString(1));
-
-                switch (playerAction)
-                {
-                    case PlayerAction.Ban:
-                        target.IPlayer.Ban(string.Empty);                        
-                        ConVar.Chat.Broadcast($"Banned {target.displayName}", "SERVER", "#eee", (ulong)0);
-                        break;
-                    case PlayerAction.Kick:
-                        ConVar.Chat.Broadcast($"Kicked {target.displayName}", "SERVER", "#eee", (ulong)0);
-                        Network.Net.sv.Kick(target.net.connection, "Kicked by admin");
-                        break;
-                    case PlayerAction.Kill:
-                        target.Die(new HitInfo(target, target, Rust.DamageType.Stab, 1000));
-                        player.ChatMessage(string.Format(msg("kill.success", player.UserIDString), target.displayName));
-                        break;                    
-                    case PlayerAction.MuteChat:
-                        target.SetPlayerFlag(BasePlayer.PlayerFlags.ChatMute, true);
-                        player.ChatMessage(string.Format(msg("chatmute.success", player.UserIDString), target.displayName));
-                        break;
-                    case PlayerAction.UnmuteChat:
-                        target.SetPlayerFlag(BasePlayer.PlayerFlags.ChatMute, false);
-                        player.ChatMessage(string.Format(msg("chatunmute.success", player.UserIDString), target.displayName));
-                        break;
-                    case PlayerAction.StripInventory:
-                        target.inventory.Strip();
-                        player.ChatMessage(string.Format(msg("stripinv.success", player.UserIDString), target.displayName));
-                        break;
-                    case PlayerAction.ResetBlueprints:
-                        target.blueprints.Reset();
-                        player.ChatMessage(string.Format(msg("resetblueprints.success", player.UserIDString), target.displayName));
-                        break;
-                      case PlayerAction.GiveBlueprints:
-
-                        target.blueprints.UnlockAll();
-
-                        player.ChatMessage(string.Format(msg("unlockblueprints.success", player.UserIDString), target.displayName));
-                        break;
-                    case PlayerAction.ResetMetabolism:
-                        target.metabolism.bleeding.value = 0;
-                        target.metabolism.calories.value = target.metabolism.calories.max;
-                        target.metabolism.hydration.value = target.metabolism.hydration.max;
-                        target.metabolism.radiation_level.value = 0;
-                        target.metabolism.radiation_poison.value = 0;
-                        target.metabolism.poison.value = 0;
-                        target.metabolism.wetness.value = 0;
-
-                        target.metabolism.SendChangesToClient();
-                        player.ChatMessage(string.Format(msg("resetmetabolism.success", player.UserIDString), target.displayName));
-                        break;
-                    case PlayerAction.Hurt25:
-                        target.Hurt(target.health * 0.25f);
-                        player.ChatMessage(string.Format(msg("hurt.success", player.UserIDString), 25, target.displayName));
-                        break;
-                    case PlayerAction.Hurt50:
-                        target.Hurt(target.health * 0.5f);
-                        player.ChatMessage(string.Format(msg("hurt.success", player.UserIDString), 50, target.displayName));
-                        break;
-                    case PlayerAction.Hurt75:
-                        target.Hurt(target.health * 0.75f);
-                        player.ChatMessage(string.Format(msg("hurt.success", player.UserIDString), 75, target.displayName));
-                        break;                    
-                    case PlayerAction.Heal25:
-                        if (player.IsWounded())
-                            player.StopWounded();
-                        target.Heal(target.MaxHealth() * 0.25f);
-                        player.ChatMessage(string.Format(msg("heal.success", player.UserIDString), target.displayName, 25));
-                        break;
-                    case PlayerAction.Heal50:
-                        if (player.IsWounded())
-                            player.StopWounded();
-                        target.Heal(target.MaxHealth() * 0.5f);
-                        player.ChatMessage(string.Format(msg("heal.success", player.UserIDString), target.displayName, 50));
-                        break;
-                    case PlayerAction.Heal75:
-                        if (player.IsWounded())
-                            player.StopWounded();
-                        target.Heal(target.MaxHealth() * 0.75f);
-                        player.ChatMessage(string.Format(msg("heal.success", player.UserIDString), target.displayName, 75));
-                        break;
-                    case PlayerAction.Heal100:
-                        if (player.IsWounded())
-                            player.StopWounded();
-                        target.Heal(target.MaxHealth());
-                        player.ChatMessage(string.Format(msg("heal.success", player.UserIDString), target.displayName, 100));
-                        break;
-                    case PlayerAction.TeleportSelfTo:
-                        player.Teleport(target.transform.position);
-                        player.ChatMessage(string.Format(msg("teleport.success", player.UserIDString), target.displayName));
-                        DestroyUI(player);
-                        return;
-                    case PlayerAction.Permissions:
-                        OpenPermissionMenu(player, target.UserIDString, target.displayName, string.Format(msg("togglepermplayer", player.UserIDString), target.displayName), 0, string.Empty);
-                        return;
-                    default:
-                        break;
-                }
-            }
-            else SendReply(player, "Unable to find the specified player");
-            CreateMenuCommands(player, CommSub.Player);
-        }
-
-        [ConsoleCommand("amui.performcustomplayeraction")]
-        private void ccmdPerformCustomPlayerAction(ConsoleSystem.Arg arg)
-        {
-            BasePlayer player = arg.Connection.player as BasePlayer;
-            if (player == null)
-                return;
-
-            if (!HasPermission(player.UserIDString, PLAYER_PERMISSION))
-                return;
-
-            int row = arg.GetInt(1);
-            int column = arg.GetInt(2);
-
-            BasePlayer target = BasePlayer.FindByID(arg.GetULong(0));
-            if (target != null)
-            {
-                PlayerInfoCommandEntry command = configData.PlayerInfoCommands[row].Commands[column];
-
-                string c = command.Command.Replace("{target1_name}", $"\"{target.displayName}\"").Replace("{target1_id}", target.UserIDString);
-
-                if (command.CommandType == CommSub.Console)
-                    rust.RunServerCommand(c);
-                else rust.RunClientCommand(player, "chat.say", c);
-
-                PopupMessage(player, string.Format(msg("commandrun", player.UserIDString), command));
-
-                if (command.CloseOnRun)
-                    DestroyUI(player);
-                else CreateMenuCommands(player, CommSub.Player);
-            }
-            else SendReply(player, "Unable to find the specified player");               
-        }
         #endregion
 
         #region Helpers
@@ -2011,42 +1447,12 @@ namespace Oxide.Plugins
             uiColors.Add("button1", UI.Color(configData.Colors.Button1.Color, configData.Colors.Button1.Alpha));
             uiColors.Add("button2", UI.Color(configData.Colors.Button2.Color, configData.Colors.Button2.Alpha));
             uiColors.Add("button3", UI.Color(configData.Colors.Button3.Color, configData.Colors.Button3.Alpha));
-            uiColors.Add("close", UI.Color("ce422b", 1f));
         }        
 
         private List<string> GetGroups() => permission.GetGroups().ToList();
 
-        private bool CreateGroup(string name, string title, int rank) => permission.CreateGroup(name, title, rank);
-
-        private bool CloneGroup(string fromname, string name, string title, int rank, bool cloneUsers)
-        {
-            if (permission.CreateGroup(name, title, rank))
-            {
-                string[] perms = permission.GetGroupPermissions(fromname);
-                for (int i = 0; i < perms.Length; i++)
-                {
-                    permission.GrantGroupPermission(name, perms[i], null);
-                }
-
-                if (cloneUsers)
-                {
-                    string[] users = permission.GetUsersInGroup(fromname);
-                    for (int i = 0; i < users.Length; i++)
-                    {
-                        string userId = ToUserID(users[i]);
-                        if (!string.IsNullOrEmpty(userId))
-                            AddToGroup(userId, name);
-                    }
-                }
-                return true;
-            }
-            return false;
-        }
-
-        private string ToUserID(string name) => name.Split(' ')?[0] ?? string.Empty;
-
-        private string ToDisplayName(string name) => name.Substring(18).TrimStart('(').TrimEnd(')');
-
+        private bool CreateGroup(string name, string title, int rank) => permission.CreateGroup(name, title, rank);  
+        
         private void RemoveGroup(string name) => permission.RemoveGroup(name);
 
         private void AddToGroup(string userId, string groupId) => permission.AddUserGroup(userId, groupId);
@@ -2055,8 +1461,6 @@ namespace Oxide.Plugins
 
         private bool HasGroup(string userId, string groupId) => permission.UserHasGroup(userId, groupId);
 
-        private List<KeyValuePair<string, string>> GetUsersInGroupFormatted(string groupId) => permission.GetUsersInGroup(groupId).Select(x => new KeyValuePair<string,string>(ToUserID(x), ToDisplayName(x))).ToList();
-        
         private List<string> GetPermissions()
         {
             List<string> permissions = permission.GetPermissions().ToList();
@@ -2093,7 +1497,7 @@ namespace Oxide.Plugins
         }
         private T ParseType<T>(string type) => (T)Enum.Parse(typeof(T), type, true);
 
-        private bool IsDivisableBy2(int number) => number % 2 == 0;
+        private bool IsDivisable(int number) => number % 2 == 0;
 
         private void UpdatePermissionList()
         {
@@ -2127,14 +1531,13 @@ namespace Oxide.Plugins
         [ChatCommand("admin")]
         private void cmdAdmin(BasePlayer player, string command, string[] args)
         {
-            if (!HasPermission(player.UserIDString, USE_PERMISSION)) return;
+            if (!HasPermission(player.UserIDString, "adminmenu.use")) return;
             OpenAdminMenu(player);
-        }        
+        }
         #endregion
 
         #region Config        
         private ConfigData configData;
-
         private class Colors
         {          
             [JsonProperty(PropertyName = "Panel - Dark")]
@@ -2162,64 +1565,26 @@ namespace Oxide.Plugins
             public string Name { get; set; }
             public string Command { get; set; }
             public string Description { get; set; }
-            public bool CloseOnRun { get; set; }
-        }
-
-        private class PlayerInfoCommandEntry : CommandEntry
-        {            
-            public string RequiredPlugin { get; set; }
-
-            public string RequiredPermission { get; set; }
-
-            [JsonProperty(PropertyName = "Command Type ( Chat, Console )")]
-            public CommSub CommandType { get; set; }            
-        }
-
-        private class CustomCommands
-        {
-            public string Name { get; set; }
-
-            public List<PlayerInfoCommandEntry> Commands { get; set; }
         }
 
         private class ConfigData
         {
             public Colors Colors { get; set; }
-
             [JsonProperty(PropertyName = "Chat Command List")]
             public List<CommandEntry> ChatCommands { get; set; }
-
             [JsonProperty(PropertyName = "Console Command List")]
             public List<CommandEntry> ConsoleCommands { get; set; }
-
-            [JsonProperty(PropertyName = "Player Info Custom Commands")]
-            public List<CustomCommands> PlayerInfoCommands { get; set; }
-
-            [JsonProperty(PropertyName = "Give amounts per category")]
-            public Dictionary<ItemCategory, int[]> GiveAmounts { get; set; }
-
-            [JsonProperty(PropertyName = "Use different permissions for each section of the player administration tab")]
-            public bool UsePlayerAdminPermissions { get; set; }
-
-            public Oxide.Core.VersionNumber Version { get; set; }
         }
 
-        protected override void LoadConfig()
+        private void LoadVariables()
         {
-            base.LoadConfig();
-            configData = Config.ReadObject<ConfigData>();
-
-            if (configData.Version < Version)
-                UpdateConfigValues();
-
-            Config.WriteObject(configData, true);
+            LoadConfigVariables();
+            SaveConfig();
         }
 
-        protected override void LoadDefaultConfig() => configData = GetBaseConfig();
-
-        private ConfigData GetBaseConfig()
+        protected override void LoadDefaultConfig()
         {
-            return new ConfigData
+            var config = new ConfigData
             {
                 Colors = new Colors
                 {
@@ -2255,7 +1620,7 @@ namespace Oxide.Plugins
                         Name = "God",
                         Command = "/god",
                         Description = "Toggle god mode"
-                    }
+                    } 
                 },
                 ConsoleCommands = new List<CommandEntry>
                 {
@@ -2283,107 +1648,14 @@ namespace Oxide.Plugins
                         Command = "airstrike strike random",
                         Description = "Call a random Airstrike"
                     }
-                },
-                PlayerInfoCommands = new List<CustomCommands>
-                {
-                    new CustomCommands
-                    {
-                        Name = "Backpacks",
-                        Commands = new List<PlayerInfoCommandEntry>
-                        {
-                            new PlayerInfoCommandEntry
-                            {
-                                RequiredPlugin = "Backpacks",
-                                RequiredPermission = "backpacks.admin",
-                                Name = "View Backpack",
-                                CloseOnRun = true,
-                                Command = "/viewbackpack {target1_id}",
-                                CommandType = CommSub.Chat
-                            }
-                        }
-                    },
-                    new CustomCommands
-                    {
-                        Name = "InventoryViewer",
-                        Commands = new List<PlayerInfoCommandEntry>
-                        {
-                            new PlayerInfoCommandEntry
-                            {
-                                RequiredPlugin = "InventoryViewer",
-                                RequiredPermission = "inventoryviewer.allowed",
-                                Name = "View Inventory",
-                                CloseOnRun = true,
-                                Command = "/viewinv {target1_id}",
-                                CommandType = CommSub.Chat
-                            }
-                        }
-                    },
-                    new CustomCommands
-                    {
-                        Name = "Freeze",
-                        Commands = new List<PlayerInfoCommandEntry>
-                        {
-                            new PlayerInfoCommandEntry
-                            {
-                                RequiredPlugin = "Freeze",
-                                RequiredPermission = "freeze.use",
-                                Name = "Freeze",
-                                CloseOnRun = false,
-                                Command = "/freeze {target1_id}",
-                                CommandType = CommSub.Chat
-                            },
-                            new PlayerInfoCommandEntry
-                            {
-                                RequiredPlugin = "Freeze",
-                                RequiredPermission = "freeze.use",
-                                Name = "Unfreeze",
-                                CloseOnRun = false,
-                                Command = "/unfreeze {target1_id}",
-                                CommandType = CommSub.Chat
-                            }
-                        }
-                    }
-                },
-                GiveAmounts = new Dictionary<ItemCategory, int[]>
-                {
-                    [ItemCategory.Ammunition] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Attire] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Common] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Component] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Construction] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Electrical] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Food] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Fun] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Items] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Medical] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Misc] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Resources] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Tool] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Traps] = new int[] { 1, 10, 100, 1000 },
-                    [ItemCategory.Weapon] = new int[] { 1, 10, 100, 1000 },
-                },
-                UsePlayerAdminPermissions = false,
-                Version = Version
+                }
             };
+            SaveConfig(config);
         }
 
-        protected override void SaveConfig() => Config.WriteObject(configData, true);
+        private void LoadConfigVariables() => configData = Config.ReadObject<ConfigData>();
 
-        private void UpdateConfigValues()
-        {
-            PrintWarning("Config update detected! Updating config values...");
-
-            ConfigData baseConfig = GetBaseConfig();
-
-            if (configData.Version < new VersionNumber(0, 1, 41))
-                configData.GiveAmounts = baseConfig.GiveAmounts;
-
-            if (configData.Version < new VersionNumber(0, 1, 51))
-                configData.PlayerInfoCommands = baseConfig.PlayerInfoCommands;
-
-            configData.Version = Version;
-            PrintWarning("Config update completed!");
-        }
+        private void SaveConfig(ConfigData config) => Config.WriteObject(config, true);
         #endregion
 
         #region Data Management
@@ -2443,7 +1715,6 @@ namespace Oxide.Plugins
             ["group"] = "Group Permissions",
             ["usergroups"] = "User Groups",
             ["addgroup"] = "Create Group",
-            ["clonegroup"] = "Clone Group",
             ["removegroup"] = "Remove Group",
             ["chat"] = "Chat Commands",
             ["console"] = "Console Commands",
@@ -2457,33 +1728,25 @@ namespace Oxide.Plugins
             ["togglepermplayer"] = "Toggle permissions for player : {0}",
             ["togglepermgroup"] = "Toggle permissions for group : {0}",
             ["togglegroupplayer"] = "Toggle groups for player : {0}",
-            ["groupview"] = "Viewing players in group : {0}",
             ["giveitem"] = "Select a player to give : {0} x {1}",
             ["selectgroup"] = "Select a group",
             ["selectremovegroup"] = "Select a group to remove. <color=#ce422b>WARNING! This can not be undone</color>",
             ["selecttarget"] = "Select a target",
             ["onlineplayers"] = "Online Players",
             ["offlineplayers"] = "Offline Players",
-            ["inputhelper"] = "To create a new group type a group name, title, and rank. Press Enter after completing each field.\nOnce you are ready hit the 'Create' button",
-            ["clonehelper"] = "To clone a group type the group name you want to clone, a new group name, title, and rank. Press Enter after completing each field.\nOnce you are ready hit the 'Clone' button",
+            ["inputhelper"] = "To create a new group type a group name, title, and rank. Press Enter after completing each field. Once you are ready hit the 'Create' button",
             ["create"] = "Create",
-            ["clone"] = "Clone",
-            ["fromgroupname"] = "Clone From:",
             ["groupname"] = "Name:",
             ["grouptitle"] = "Title (optional):",
             ["grouprank"] = "Rank (optional):",
             ["reset"] = "Reset",
             ["nogroupname"] = "You must set a group name",
-            ["nofromgroupname"] = "You must supply a valid existing group name to clone from",
-            ["invalidfromgroupname"] = "The group name {0} does not exist",
             ["groupcreated"] = "You have successfully created the group: {0}",
-            ["groupcloned"] = "You have successfully cloned the group: {0} to {1}",
-            ["copyusers"] = "Copy users:",
             ["commandrun"] = "You have run the command : {0}",
             ["groupremoved"] = "You have removed the group : {0}",
             ["uiwarning"] = "** Note ** Close any other UI plugins you have running that automatically refresh (LustyMap or InfoPanel for example). Having these open will cause your input boxes to continually refresh!",
+      //  Слив плагинов server-rust by Apolo YouGame
             ["give"] = "Give Items",
-            ["playerinfo"] = "Player Info",
             ["Weapon"] = "Weapon",
             ["Construction"] = "Construction",
             ["Items"] = "Items",
@@ -2497,39 +1760,7 @@ namespace Oxide.Plugins
             ["Misc"] = "Misc",
             ["Component"] = "Component",
             ["noplayer"] = "Unable to find the specified player",
-            ["gaveitem"] = "You gave {0}x {1} to {2}",
-            ["chatmute.success"] = "You have chat muted {0}",
-            ["chatunmute.success"] = "You have disabled chat mute for {0}",
-            ["stripinv.success"] = "You have stripped {0}'s inventory",
-            ["resetmetabolism.success"] = "You have reset {0}'s metabolism",
-            ["hurt.success"] = "You have deducted {0}% of {1}'s current health",
-            ["heal.success"] = "You have healed {0} by {1}% of their max health",
-            ["teleport.success"] = "You have teleported to {0}'s position",
-            ["kill.success"] = "You have killed {0}",
-            ["kick.success"] = "You have kicked {0}",
-            ["ban.success"] = "You have banned {0}",
-            ["resetblueprints.success"] = "You have reset {0}'s blueprint",
-            ["unlockblueprints.success"] = "You have given {0} all available blueprints",
-            ["action.ban"] = "Ban",
-            ["action.kick"] = "Kick",
-            ["action.kill"] = "Kill",
-            ["action.mutechat"] = "Mute Chat",
-            ["action.mutevoice"] = "Mute Voice",
-            ["action.unmutechat"] = "Unmute Chat",
-            ["action.unmutevoice"] = "Unmute Voice",
-            ["action.stripinventory"] = "Strip Inventory",
-            ["action.resetblueprints"] = "Reset Blueprints",
-            ["action.giveblueprints"] = "Give Blueprints",
-            ["action.resetmetabolism"] = "Reset Metabolism",
-            ["action.hurt25"] = "Hurt 25%",
-            ["action.hurt50"] = "Hurt 50%",
-            ["action.hurt75"] = "Hurt 75%",
-            ["action.heal25"] = "Heal 25%",
-            ["action.heal50"] = "Heal 50%",
-            ["action.heal75"] = "Heal 75%",
-            ["action.heal100"] = "Heal 100%",
-            ["action.teleportselfto"] = "Teleport Self To",
-            ["action.permissions"] = "View Permissions",
+            ["gaveitem"] = "You gave {0}x {1} to {2}"
         };
         #endregion
     }

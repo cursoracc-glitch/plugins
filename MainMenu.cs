@@ -712,7 +712,7 @@ namespace Oxide.Plugins
                     Parent = MainLayer + "_Home_" + i,
                     Components =
                 {
-                    new CuiButtonComponent {Color="1 1 1 0", Command = $"mainmenu_command /sethome {name}" },
+                    new CuiButtonComponent {Color="1 1 1 0", Command = $"mainmenu_command /home set {name}" },
                     new CuiRectTransformComponent { AnchorMin="0 0", AnchorMax="1 1" },
 
                 },
