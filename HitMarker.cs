@@ -7,7 +7,6 @@ using Rust;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using Oxide.Core;
 using Random = System.Random;
 using Time = UnityEngine.Time;
 
@@ -86,20 +85,20 @@ namespace Oxide.Plugins
 
         #region COMMANDS
 
-        [ChatCommand("hit")]
+        [ChatCommand("hitmarker")]
         void cmdHitMarker(BasePlayer player, string cmd, string[] args)
         {
             if (!hitmarkeron.Contains(player))
             {
                 hitmarkeron.Add(player);
                 SendReply(player,
-                    "<color=orange>HitMarker</color>:" + " " + "<color=#00FF00>Вы включили показ урона.</color>");
+                    "<color=cyan>HitMarker</color>:" + " " + "<color=orange>Вы включили показ урона.</color>");
             }
             else
             {
                 hitmarkeron.Remove(player);
                 SendReply(player,
-                    "<color=orange>HitMarker</color>:" + " " + "<color=#00FF00>Вы отключили показ урона.</color>");
+                    "<color=cyan>HitMarker</color>:" + " " + "<color=orange>Вы отключили показ урона.</color>");
             }
         }
 
@@ -158,9 +157,6 @@ namespace Oxide.Plugins
                     }
                 }
             }
-            //bool ret;
-            //if (hitinfo?.HitEntity is BasePlayer)
-                //ret = (bool)Interface.CallHook("OnAttackInternal", attacker, (BasePlayer)hitinfo.HitEntity, hitinfo);
         }
 
         string DamageGUI = "[{\"name\":\"hitmarkerDamage{0}\",\"parent\":\"Hud\",\"components\":[{\"type\":\"UnityEngine.UI.Text\",\"text\":\"{1}\"},{\"type\":\"UnityEngine.UI.Outline\",\"color\":\"0 0 0 1\",\"distance\":\"0.3 -0.3\"},{\"type\":\"RectTransform\",\"anchormin\":\"{2} {3}\",\"anchormax\":\"{4} {5}\",\"offsetmin\":\"0 0\",\"offsetmax\":\"1 1\"}]}]" ;
@@ -172,34 +168,22 @@ namespace Oxide.Plugins
                 json = json.Replace( "{" + i + "}", args[ i ].ToString() );
             return json;
         }
-		
         private void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo hitInfo)
         {
-            //OnHeliTakeDamage(entity, hitInfo);
-			var victim = entity as BasePlayer;
-			var attacker = hitInfo.InitiatorPlayer;
-			//var helivictim = entity as HelicopterAI;
-            if (hitInfo == null) return;
+            var victim = entity as BasePlayer;
+            if (victim == null || hitInfo == null) return;
+            DamageType type = hitInfo.damageTypes.GetMajorityDamageType();
+            var attacker = hitInfo.InitiatorPlayer;
+            if (attacker == null) return;
 			
-			if (victim != null){
-				DamageType type = hitInfo.damageTypes.GetMajorityDamageType();
-				
-				if (attacker == null) return;
-				
-				var isHead = hitInfo.isHeadshot;
-				bool isFriend = IsFriends(attacker, victim as BasePlayer);
-				NextTick(() =>
-				{
-					var damage =
-						System.Convert.ToInt32(Math.Round(hitInfo.damageTypes.Total(), 0, MidpointRounding.AwayFromZero));
-
-                    if (entity is BasePlayer && hitInfo?.Initiator is BasePlayer)
-                        Interface.CallHook("OnAttackInternal", (BasePlayer)hitInfo.Initiator, (BasePlayer)entity, hitInfo);
-
-                    DamageNotifier(attacker, damage, isHead, isFriend);
-				});
-			}
-            
+			var isHead = hitInfo.isHeadshot;
+			bool isFriend = (Clans?.Call("HasFriend", attacker.userID, (victim as BasePlayer).userID) as bool?) ?? false;
+            NextTick(() =>
+            {
+                var damage =
+                    System.Convert.ToInt32(Math.Round(hitInfo.damageTypes.Total(), 0, MidpointRounding.AwayFromZero));
+                DamageNotifier(attacker, damage, isHead, isFriend);
+            });
         }
 
         void OnPlayerWound( BasePlayer player )
@@ -278,11 +262,11 @@ namespace Oxide.Plugins
 		{
 			switch (action)
 			{
-				case "wound": return "<color=#FF7979><size=22>УПАЛ!</size></color>";							  
-				case "kill":  return "<color=red><size=22>УБИТ!</size></color>";							  
+				case "wound": return "<color=#FF7979>УПАЛ!</color>";							  
+				case "kill":  return "<color=red>УБИТ!</color>";							  
 			}
 			
-			return "<color=white><size=22>ПОПАЛ!</size></color>";
+			return "<color=white>ПОПАЛ!</color>";
 		}
 
         void DestroyLastCui(BasePlayer player)
@@ -322,13 +306,8 @@ namespace Oxide.Plugins
                 CuiHelper.DestroyUi(player, "hitmarkerDamage"+item.Value.num.ToString());										
 				if (item.Key < time)
 					damages.RemoveAt(i);
-                else
-                {
-                    if(item.Value.isFriend)
-                        CuiHelper.AddUi(player, HandleArgs(DamageGUI, item.Value.num, $"<size=22><color={(item.Value.isFriend ? "#e37f7f" : (item.Value.isHead ? "red" : "white"))}>ДРУГ</color></size>", item.Value.xs, item.Value.ys, item.Value.xe, item.Value.ye));
-                    else
-                        CuiHelper.AddUi(player, HandleArgs(DamageGUI, item.Value.num, $"<size=22><color={(item.Value.isHead ? "red" : "white")}>-{item.Value.damage}</color></size>", item.Value.xs, item.Value.ys, item.Value.xe, item.Value.ye));
-                }
+				else
+					CuiHelper.AddUi( player, HandleArgs( DamageGUI, item.Value.num, $"<color={item.Value.isFriend ? "green" : (item.Value.isHead ? "red" : "white")}>-{item.Value.damage}</color>", item.Value.xs, item.Value.ys, item.Value.xe, item.Value.ye ) );
                 destTimers[player] = timer.Once(damageTimeout, () =>
                 {
                     CuiHelper.DestroyUi(player, "hitmarkerDamage" + item.Value.num.ToString());
@@ -338,12 +317,8 @@ namespace Oxide.Plugins
 
         #endregion
         
-        private bool IsFriends(BasePlayer player, BasePlayer target)
-        {
-            if (player?.currentTeam == target?.currentTeam && player?.currentTeam != 0 && target?.currentTeam != 0)
-                return true;
-
-            return false;
-        }
     }
 }
+
+
+

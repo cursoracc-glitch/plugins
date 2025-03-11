@@ -6,139 +6,253 @@ using UnityEngine;
 using System.Globalization;
 using Oxide.Core;
 using System.IO;
-using Newtonsoft.Json;
 
 namespace Oxide.Plugins
 {
-    [Info("Kits", "DeliciousDev.", "2.0.0")]
+    [Info("KitLazar", "SkripTal", "1.0.1")]
     class Kits : RustPlugin
     {
+        private PluginConfig _config;
+        private ImagesCache _imagesCache = new ImagesCache();
         private List<Kit> _kits;
         private Dictionary<ulong, Dictionary<string, KitData>> _kitsData;
         private Dictionary<BasePlayer, List<string>> _kitsGUI = new Dictionary<BasePlayer, List<string>>();
-        private static List<string> CustomAutoKits = new List<string>();
 
-		public string color = "<color=#34495E>";
-		public string colorend = "</color>";
+        #region Classes
 
-        #region Конфиг
-        private string ImagesColor = "#96969623";
-        private string MaskImagesColor = "#96969600";
-        private float KitWidth = 0.12f;
-        private float MarginBetween = 0.01f;
-        private float MarginBottom  = 0.5f;
-        private float MarginTop = 0.44f;
-
-        private void LoadDefaultConfig()
+        class PluginConfig
         {
-            GetConfig("Основные настройки", "Цвет доступного набора (HEX, два последних значения - прозрачность)", ref ImagesColor);
-            GetConfig("Основные настройки", "Цвет недоступного набора (HEX, два последних значения - прозрачность)", ref MaskImagesColor);
+            public Position Position { get; set; }
+            public Position CloseButtonPosition { get; set; }
+            public Position CloseButtonPositionNext1 { get; set; }
+            public Position CloseButtonPositionNext2 { get; set; }
+            public Position CloseButtonPositionNext3 { get; set; }
+            public string CloseButtonColor { get; set; }
+            public string MainBackgroundColor { get; set; }
 
-            GetConfig("Кнопки", "Ширина", ref KitWidth);
-            GetConfig("Кнопки", "Смещение", ref MarginBetween);
-            GetConfig("Кнопки", "Смещение вниз", ref MarginBottom);
-            GetConfig("Кнопки", "Смещение вверх", ref MarginTop);
+            public string DefaultKitImage { get; set; }
+            public float MarginTop { get; set; }
+            public float MarginBottom { get; set; }
+            public float MarginBetween { get; set; }
+            public float KitWidth { get; set; }
+            public string DisableMaskColor { get; set; }
+            public string KitBackgroundColor { get; set; }
+            public List<string> CustomAutoKits;
+            public ImageConfig Image { get; set; }
+            public LabelConfig Label { get; set; }
+            public LabelConfig Amount { get; set; }
+            public LabelConfig Time { get; set; }
 
-            var CustomAutoKits = new List<object>
+            public static PluginConfig CreateDefault()
             {
-                {"autokit1"},
-                {"autokit2"}
-            };
+                return new PluginConfig
+                {
+                    CustomAutoKits = new List<string>()
+                    {
+                        "autokit1",
+                        "autokit2"
+                    },
+                    MainBackgroundColor = "#00000088",
+                    Position = new Position
+                    {
+                        AnchorMin = "0 0.35",
+                        AnchorMax = "1 0.65"
+                    },
+                    CloseButtonPosition = new Position
+                    {
+                        AnchorMin = "0.95 0.8",
+                        AnchorMax = "0.997 0.98"
+                    },
+                    CloseButtonPositionNext1 = new Position
+                    {
+                        AnchorMin = "0.95 0.6",
+                        AnchorMax = "0.997 0.78"
+                    },
+                    CloseButtonPositionNext2 = new Position
+                    {
+                        AnchorMin = "0.95 0.4",
+                        AnchorMax = "0.997 0.58"
+                    },
+                    CloseButtonPositionNext3 = new Position
+                    {
+                        AnchorMin = "0.95 0.1",
+                        AnchorMax = "0.997 0.38"
+                    },
+                    CloseButtonColor = "0 0 0 0.70",
 
-            GetConfig("Наборы", "Набор на респавне", ref CustomAutoKits);
-            SaveConfig();
-        }
+                    DefaultKitImage = "file://" + Interface.Oxide.DataDirectory + Path.DirectorySeparatorChar + "Kits" + Path.DirectorySeparatorChar + "stores.png",
+                    KitWidth = 0.12f,
+                    MarginTop = 0.04f,
+                    MarginBottom = 0.03f,
+                    DisableMaskColor = "#000000DD",
+                    MarginBetween = 0.01f,
+                    KitBackgroundColor = "#00000088",
 
-        private void GetConfig<T>(string menu, string Key, ref T var)
-        {
-            if (Config[menu, Key] != null)
-            {
-                var = (T)Convert.ChangeType(Config[menu, Key], typeof(T));
+                    Image = new ImageConfig
+                    {
+                        Color = "#FFFFFFFF",
+                        Position = new Position
+                        {
+                            AnchorMin = "0.05 0.15",
+                            AnchorMax = "0.95 0.95"
+                        },
+                        Png = ""
+                    },
+                    Label = new LabelConfig
+                    {
+                        Position = new Position
+                        {
+                            AnchorMin = "0 0",
+                            AnchorMax = "1 0.15"
+                        },
+                        FontSize = 16,
+                        ForegroundColor = "#FFFFFFFF",
+                        BackgroundColor = "#00000000",
+                        TextAnchor = TextAnchor.MiddleCenter
+                    },
+                    Amount = new LabelConfig
+                    {
+                        Position = new Position
+                        {
+                            AnchorMin = "0.05 0.85",
+                            AnchorMax = "0.95 0.95"
+                        },
+                        FontSize = 16,
+                        ForegroundColor = "#FFFFFFFF",
+                        BackgroundColor = "#00000000",
+                        TextAnchor = TextAnchor.MiddleCenter
+                    },
+                    Time = new LabelConfig
+                    {
+                        Position = new Position
+                        {
+                            AnchorMin = "0 0",
+                            AnchorMax = "1 1"
+                        },
+                        FontSize = 16,
+                        ForegroundColor = "#FFFFFFFF",
+                        BackgroundColor = "#00000000",
+                        TextAnchor = TextAnchor.MiddleCenter
+                    }
+                };
             }
 
-            Config[menu, Key] = var;
-        }
-        #endregion
+            public class LabelConfig
+            {
+                public Position Position { get; set; }
+                public string ForegroundColor { get; set; }
+                public string BackgroundColor { get; set; }
+                public int FontSize { get; set; }
+                public TextAnchor TextAnchor { get; set; }
+            }
 
-        #region Класс
+            public class ImageConfig
+            {
+                public Position Position { get; set; }
+                public string Color { get; set; }
+                public string Png { get; set; }
+            }
+        }
 
         public class Kit
         {
-            [JsonProperty("Название")]
-            public string Name;
-            [JsonProperty("Формат названия")]
-            public string DisplayName;
-            [JsonProperty("Максимум использований")]
-            public int Amount;
-            [JsonProperty("Кулдаун")]
-            public double Cooldown;
-            [JsonProperty("Виден или скрыт")]
-            public bool Hide;
-            [JsonProperty("Привилегия")]
-            public string Permission;
-            [JsonProperty("Предметы")]
-            public List<KitItem> Items;
-            [JsonProperty("Изображение")]
-            public string Png;
+            public string Name { get; set; }
+            public string DisplayName { get; set; }
+            public int Amount { get; set; }
+            public double Cooldown { get; set; }
+            public bool Hide { get; set; }
+            public string Permission { get; set; }
+            public List<KitItem> Items { get; set; }
+
+            public string Png { get; set; }
         }
 
         public class KitItem
         {
-            [JsonProperty("Название предмета")]
-            public string ShortName;
-            [JsonProperty("Количество")]
-            public int Amount;
-            [JsonProperty("Чертеж")]
-            public int Blueprint;
-            [JsonProperty("Место")]
-            public string Container;
-            [JsonProperty("Состояние")]
-            public float Condition;
-            [JsonProperty("Скин")]
-            public ulong SkinID;
-            [JsonProperty("Оружие")]
-            public Weapon Weapon;
-            public List<ItemContent> Content;
+            public string ShortName { get; set; }
+            public int Amount { get; set; }
+            public int Blueprint { get; set; }
+            public ulong SkinID { get; set; }
+            public string Container { get; set; }
+            public float Condition { get; set; }
+            public Weapon Weapon { get; set; }
+            public List<ItemContent> Content { get; set; }
 
         }
         public class Weapon
         {
-            [JsonProperty("Название боеприпаса")]
-            public string ammoType;
-            [JsonProperty("Количество")]
-            public int ammoAmount;
+            public string ammoType { get; set; }
+            public int ammoAmount { get; set; }
         }
         public class ItemContent
         {
-            [JsonProperty("Название предмета")]
-            public string ShortName;
-            [JsonProperty("Состояние")]
-            public float Condition;
-            [JsonProperty("Количество")]
-            public int Amount;
+            public string ShortName { get; set; }
+            public float Condition { get; set; }
+            public int Amount { get; set; }
         }
 
         public class KitData
         {
-            [JsonProperty("Количество")]
-            public int Amount;
-            [JsonProperty("Кулдаун")]
-            public double Cooldown;
+            public int Amount { get; set; }
+            public double Cooldown { get; set; }
+        }
+
+        public class Position
+        {
+            public string AnchorMin { get; set; }
+            public string AnchorMax { get; set; }
+        }
+
+        public class ImagesCache : MonoBehaviour
+        {
+            private Dictionary<string, string> _images = new Dictionary<string, string>();
+
+            public void Add(string name, string url)
+            {
+                if (_images.ContainsKey(name))
+                    return;
+
+                using (var www = new WWW(url))
+                {
+                    if (www.error != null)
+                    {
+                        print(string.Format("Ошибка загрузки изображения!ошибка: { 0}", www.error));
+                    }
+                    else
+                    {
+                        if (www.bytes == null || www.bytes.Count() == 0)
+                        {
+                            Interface.Oxide.LogError($"Не удалось добавить изображение для { name}. Адрес файла возможно недействителен\n {url}");
+                            return;
+                        }
+
+                        _images[name] = FileStorage.server.Store(www.bytes, FileStorage.Type.png, CommunityEntity.ServerInstance.net.ID).ToString();
+                    }
+                }
+            }
+            public string Get(string name)
+            {
+                if (_images.ContainsKey(name))
+                    return _images[name];
+
+                return string.Empty;
+            }
         }
 
         #endregion
 
-        #region Оксид
+        #region Oxide hooks
 
-		void OnNewSave(string filename)
-		{ 
-			_kitsData.Clear();
-			PrintWarning("Очищаем дата-файл использований китов...");
-		}
+        protected override void LoadDefaultConfig()
+        {
+            Config.Clear();
+            Config.WriteObject(PluginConfig.CreateDefault(), true);
+            PrintWarning("Плагин для проекта LAZAR");
+        }
 
         void OnPlayerRespawned(BasePlayer player)
         {
-            foreach (var kits in CustomAutoKits)
+            foreach (var kits in _config.CustomAutoKits)
             {
                 if (_kits.Exists(x => x.Name == kits))
                 {
@@ -175,13 +289,64 @@ namespace Oxide.Plugins
             SaveKits();
         }
 
+
+        private void LoadMessages()
+        {
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["Kit Was Removed"] = "<color=#008B8B>[Сервер]:</color> Kit {kitname} was removed",
+                ["Kit Doesn't Exist"] = "<color=#008B8B>[Сервер]:</color> This kit doesn't exist",
+                ["Not Found Player"] = "<color=#008B8B>[Сервер]:</color> Player not found",
+                ["To Many Player"] = "<color=#008B8B>[Сервер]:</color> Found multipy players",
+                ["Permission Denied"] = "<color=#008B8B>[Сервер]:</color> Access denied",
+                ["Limite Denied"] = "<color=#008B8B>[Сервер]:</color> Useage limite reached",
+                ["Cooldown Denied"] = "<color=#008B8B>[Сервер]:</color> You will be able to use this kit after {time}",
+                ["Reset"] = "<color=#008B8B>[Сервер]:</color> Kits data wiped",
+                ["Kit Already Exist"] = "<color=#008B8B>[Сервер]:</color> Kit with the same name already exist",
+                ["Kit Created"] = "<color=#008B8B>[Сервер]:</color> You have created a new kit - {name}",
+                ["Kit Extradited"] = "<color=#008B8B>[Сервер]:</color> You have claimed kit - {kitname}",
+                ["Kit Cloned"] = "<color=#008B8B>[Сервер]:</color> You inventory was copyed to the kit",
+                ["UI Amount"] = "Timeleft: {amount}",
+                ["Help"] = "/kit name|add|clone|remove|list|reset",
+                ["Help Add"] = "/kit add <kitname>",
+                ["Help Clone"] = "/kit clone <kitname>",
+                ["Help Remove"] = "/kit remove <kitname>",
+                ["Help Give"] = "/kit give <kitname> <playerName|steamID>",
+                ["Give Succes"] = "You have successfully given the player {0} a set {1}",
+                ["No Space"] = "Can't redeem kit. Not enought space"
+            }, this);
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["Kit Was Removed"] = "<color=#008B8B>[Сервер]:</color> {kitname} был удалён",
+                ["Kit Doesn't Exist"] = "<color=#008B8B>[Сервер]:</color> Этого комплекта не существует",
+                ["Not Found Player"] = "<color=#008B8B>[Сервер]:</color> Игрок не найден",
+                ["To Many Player"] = "<color=#008B8B>[Сервер]:</color> Найдено несколько игроков",
+                ["Permission Denied"] = "<color=#008B8B>[Сервер]:</color> У вас нет полномочий использовать этот комплект",
+                ["Limite Denied"] = "<color=#008B8B>[Сервер]:</color> Вы уже использовали этот комплект максимальное количество раз",
+                ["Cooldown Denied"] = "<color=#008B8B>[Сервер]:</color> Вы сможете использовать этот комплект через {time}",
+                ["Reset"] = "<color=#008B8B>[Сервер]:</color> Вы обнулили все данные о использовании комплектов игроков",
+                ["Kit Already Exist"] = "<color=#008B8B>[Сервер]:</color> Этот набор уже существует",
+                ["Kit Created"] = "<color=#008B8B>[Сервер]:</color> Вы создали новый набор - {name}",
+                ["Kit Extradited"] = "<color=#008B8B>[Сервер]:</color> Вы получили комплект {kitname}",
+                ["Kit Cloned"] = "<color=#008B8B>[Сервер]:</color> Предметы были скопированы из инвентаря в набор",
+                ["UI Amount"] = "Осталось: {amount}",
+                ["Help"] = "/kit name|add|clone|remove|list|reset",
+                ["Help Add"] = "/kit add <kitname>",
+                ["Help Clone"] = "/kit clone <kitname>",
+                ["Help Remove"] = "/kit remove <kitname>",
+                ["Help Give"] = "/kit give <kitname> <playerName|steamID>",
+                ["Give Succes"] = "Вы успешно выдали игрок {0} набор {1}",
+                ["No Space"] = "Невозможно получить набор - недостаточно места в инвентаре"
+            }, this, "ru");
+        }
+
         private void Loaded()
         {
-            LoadConfig();
-            LoadDefaultConfig();
-
+            _config = Config.ReadObject<PluginConfig>();
             _kits = Interface.Oxide.DataFileSystem.ReadObject<List<Kit>>("Kits");
             _kitsData = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, Dictionary<string, KitData>>>("Kits_Data");
+
+            LoadMessages();
         }
 
         private void Unload()
@@ -196,11 +361,9 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
-            LoadConfig();
-            LoadDefaultConfig();
-
             foreach (var kit in _kits)
             {
+                _imagesCache.Add(kit.Name, kit.Png);
                 if (!permission.PermissionExists(kit.Permission))
                     permission.RegisterPermission(kit.Permission, this);
             }
@@ -215,7 +378,8 @@ namespace Oxide.Plugins
 
         #endregion
 
-        #region Команды
+        #region Commands
+
         [ConsoleCommand("kit")]
         private void CommandConsoleKit(ConsoleSystem.Arg arg)
         {
@@ -234,6 +398,28 @@ namespace Oxide.Plugins
                 TriggerUI(player);
                 return;
             }
+
+            if (value == "next1")
+            {
+                TriggerUI(player);
+                TriggerUI1(player);
+                return;
+            }
+
+            if (value == "next2")
+            {
+                TriggerUI(player);
+                TriggerUI2(player);
+                return;
+            }
+
+            if (value == "next3")
+            {
+                TriggerUI(player);
+                TriggerUI3(player);
+                return;
+            }
+
 
             if (!_kitsGUI.ContainsKey(player))
                 return;
@@ -254,12 +440,17 @@ namespace Oxide.Plugins
                     foreach (var kitname in _kitsGUI[player])
                     {
                         CuiHelper.DestroyUi(player, $"ui.kits.{kitname}.button");
+                        CuiHelper.DestroyUi(player, $"ui.kits.{kitname}.amount");
                         CuiHelper.DestroyUi(player, $"ui.kits.{kitname}");
                     }
 
+                    InitilizeKitsUI(ref container, player);
                     CuiHelper.AddUi(player, container);
                     return;
                 }
+
+                CuiHelper.DestroyUi(player, $"ui.kits.{value}.amount");
+                InitilizeAmountLabelUI(ref container, value, GetMsg("UI Amount", player).Replace("{amount}", (kit.Amount - playerData.Amount).ToString()));
             }
 
             if (kit.Cooldown > 0)
@@ -270,11 +461,6 @@ namespace Oxide.Plugins
                     CuiHelper.DestroyUi(player, $"ui.kits.{value}.button");
 
                     InitilizeMaskUI(ref container, kit.Name);
-
-                    container.Add(new CuiLabel
-                    {
-                        Text = { Color = "1 1 1 1", Font = "RobotoCondensed-regular.ttf", FontSize = 16, Align = TextAnchor.MiddleCenter, Text = $"{kit.DisplayName}" }
-                    }, $"ui.kits.{kit.Name}");
                     InitilizeCooldownLabelUI(ref container, value, TimeSpan.FromSeconds(playerData.Cooldown - currentTime));
                 }
             }
@@ -305,23 +491,23 @@ namespace Oxide.Plugins
             switch (args[0].ToLower())
             {
                 case "help":
-                    SendReply(player, "Команды:\n/kit new [название]: создать набор\n/kit clone [название]: сделать копию\n/kit remove [название]: удалить набор\n/kit list: список наборов\n/kit reset: обнулить все наборы");
+                    SendReply(player, GetMsg("Help", player));
                     return;
-                case "new":
+                case "add":
                     if (args.Length < 2)
-                        SendReply(player, "/kit new [название]: создать набор");
+                        SendReply(player, GetMsg("Help Add", player));
                     else
                         KitCommandAdd(player, args[1].ToLower());
                     return;
                 case "clone":
                     if (args.Length < 2)
-                        SendReply(player, "/kit clone [название]: сделать копию");
+                        SendReply(player, GetMsg("Help Clone", player));
                     else
                         KitCommandClone(player, args[1].ToLower());
                     return;
                 case "remove":
                     if (args.Length < 2)
-                        SendReply(player, "/kit remove [название]: удалить набор");
+                        SendReply(player, GetMsg("Help Remove", player));
                     else
                         KitCommandRemove(player, args[1].ToLower());
                     return;
@@ -334,14 +520,14 @@ namespace Oxide.Plugins
                 case "give":
                     if (args.Length < 3)
                     {
-                        SendReply(player, "/kit give [название] Ник/SteamID");
+                        SendReply(player, GetMsg("Help Give", player));
                     }
                     else
                     {
                         var foundPlayer = FindPlayer(player, args[1].ToLower());
                         if (foundPlayer == null)
                             return;
-                        SendReply(player, $"Вы успешно выдали игроку {foundPlayer.displayName} набор {args[2]}");
+                        SendReply(player, GetMsg("Give Succes", player), foundPlayer.displayName, args[2]);
                         KitCommandGive(player, foundPlayer, args[2].ToLower());
                     }
                     return;
@@ -351,21 +537,9 @@ namespace Oxide.Plugins
             }
         }
 
-        [ConsoleCommand("kits")]
-        private void ConsoleBag(ConsoleSystem.Arg args)
-        {
-            var player = args.Player();
-            if (player != null && args.HasArgs(1))
-            {
-                if (args.Args[0] == "skip")
-                {
-                    InitilizeUI(player, int.Parse(args.Args[1]));
-                }
-            }
-        }
         #endregion
 
-        #region Кит
+        #region Kits
 
         private bool GiveKit(BasePlayer player, string kitname)
         {
@@ -378,7 +552,7 @@ namespace Oxide.Plugins
             }
             if (!_kits.Exists(x => x.Name == kitname))
             {
-                SendReply(player, "Этого комплекта не существует");
+                SendReply(player, GetMsg("Kit Doesn't Exist", player));
                 return false;
             }
 
@@ -386,7 +560,7 @@ namespace Oxide.Plugins
 
             if (!string.IsNullOrEmpty(kit.Permission) && !permission.UserHasPermission(player.UserIDString, kit.Permission))
             {
-                SendReply(player, "У вас нет полномочий использовать этот комплект");
+                SendReply(player, GetMsg("Permission Denied", player));
                 return false;
             }
 
@@ -394,7 +568,7 @@ namespace Oxide.Plugins
 
             if (kit.Amount > 0 && playerData.Amount >= kit.Amount)
             {
-                SendReply(player, "Вы уже использовали этот комплект максимальное количество раз");
+                SendReply(player, GetMsg("Limite Denied", player));
                 return false;
             }
 
@@ -403,7 +577,7 @@ namespace Oxide.Plugins
                 var currentTime = GetCurrentTime();
                 if (playerData.Cooldown > currentTime)
                 {
-                    SendReply(player, $"Вы сможете использовать этот комплект через {TimeExtensions.FormatTime(TimeSpan.FromSeconds(playerData.Cooldown - currentTime))}");
+                    SendReply(player, GetMsg("Cooldown Denied", player).Replace("{time}", TimeExtensions.FormatTime(TimeSpan.FromSeconds(playerData.Cooldown - currentTime))));
                     return false;
                 }
             }
@@ -417,7 +591,7 @@ namespace Oxide.Plugins
             if ((player.inventory.containerBelt.capacity - player.inventory.containerBelt.itemList.Count) < beltcount || (player.inventory.containerWear.capacity - player.inventory.containerWear.itemList.Count) < wearcount || (player.inventory.containerMain.capacity - player.inventory.containerMain.itemList.Count) < maincount)
                 if (totalcount > (player.inventory.containerMain.capacity - player.inventory.containerMain.itemList.Count))
                 {
-                    player.ChatMessage($"Недостаточно места в инвентаре");
+                    player.ChatMessage(GetMsg("No Space", player));
                     return false;
                 }
             GiveItems(player, kit);
@@ -428,7 +602,7 @@ namespace Oxide.Plugins
             if (kit.Cooldown > 0)
                 playerData.Cooldown = GetCurrentTime() + kit.Cooldown;
 
-            SendReply(player, $"Вы получили комплект {kit.DisplayName}");
+            SendReply(player, GetMsg("Kit Extradited", player).Replace("{kitname}", kit.DisplayName));
             return true;
         }
 
@@ -436,7 +610,7 @@ namespace Oxide.Plugins
         {
             if (_kits.Exists(x => x.Name == kitname))
             {
-                SendReply(player, "Этот набор уже существует");
+                SendReply(player, GetMsg("Kit Already Exist", player));
                 return;
             }
 
@@ -448,10 +622,11 @@ namespace Oxide.Plugins
                 Hide = true,
                 Permission = "kits.default",
                 Amount = 0,
+                Png = _config.DefaultKitImage,
                 Items = GetPlayerItems(player)
             });
             permission.RegisterPermission($"kits.default", this);
-            SendReply(player, $"Вы создали новый набор {kitname}");
+            SendReply(player, GetMsg("Кит создан", player).Replace("{name}", kitname));
 
             SaveKits();
             SaveData();
@@ -461,13 +636,13 @@ namespace Oxide.Plugins
         {
             if (!_kits.Exists(x => x.Name == kitname))
             {
-                SendReply(player, "Этого комплекта не существует");
+                SendReply(player, GetMsg("Кит не существует", player));
                 return;
             }
 
             _kits.First(x => x.Name == kitname).Items = GetPlayerItems(player);
 
-            SendReply(player, $"Предметы были скопированы из инвентаря в набор {kitname}");
+            SendReply(player, GetMsg("Кит клонирован", player).Replace("{name}", kitname));
 
             SaveKits();
         }
@@ -476,11 +651,11 @@ namespace Oxide.Plugins
         {
             if (_kits.RemoveAll(x => x.Name == kitname) <= 0)
             {
-                SendReply(player, "Этого комплекта не существует");
+                SendReply(player, GetMsg("Кит не существует", player));
                 return;
             }
 
-            SendReply(player, $"Набор {kitname} был удалён");
+            SendReply(player, GetMsg("Кит был удален", player).Replace("{kitname}", kitname));
 
             SaveKits();
         }
@@ -495,7 +670,7 @@ namespace Oxide.Plugins
         {
             _kitsData.Clear();
 
-            SendReply(player, "Вы обнулили все данные о использовании комплектов игроков");
+            SendReply(player, GetMsg("Перезагружен", player));
         }
 
         private void KitCommandGive(BasePlayer player, BasePlayer foundPlayer, string kitname)
@@ -506,7 +681,7 @@ namespace Oxide.Plugins
 
             if (!_kits.Exists(x => x.Name == kitname))
             {
-                SendReply(player, "Этого комплекта не существует");
+                SendReply(player, GetMsg("Кит не существует", player));
                 return;
             }
 
@@ -566,7 +741,8 @@ namespace Oxide.Plugins
         }
         #endregion
 
-        #region Гуи
+        #region UI
+
         private void TriggerUI(BasePlayer player)
         {
             if (_kitsGUI.ContainsKey(player))
@@ -575,151 +751,195 @@ namespace Oxide.Plugins
                 InitilizeUI(player);
         }
 
-        private string Layer = "ui.kits";
-
-        private void InitilizeUI(BasePlayer player, int page = 0)
+        private void TriggerUI2(BasePlayer player)
         {
-            CuiHelper.DestroyUi(player, Layer);
-            _kitsGUI[player] = new List<string>();
-            var currentTime = GetCurrentTime();
-            var kits = GetKitsForPlayer(player).Skip(page * 7).Take(7).ToList();
-            var pos = 0.5f - (kits.Count * KitWidth + (kits.Count - 1) * MarginBetween) / 2;
+            InitilizeUI2(player);
+        }
+
+        private void TriggerUI3(BasePlayer player)
+        {
+            InitilizeUI3(player);
+        }
+
+        private void TriggerUI1(BasePlayer player)
+        {
+            InitilizeUI(player);
+        }
+
+        private void InitilizeUI(BasePlayer player)
+        {
+            var kits = GetKitsForPlayer(player).ToList();
             var container = new CuiElementContainer();
 
             container.Add(new CuiPanel
             {
-                Image = { Color = HexToRustFormat("#FFFFFF00") },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                CursorEnabled = true,
-            }, "Overlay", Layer);
-
-            container.Add(new CuiElement
+                Image = { Color = HexToRustFormat(_config.MainBackgroundColor) },
+                RectTransform = { AnchorMin = _config.Position.AnchorMin, AnchorMax = _config.Position.AnchorMax },
+                CursorEnabled = true
+            }, name: "ui.kits");
+            container.Add(new CuiButton
             {
-                Parent = Layer,
-                Components =
+                Button = { Command = "kit ui", Color = _config.CloseButtonColor },
+                RectTransform = { AnchorMin = _config.CloseButtonPosition.AnchorMin, AnchorMax = _config.CloseButtonPosition.AnchorMax },
+                Text = { Text = "X", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+            }, "ui.kits");
+            foreach (var kit in kits)
+            {
+                if (kits.Count > 7)
                 {
-                    new CuiRawImageComponent { Color = "0 0 0 0.85", FadeIn = 0.25f, Sprite = "assets/content/ui/ui.background.tiletex.psd", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat"},
-                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1"}
+                    container.Add(new CuiButton
+                    {
+                        Button = { Command = "kit next2", Color = "0 0 0 0.15" },
+                        RectTransform = { AnchorMin = "0.965 0.3", AnchorMax = "0.997 0.7" },
+                        Text = { Text = ">", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+                    }, "ui.kits");
                 }
-            });
+            }
 
-            container.Add(new CuiElement
+            InitilizeKitsUI(ref container, player);
+
+            CuiHelper.AddUi(player, container);
+        }
+        private void InitilizeUI2(BasePlayer player)
+        {
+            var kits = GetKitsForPlayer(player).ToList();
+            var container = new CuiElementContainer();
+            container.Add(new CuiPanel
             {
-                Parent = Layer,
-                Components =
-                {
-                    new CuiTextComponent { Text = "ВЫБЕРИТЕ НАБОР ДЛЯ ПОЛУЧЕНИЯ", Align = TextAnchor.MiddleCenter, FontSize = 30, Font = "RobotoCondensed-bold.ttf"},
-                    new CuiOutlineComponent { Color = "0 0 0 1", Distance = "0.7 0.7" },
-                    new CuiRectTransformComponent { AnchorMin = "0 0.2916667", AnchorMax = "1 0.9416667"}
-                }
-            });
-
-            container.Add(new CuiElement
-            {
-                Parent = Layer,
-                Components =
-                {
-                    new CuiTextComponent { Text = "Чтобы закрыть, нажмите по пустому месту", Align = TextAnchor.MiddleCenter, FontSize = 15, Font = "RobotoCondensed-regular.ttf"},
-                    new CuiOutlineComponent { Color = "0 0 0 1", Distance = "0.7 0.7" },
-                    new CuiRectTransformComponent { AnchorMin = "0 0.138889", AnchorMax = "1 0.7888891"}
-                }
-            });
-
+                Image = { Color = HexToRustFormat(_config.MainBackgroundColor) },
+                RectTransform = { AnchorMin = _config.Position.AnchorMin, AnchorMax = _config.Position.AnchorMax },
+                CursorEnabled = true
+            }, name: "ui.kits");
             container.Add(new CuiButton
             {
-                Button = { Close = Layer, Color = "0 0 0 0" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                Text = { Text = "" }
-            }, Layer);
-
-            container.Add(new CuiButton
-            {
-                Button = { Command = "kit ui", Color = "0 0 0 0" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                Text = { Text = "" }
-            }, Layer);
-
-            container.Add(new CuiButton
-            {
-                RectTransform = { AnchorMin = $"0.005 0.5", AnchorMax = $"0.045 0.57" },
-                Button = { Color = "1 1 1 0", Command = $"kits skip {page - 1}" },
-                Text = { Text = $"<", Color = "1 1 1 1", Font = "robotocondensed-bold.ttf", FontSize = 30, Align = TextAnchor.MiddleCenter}
-            }, Layer);
-
-            container.Add(new CuiButton
-            {
-                RectTransform = { AnchorMin = $"0.95 0.5", AnchorMax = $"0.995 0.57" },
-                Button = { Color = "1 1 1 0", Command = $"kits skip {page + 1}" },
-                Text = { Text = $">", Color = "1 1 1 1", Font = "robotocondensed-bold.ttf", FontSize = 30, Align = TextAnchor.MiddleCenter }
-            }, Layer);
+                Button = { Command = "kit ui", Color = _config.CloseButtonColor },
+                RectTransform = { AnchorMin = _config.CloseButtonPosition.AnchorMin, AnchorMax = _config.CloseButtonPosition.AnchorMax },
+                Text = { Text = "X", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+            }, "ui.kits");
 
             foreach (var kit in kits)
             {
-                _kitsGUI[player].Add(kit.Name);
-                var playerData = GetPlayerData(player.userID, kit.Name);
+                if (kits.Count > 14)
+                {
+                    container.Add(new CuiButton
+                    {
+                        Button = { Command = "kit next1", Color = "0 0 0 0.15" },
+                        RectTransform = { AnchorMin = "0.002 0.3", AnchorMax = "0.035 0.7" },
+                        Text = { Text = "<", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+                    }, "ui.kits");
 
-                container.Add(new CuiButton
+                    container.Add(new CuiButton
+                    {
+                        Button = { Command = "kit next3", Color = "0 0 0 0.15" },
+                        RectTransform = { AnchorMin = "0.965 0.3", AnchorMax = "0.997 0.7" },
+                        Text = { Text = ">", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+                    }, "ui.kits");
+                }
+                else if (kits.Count > 7)
                 {
-                    Button = { Color = HexToRustFormat(ImagesColor), Material = "assets/content/ui/ui.background.tiletex.psd" },
-                    RectTransform = { AnchorMin = $"{pos} {MarginBottom}", AnchorMax = $"{pos + KitWidth} {1.01f - MarginTop}" },
-                    Text = { Color = "1 1 1 1", Font = "robotocondensed-regular.ttf", FontSize = 16, Align = TextAnchor.MiddleCenter, Text = $"{kit.DisplayName}" }
-                }, Layer, $"ui.kits.{kit.Name}");
-                pos += KitWidth + MarginBetween;
+                    container.Add(new CuiButton
+                    {
+                        Button = { Command = "kit next1", Color = "0 0 0 0.15" },
+                        RectTransform = { AnchorMin = "0.002 0.3", AnchorMax = "0.035 0.7" },
+                        Text = { Text = "<", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+                    }, "ui.kits");
 
-                if (kit.Cooldown > 0 && (playerData.Cooldown > currentTime))
-                {
-                    InitilizeMaskUI(ref container, kit.Name);
-                    InitilizeNameLabelUI(ref container, kit.Name, kit.DisplayName);
-                    InitilizeCooldownLabelUI(ref container, kit.Name, TimeSpan.FromSeconds(playerData.Cooldown - currentTime));
                 }
-                else
-                {
-                    InitilizeButtonUI(ref container, kit.Name);
-                }
+            }
+
+
+            if (kits.Count < 7)
+            {
+                InitilizeKitsUI(ref container, player);
+            }
+            else
+            {
+                InitilizeKitsUINext(ref container, player);
             }
 
             CuiHelper.AddUi(player, container);
         }
 
-        private void InitilizeNameLabelUI(ref CuiElementContainer container, string kitname, string text)
+        private void InitilizeUI3(BasePlayer player)
         {
-            container.Add(new CuiLabel
+            var kits = GetKitsForPlayer(player).ToList();
+            var container = new CuiElementContainer();
+            container.Add(new CuiPanel
             {
-                Text = { Color = "1 1 1 1", Font = "robotocondensed-regular.ttf", FontSize = 16, Align = TextAnchor.MiddleCenter, Text = text }
-            }, $"ui.kits.{kitname}");
-        }
-
-        private void InitilizeButtonUI(ref CuiElementContainer container, string kitname)
-        {
+                Image = { Color = HexToRustFormat(_config.MainBackgroundColor) },
+                RectTransform = { AnchorMin = _config.Position.AnchorMin, AnchorMax = _config.Position.AnchorMax },
+                CursorEnabled = true
+            }, name: "ui.kits");
             container.Add(new CuiButton
             {
-                Button = { Color = "0 0 0 0", Command = $"kit {kitname}" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                Text = { Text = "" }
-            }, $"ui.kits.{kitname}", $"ui.kits.{kitname}.button");
+                Button = { Command = "kit ui", Color = _config.CloseButtonColor },
+                RectTransform = { AnchorMin = _config.CloseButtonPosition.AnchorMin, AnchorMax = _config.CloseButtonPosition.AnchorMax },
+                Text = { Text = "X", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+            }, "ui.kits");
+
+            foreach (var kit in kits)
+            {
+                if (kits.Count > 14)
+                {
+                    container.Add(new CuiButton
+                    {
+                        Button = { Command = "kit next2", Color = "0 0 0 0.15" },
+                        RectTransform = { AnchorMin = "0.002 0.3", AnchorMax = "0.035 0.7" },
+                        Text = { Text = "<", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+                    }, "ui.kits");
+
+
+                }
+                else if (kits.Count > 7)
+                {
+                    container.Add(new CuiButton
+                    {
+                        Button = { Command = "kit next1", Color = _config.CloseButtonColor },
+                        RectTransform = { AnchorMin = _config.CloseButtonPositionNext1.AnchorMin, AnchorMax = _config.CloseButtonPositionNext1.AnchorMax },
+                        Text = { Text = "1", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+                    }, "ui.kits");
+                    container.Add(new CuiButton
+                    {
+                        Button = { Command = "kit next2", Color = _config.CloseButtonColor },
+                        RectTransform = { AnchorMin = _config.CloseButtonPositionNext2.AnchorMin, AnchorMax = _config.CloseButtonPositionNext2.AnchorMax },
+                        Text = { Text = "2", FontSize = 20, Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+                    }, "ui.kits");
+                }
+            }
+
+
+            if (kits.Count < 14)
+            {
+                InitilizeKitsUINext(ref container, player);
+            }
+            else if (kits.Count < 7)
+            {
+                InitilizeKitsUI(ref container, player);
+            }
+            else
+            {
+                InitilizeKitsUI2(ref container, player);
+            }
+
+            CuiHelper.AddUi(player, container);
         }
 
-        private void InitilizeMaskUI(ref CuiElementContainer container, string kitname)
+        private void DestroyUI(BasePlayer player)
         {
-            container.Add(new CuiPanel
-            {
-                Image = { Color = HexToRustFormat("#FFFFFF00") },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "0.9915 0.9915" }
-            }, $"ui.kits.{kitname}", $"ui.kits.{kitname}.mask");
-        }
+            if (!_kitsGUI.ContainsKey(player))
+                return;
 
-        private void InitilizeCooldownLabelUI(ref CuiElementContainer container, string kitname, TimeSpan time)
-        {
-            container.Add(new CuiPanel
+            foreach (var kitname in _kitsGUI[player])
             {
-                Image = { Color = "0 0 0 0" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" }
-            }, $"ui.kits.{kitname}", $"ui.kits.{kitname}.time");
+                CuiHelper.DestroyUi(player, $"ui.kits.{kitname}.time");
+                CuiHelper.DestroyUi(player, $"ui.kits.{kitname}.mask");
+                CuiHelper.DestroyUi(player, $"ui.kits.{kitname}.button");
+                CuiHelper.DestroyUi(player, $"ui.kits.{kitname}.amount");
+                CuiHelper.DestroyUi(player, $"ui.kits.{kitname}");
+            }
+            CuiHelper.DestroyUi(player, "ui.kits");
 
-            container.Add(new CuiLabel
-            {
-                Text = { Color = "1 1 1 1", Font = "RobotoCondensed-regular.ttf", FontSize = 10, Align = TextAnchor.LowerCenter, Text = TimeExtensions.FormatShortTime(time) }
-            }, $"ui.kits.{kitname}.time");
+            _kitsGUI.Remove(player);
         }
 
         private void RefreshCooldownKitsUI()
@@ -751,9 +971,221 @@ namespace Oxide.Plugins
             }
         }
 
+        private void InitilizeKitsUI(ref CuiElementContainer container, BasePlayer player)
+        {
+            _kitsGUI[player] = new List<string>();
+            var currentTime = GetCurrentTime();
+            var kits = GetKitsForPlayer(player).Take((int)(1.0f / (_config.KitWidth + _config.MarginBetween))).ToList();
+            var pos = 0.490f - (kits.Count * _config.KitWidth + (kits.Count - 1) * _config.MarginBetween) / 2;
+
+            foreach (var kit in kits)
+            {
+                _kitsGUI[player].Add(kit.Name);
+
+                var playerData = GetPlayerData(player.userID, kit.Name);
+
+                // Kit panel
+                container.Add(new CuiPanel
+                {
+                    Image = { Color = HexToRustFormat(_config.KitBackgroundColor) },
+                    RectTransform = { AnchorMin = $"{pos} {_config.MarginBottom}", AnchorMax = $"{pos + _config.KitWidth} {1.0f - _config.MarginTop}" }
+                }, "ui.kits", $"ui.kits.{kit.Name}");
+
+                pos += _config.KitWidth + _config.MarginBetween;
+
+                InitilizeNameLabelUI(ref container, kit.Name, kit.DisplayName);
+
+                InitilizeKitImageUI(ref container, kit.Name);
+
+                if (kit.Amount > 0)
+                {
+                    InitilizeAmountLabelUI(ref container, kit.Name, GetMsg("UI Amount", player).Replace("{amount}", (kit.Amount - playerData.Amount).ToString()));
+                }
+
+                if (kit.Cooldown > 0 && (playerData.Cooldown > currentTime))
+                {
+                    InitilizeMaskUI(ref container, kit.Name);
+                    InitilizeCooldownLabelUI(ref container, kit.Name, TimeSpan.FromSeconds(playerData.Cooldown - currentTime));
+                }
+                else
+                {
+                    InitilizeButtonUI(ref container, kit.Name);
+                }
+            }
+        }
+
+        private void InitilizeKitsUINext(ref CuiElementContainer container, BasePlayer player)
+        {
+            _kitsGUI[player] = new List<string>();
+            var currentTime = GetCurrentTime();
+            var kits = GetKitsForPlayer(player).Take((int)(1.0f / (_config.KitWidth + _config.MarginBetween)) + 7).ToList();
+            var pos = 0.525f - ((kits.Count - 7) * _config.KitWidth + (kits.Count - 1) * _config.MarginBetween) / 2;
+            var kitsAmount = kits.Skip(7);
+            foreach (var kit in kitsAmount)
+            {
+                _kitsGUI[player].Add(kit.Name);
+
+                var playerData = GetPlayerData(player.userID, kit.Name);
+
+                // Kit panel
+                container.Add(new CuiPanel
+                {
+                    Image = { Color = HexToRustFormat(_config.KitBackgroundColor) },
+                    RectTransform = { AnchorMin = $"{pos} {_config.MarginBottom}", AnchorMax = $"{pos + _config.KitWidth} {1.0f - _config.MarginTop}" }
+                }, "ui.kits", $"ui.kits.{kit.Name}");
+
+                pos += _config.KitWidth + _config.MarginBetween;
+
+                InitilizeNameLabelUI(ref container, kit.Name, kit.DisplayName);
+
+                InitilizeKitImageUI(ref container, kit.Name);
+
+                if (kit.Amount > 0)
+                {
+                    InitilizeAmountLabelUI(ref container, kit.Name, GetMsg("UI Amount", player).Replace("{amount}", (kit.Amount - playerData.Amount).ToString()));
+                }
+
+                if (kit.Cooldown > 0 && (playerData.Cooldown > currentTime))
+                {
+                    InitilizeMaskUI(ref container, kit.Name);
+                    InitilizeCooldownLabelUI(ref container, kit.Name, TimeSpan.FromSeconds(playerData.Cooldown - currentTime));
+                }
+                else
+                {
+                    InitilizeButtonUI(ref container, kit.Name);
+                }
+            }
+        }
+
+        private void InitilizeKitsUI2(ref CuiElementContainer container, BasePlayer player)
+        {
+            _kitsGUI[player] = new List<string>();
+            var currentTime = GetCurrentTime();
+            var kits = GetKitsForPlayer(player).ToList();
+            var pos = 0.56f - ((kits.Count - 14) * _config.KitWidth + (kits.Count - 1) * _config.MarginBetween) / 2;
+            var kitsAmount = kits.Skip(14);
+            foreach (var kit in kitsAmount)
+            {
+                _kitsGUI[player].Add(kit.Name);
+
+                var playerData = GetPlayerData(player.userID, kit.Name);
+
+                // Kit panel
+                container.Add(new CuiPanel
+                {
+                    Image = { Color = HexToRustFormat(_config.KitBackgroundColor) },
+                    RectTransform = { AnchorMin = $"{pos} {_config.MarginBottom}", AnchorMax = $"{pos + _config.KitWidth} {1.0f - _config.MarginTop}" }
+                }, "ui.kits", $"ui.kits.{kit.Name}");
+
+                pos += _config.KitWidth + _config.MarginBetween;
+
+                InitilizeNameLabelUI(ref container, kit.Name, kit.DisplayName);
+
+                InitilizeKitImageUI(ref container, kit.Name);
+
+                if (kit.Amount > 0)
+                {
+                    InitilizeAmountLabelUI(ref container, kit.Name, GetMsg("UI Amount", player).Replace("{amount}", (kit.Amount - playerData.Amount).ToString()));
+                }
+
+                if (kit.Cooldown > 0 && (playerData.Cooldown > currentTime))
+                {
+                    InitilizeMaskUI(ref container, kit.Name);
+                    InitilizeCooldownLabelUI(ref container, kit.Name, TimeSpan.FromSeconds(playerData.Cooldown - currentTime));
+                }
+                else
+                {
+                    InitilizeButtonUI(ref container, kit.Name);
+                }
+            }
+        }
+
+        private void InitilizeKitImageUI(ref CuiElementContainer container, string kitname)
+        {
+            string image = _imagesCache.Get(kitname);
+            CuiRawImageComponent imageComp = new CuiRawImageComponent
+            {
+                Sprite = "assets/content/textures/generic/fulltransparent.tga",
+                Color = HexToRustFormat(_config.Image.Color)
+            };
+            if (image != string.Empty)
+            {
+                imageComp.Png = image;
+            }
+            container.Add(new CuiElement
+            {
+                Parent = $"ui.kits.{kitname}",
+                Components =
+                {
+                    imageComp,
+                    new CuiRectTransformComponent {AnchorMin = _config.Image.Position.AnchorMin, AnchorMax = _config.Image.Position.AnchorMax }
+                }
+            });
+        }
+
+        private void InitilizeNameLabelUI(ref CuiElementContainer container, string kitname, string text)
+        {
+            var name = container.Add(new CuiPanel
+            {
+                Image = { Color = HexToRustFormat(_config.Label.BackgroundColor) },
+                RectTransform = { AnchorMin = _config.Label.Position.AnchorMin, AnchorMax = _config.Label.Position.AnchorMax }
+            }, $"ui.kits.{kitname}");
+
+            container.Add(new CuiLabel
+            {
+                Text = { Color = HexToRustFormat(_config.Label.ForegroundColor), FontSize = _config.Label.FontSize, Align = _config.Label.TextAnchor, Text = text }
+            }, name);
+        }
+
+        private void InitilizeMaskUI(ref CuiElementContainer container, string kitname)
+        {
+            var name = container.Add(new CuiPanel
+            {
+                Image = { Color = HexToRustFormat(_config.DisableMaskColor) }
+            }, $"ui.kits.{kitname}", $"ui.kits.{kitname}.mask");
+        }
+
+        private void InitilizeAmountLabelUI(ref CuiElementContainer container, string kitname, string text)
+        {
+            container.Add(new CuiPanel
+            {
+                Image = { Color = HexToRustFormat(_config.Amount.BackgroundColor) },
+                RectTransform = { AnchorMin = _config.Amount.Position.AnchorMin, AnchorMax = _config.Amount.Position.AnchorMax }
+            }, $"ui.kits.{kitname}", $"ui.kits.{kitname}.amount");
+
+            container.Add(new CuiLabel
+            {
+                Text = { Color = HexToRustFormat(_config.Amount.ForegroundColor), FontSize = _config.Amount.FontSize, Align = _config.Amount.TextAnchor, Text = text }
+            }, $"ui.kits.{kitname}.amount");
+        }
+
+        private void InitilizeButtonUI(ref CuiElementContainer container, string kitname)
+        {
+            container.Add(new CuiButton
+            {
+                Button = { Color = "0 0 0 0", Command = $"kit {kitname}" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                Text = { Text = "" }
+            }, $"ui.kits.{kitname}", $"ui.kits.{kitname}.button");
+        }
+
+        private void InitilizeCooldownLabelUI(ref CuiElementContainer container, string kitname, TimeSpan time)
+        {
+            container.Add(new CuiPanel
+            {
+                Image = { Color = HexToRustFormat(_config.Time.BackgroundColor) },
+                RectTransform = { AnchorMin = _config.Time.Position.AnchorMin, AnchorMax = _config.Time.Position.AnchorMax }
+            }, $"ui.kits.{kitname}", $"ui.kits.{kitname}.time");
+
+            container.Add(new CuiLabel
+            {
+                Text = { Color = HexToRustFormat(_config.Time.ForegroundColor), FontSize = _config.Time.FontSize, Align = _config.Time.TextAnchor, Text = TimeExtensions.FormatShortTime(time) }
+            }, $"ui.kits.{kitname}.time");
+        }
+
         #endregion
 
-        #region Хелпер
+        #region Helpers 
 
         private KitData GetPlayerData(ulong userID, string name)
         {
@@ -843,12 +1275,12 @@ namespace Oxide.Plugins
         private BasePlayer FindPlayer(BasePlayer player, string nameOrID)
         {
             ulong id;
-            if (ulong.TryParse(nameOrID, out id) && nameOrID.StartsWith("") && nameOrID.Length == 17)
+            if (ulong.TryParse(nameOrID, out id) && nameOrID.StartsWith("7656119") && nameOrID.Length == 17)
             {
                 var findedPlayer = BasePlayer.FindByID(id);
                 if (findedPlayer == null || !findedPlayer.IsConnected)
                 {
-                    SendReply(player, "Игрок не найден");
+                    SendReply(player, GetMsg("Not Found Player", player));
                     return null;
                 }
 
@@ -859,13 +1291,13 @@ namespace Oxide.Plugins
 
             if (foundPlayers.Count() == 0)
             {
-                SendReply(player, "Игрок не найден");
+                SendReply(player, GetMsg("Not Found Player", player));
                 return null;
             }
 
             if (foundPlayers.Count() > 1)
             {
-                SendReply(player, "Найдено несколько игроков");
+                SendReply(player, GetMsg("To Many Player", player));
                 return null;
             }
 
@@ -874,22 +1306,49 @@ namespace Oxide.Plugins
 
         private double GetCurrentTime() => new TimeSpan(DateTime.UtcNow.Ticks).TotalSeconds;
 
+        private static string HexToRustFormat(string hex)
+        {
+            if (string.IsNullOrEmpty(hex))
+            {
+                hex = "#FFFFFFFF";
+            }
+
+            var str = hex.Trim('#');
+
+            if (str.Length == 6)
+                str += "FF";
+
+            if (str.Length != 8)
+            {
+                throw new InvalidOperationException("Cannot convert a wrong format.");
+            }
+
+            var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
+            var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
+            var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
+            var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
+
+            Color color = new Color32(r, g, b, a);
+
+            return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
+        }
+
         private static class TimeExtensions
         {
             public static string FormatShortTime(TimeSpan time)
             {
                 string result = string.Empty;
                 if (time.Days != 0)
-                    result += $"{time.Days} дней ";
+                    result += $"{time.Days} д. ";
 
                 if (time.Hours != 0)
-                    result += $"{time.Hours} час ";
+                    result += $"{time.Hours} ч. ";
 
                 if (time.Minutes != 0)
-                    result += $"{time.Minutes} мин ";
+                    result += $"{time.Minutes} м. ";
 
                 if (time.Seconds != 0)
-                    result += $"{time.Seconds} сек ";
+                    result += $"{time.Seconds} с. ";
 
                 return result;
             }
@@ -924,52 +1383,6 @@ namespace Oxide.Plugins
 
                 return $"{units} {form3}";
             }
-        }
-
-        private static string HexToRustFormat(string hex)
-        {
-            if (string.IsNullOrEmpty(hex))
-            {
-                hex = "#FFFFFFFF";
-            }
-
-            var str = hex.Trim('#');
-
-            if (str.Length == 6)
-                str += "FF";
-
-            if (str.Length != 8)
-            {
-                throw new Exception(hex);
-                throw new InvalidOperationException("Cannot convert a wrong format.");
-            }
-
-            var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
-            var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
-            var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
-            var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
-
-            Color color = new Color32(r, g, b, a);
-
-            return $"{color.r:F2} {color.g:F2} {color.b:F2} {color.a:F2}";
-        }
-
-        private void DestroyUI(BasePlayer player)
-        {
-            if (!_kitsGUI.ContainsKey(player))
-                return;
-
-            foreach (var kitname in _kitsGUI[player])
-            {
-                CuiHelper.DestroyUi(player, $"ui.kits.{kitname}.time");
-
-                CuiHelper.DestroyUi(player, $"ui.kits.{kitname}.button");
-                CuiHelper.DestroyUi(player, $"ui.kits.{kitname}.mask");
-                CuiHelper.DestroyUi(player, $"ui.kits.{kitname}");
-            }
-            CuiHelper.DestroyUi(player, Layer);
-
-            _kitsGUI.Remove(player);
         }
 
         #endregion

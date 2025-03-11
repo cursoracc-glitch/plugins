@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Oxide.Core;
 using Oxide.Core.Plugins;
@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Furnace Splitter", "Skipcast", "2.2.0")]
+    [Info("Furnace Splitter", "Skipcast", "2.1.7", ResourceId = 2406)]
     [Description("Splits up resources in furnaces automatically and shows useful furnace information")]
     public class FurnaceSplitter : RustPlugin
     {
@@ -329,16 +329,13 @@ namespace Oxide.Plugins
 
         private object CanMoveItem(Item item, PlayerInventory inventory, uint targetContainer, int targetSlot)
         {
-        	if(item == null || inventory == null)
-        		return null;
             BasePlayer player = inventory.GetComponent<BasePlayer>();
             if (player == null)
                 return null;
 
             ItemContainer container = inventory.FindContainer(targetContainer);
             ItemContainer originalContainer = item.GetRootContainer();
-            if(container == null || originalContainer == null) 
-            	return null;
+
             Func<object> splitFunc = () =>
             {
                 if (player == null || !HasPermission(player) || !GetEnabled(player))
@@ -346,7 +343,7 @@ namespace Oxide.Plugins
 
                 PlayerOptions playerOptions = allPlayerOptions[player.userID];
 
-                if (container == null || originalContainer == null || container == item.GetRootContainer())
+                if (container == null || container == item.GetRootContainer())
                     return null;
 
                 BaseOven oven = container.entityOwner as BaseOven;

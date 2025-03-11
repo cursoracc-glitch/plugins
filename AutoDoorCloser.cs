@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Oxide.Core;
 using System.Linq;
 using UnityEngine;
@@ -14,7 +14,16 @@ namespace Oxide.Plugins
 {
     [Info("AutoDoorCloser", "Ryamkk", "1.0.5", ResourceId = 1924)]
 	[Description("Переработка плагина AutoDoor с oxide. Почти схожая версия плагина с Moscow.ovh :)")]
-	
+	/*
+	* Это моя первая пробная работа (доделка плагина) не судите строго :)
+	*
+	* Планы на следующие обновления:
+	* Добавить конфигурацию. ✔
+    * Добавить блокировку автоматического закрытия дверей при реидблоке. ✔
+    * Добавить блокировку автоматического закрытия дверей при смерти.
+    * Добавить отдельный параметр закрытия ворот и ставень.
+	*
+	*/
     class AutoDoorCloser : RustPlugin
     {
 	    [PluginReference]

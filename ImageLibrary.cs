@@ -4,17 +4,17 @@ using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Configuration;
 using Oxide.Core.Plugins;
-using Steamworks;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Networking;
 
 namespace Oxide.Plugins
 {
-    [Info("Image Library", "Absolut & K1lly0u", "2.0.58")]
+    [Info("Image Library", "Absolut & K1lly0u", "2.0.46")]
     [Description("Plugin API for downloading and managing images")]
     class ImageLibrary : RustPlugin
     {
@@ -34,10 +34,7 @@ namespace Oxide.Plugins
         private bool orderPending;
         private bool isInitialized;
 
-        private JsonSerializerSettings errorHandling = new JsonSerializerSettings { Error = (se, ev) => { ev.ErrorContext.Handled = true; } };
-
-        private const string STEAM_API_URL = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/";
-        private const string STEAM_AVATAR_URL = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={0}&steamids={1}";
+        private readonly Regex avatarFilter = new Regex(@"<avatarFull><!\[CDATA\[(.*)\]\]></avatarFull>");
 
         private string[] itemShortNames;
 
@@ -50,13 +47,14 @@ namespace Oxide.Plugins
             identifiers = Interface.Oxide.DataFileSystem.GetFile("ImageLibrary/image_data");
             urls = Interface.Oxide.DataFileSystem.GetFile("ImageLibrary/image_urls");
             skininfo = Interface.Oxide.DataFileSystem.GetFile("ImageLibrary/skin_data");
-
-            il = this;
-            LoadData();
         }
 
         private void OnServerInitialized()
         {
+            il = this;
+            LoadVariables();
+            LoadData();
+
             itemShortNames = ItemManager.itemList.Select(x => x.shortname).ToArray();
 
             foreach (ItemDefinition item in ItemManager.itemList)
@@ -70,11 +68,11 @@ namespace Oxide.Plugins
 
             CheckForRefresh();
 
-            foreach (BasePlayer player in BasePlayer.activePlayerList)
-                OnPlayerConnected(player);
+            foreach (var player in BasePlayer.activePlayerList)
+                OnPlayerInit(player);
         }
 
-        private void OnPlayerConnected(BasePlayer player) => GetPlayerAvatar(player?.UserIDString);
+        private void OnPlayerInit(BasePlayer player) => GetPlayerAvatar(player?.UserIDString);
 
         private void Unload()
         {
@@ -86,6 +84,112 @@ namespace Oxide.Plugins
         #endregion Oxide Hooks
 
         #region Functions
+
+        private void GetItemSkins()
+        {
+            PrintWarning("Retrieving item skin lists...");
+            webrequest.Enqueue("http://s3.amazonaws.com/s3.playrust.com/icons/inventory/rust/schema.json", null, (code, response) =>
+            {
+                if (!(response == null && code == 200))
+                {
+                    Rust.Workshop.ItemSchema.Item[] items = JsonConvert.DeserializeObject<Rust.Workshop.ItemSchema>(response).items;
+
+                    PrintWarning($"Found {items.Length} item skins. Gathering image URLs");
+                    foreach (var item in items)
+                    {
+                        if (!string.IsNullOrEmpty(item.itemshortname) && !string.IsNullOrEmpty(item.icon_url))
+                        {
+                            string identifier;
+                            ItemDefinition def = ItemManager.FindItemDefinition(item.itemshortname);
+                            if (def == null)
+                                continue;
+
+                            int skinCount = def.skins.Count(k => k.id == item.itemdefid);
+                            if (skinCount == 0)
+                                identifier = $"{item.itemshortname}_{item.workshopid}";
+                            else identifier = $"{item.itemshortname}_{item.itemdefid}";
+                            if (!imageUrls.URLs.ContainsKey(identifier))
+                                imageUrls.URLs.Add(identifier, item.icon_url);
+
+                            skinInformation.skinData[identifier] = new Dictionary<string, object>
+                                {
+                                    {"title", item.name },
+                                    {"votesup", 0 },
+                                    {"votesdown", 0 },
+                                    {"description", item.description },
+                                    {"score", 0 },
+                                    {"views", 0 },
+                                    {"created", new DateTime() },
+                                };
+                        }
+                    }
+                    SaveUrls();
+                    SaveSkinInfo();
+
+                    if (configData.WorkshopImages)
+                        ServerMgr.Instance.StartCoroutine(GetWorkshopSkins());
+                    else
+                    {
+                        if (!orderPending)
+                            ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
+                    }
+                }
+            }, this);
+        }
+
+        private IEnumerator GetWorkshopSkins()
+        {
+            yield break;
+            //var q = Steamworks.Ugc.Query.Items;
+            //q = q.WithTag("version3");
+            //q = q.WithTag("skin");
+            //System.Threading.Tasks.Task<Steamworks.Ugc.ResultPage?> result = q.GetPageAsync(0);
+
+            
+            //var query = Rust.Global.SteamServer.Workshop.CreateQuery();
+            //query.Page = 1;
+            //query.PerPage = 50000;
+            //query.RequireTags.Add("version3");
+            //query.RequireTags.Add("skin");
+            //query.RequireAllTags = true;
+            //query.Run();
+            //Puts("Querying Steam for available workshop items. Please wait for a response from Steam...");
+            //yield return new WaitWhile(() => query.IsRunning);
+            //Puts($"Found {query.Items.Length} workshop items. Gathering image URLs");
+
+            //foreach (var item in query.Items)
+            //{
+            //    if (!string.IsNullOrEmpty(item.PreviewImageUrl))
+            //    {
+            //        foreach (var tag in item.Tags)
+            //        {
+            //            var adjTag = tag.ToLower().Replace("skin", "").Replace(" ", "").Replace("-", "");
+            //            if (workshopNameToShortname.ContainsKey(adjTag))
+            //            {
+            //                string identifier = $"{workshopNameToShortname[adjTag]}_{item.Id}";
+
+            //                if (!imageUrls.URLs.ContainsKey(identifier))
+            //                    imageUrls.URLs.Add(identifier, item.PreviewImageUrl);
+
+            //                skinInformation.skinData[identifier] = new Dictionary<string, object>
+            //                    {
+            //                        {"title", item.Title },
+            //                        {"votesup", item.VotesUp },
+            //                        {"votesdown", item.VotesDown },
+            //                        {"description", item.Description },
+            //                        {"score", item.Score },
+            //                        {"views", item.WebsiteViews },
+            //                        {"created", item.Created },
+            //                    };
+            //            }
+            //        }
+            //    }
+            //}
+            //query.Dispose();
+            //SaveUrls();
+            //SaveSkinInfo();
+        }
+
         private IEnumerator ProcessLoadOrders()
         {
             yield return new WaitWhile(() => !isInitialized);
@@ -101,12 +205,12 @@ namespace Oxide.Plugins
 
                 if (nextLoad.imageList != null && nextLoad.imageList.Count > 0)
                 {
-                    foreach (KeyValuePair<string, string> item in nextLoad.imageList)
+                    foreach (var item in nextLoad.imageList)
                         assets.Add(item.Key, item.Value);
                 }
                 if (nextLoad.imageData != null && nextLoad.imageData.Count > 0)
                 {
-                    foreach (KeyValuePair<string, byte[]> item in nextLoad.imageData)
+                    foreach (var item in nextLoad.imageData)
                         assets.Add(item.Key, null, item.Value);
                 }
 
@@ -120,24 +224,16 @@ namespace Oxide.Plugins
 
         private void GetPlayerAvatar(string userId)
         {
-            if (!configData.StoreAvatars || string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(configData.SteamAPIKey) || HasImage(userId, 0))
+            if (!configData.StoreAvatars || string.IsNullOrEmpty(userId) || HasImage(userId, 0))
                 return;
 
-            webrequest.Enqueue(string.Format(STEAM_AVATAR_URL, configData.SteamAPIKey, userId), null, (code, response) =>
+            webrequest.Enqueue($"http://steamcommunity.com/profiles/{userId}?xml=1", null, (code, response) =>
             {
                 if (response != null && code == 200)
                 {
-                    try
-                    {
-                        AvatarRoot rootObject = JsonConvert.DeserializeObject<AvatarRoot>(response, errorHandling);
-                        if (rootObject?.response?.players?.Length > 0)
-                        {
-                            string avatarUrl = rootObject.response.players[0].avatarmedium;
-                            if (!string.IsNullOrEmpty(avatarUrl))                            
-                                AddImage(avatarUrl, userId, 0);                               
-                        }                        
-                    }
-                    catch { }
+                    string avatar = avatarFilter.Match(response).Groups[1].ToString();
+                    if (!string.IsNullOrEmpty(avatar))
+                        AddImage(avatar, userId, 0);
                 }
             }, this);
         }
@@ -155,12 +251,7 @@ namespace Oxide.Plugins
                     AddImage(image.Value, image.Key, 0);
             }
 
-            if ((Steamworks.SteamInventory.Definitions?.Length ?? 0) == 0)
-            {
-                PrintWarning("Waiting for Steamworks to update item definitions....");
-                Steamworks.SteamInventory.OnDefinitionsUpdated += GetItemSkins;
-            }
-            else GetItemSkins();
+            GetItemSkins();
         }
 
         private void CheckForRefresh()
@@ -187,118 +278,93 @@ namespace Oxide.Plugins
         private void RestoreLoadedImages()
         {
             orderPending = true;
+            int failed = 0;
 
+            Dictionary<string, byte[]> oldFiles = new Dictionary<string, byte[]>();
+
+            for (int i = imageIdentifiers.imageIds.Count - 1; i >= 0; i--)
+            {
+                var image = imageIdentifiers.imageIds.ElementAt(i);
+
+                uint imageId;
+                if (!uint.TryParse(image.Value, out imageId))
+                    continue;
+
+                byte[] bytes = FileStorage.server.Get(imageId, FileStorage.Type.png, imageIdentifiers.lastCEID);
+                if (bytes != null)
+                    oldFiles.Add(image.Key, bytes);
+                else
+                {
+                    failed++;
+                    imageIdentifiers.imageIds.Remove(image.Key);
+                }
+            }
+
+            Facepunch.Sqlite.Database db = new Facepunch.Sqlite.Database();
             try
             {
-                Facepunch.Sqlite.Database db = new Facepunch.Sqlite.Database();
-                db.Open(string.Concat(ConVar.Server.rootFolder, "/", "sv.files.", Rust.Protocol.save - 1, ".db"));                
-                if (db.TableExists("data"))
-                {
-                    Dictionary<string, byte[]> oldFiles = new Dictionary<string, byte[]>();
-                    int failed = 0;
-
-                    for (int i = imageIdentifiers.imageIds.Count - 1; i >= 0; i--)
-                    {
-                        KeyValuePair<string, string> image = imageIdentifiers.imageIds.ElementAt(i);
-
-                        uint imageId;
-                        if (!uint.TryParse(image.Value, out imageId))
-                            continue;
-
-                        byte[] bytes = db.QueryBlob("SELECT data FROM data WHERE crc = ? AND filetype = ? AND entid = ? LIMIT 1", new object[] { (int)imageId, 0, imageIdentifiers.lastCEID });
-                        if (bytes != null)
-                            oldFiles.Add(image.Key, bytes);
-                        else
-                        {
-                            failed++;
-                            imageIdentifiers.imageIds.Remove(image.Key);
-                        }
-                    }
-
-                    if (oldFiles.Count > 0)
-                    {
-                        loadOrders.Enqueue(new LoadOrder("Image restoration from previous database", oldFiles));
-                        PrintWarning($"{imageIdentifiers.imageIds.Count - failed} images queued for restoration from previous image db, {failed} images failed");
-                    }
-
-                }
+                db.Open($"{ConVar.Server.rootFolder}/sv.files.0.db");
+                db.Execute("DELETE FROM data WHERE entid = ?", imageIdentifiers.lastCEID);
                 db.Close();
             }
-            catch
-            {
-                PrintError("Failed to open previous image database. Unable to clone previous image data");
-            }
-            //Facepunch.Sqlite.Database db = new Facepunch.Sqlite.Database();
-            //try
-            //{
-            //    db.Open($"{ConVar.Server.rootFolder}/sv.files.0.db");
-            //    db.Execute("DELETE FROM data WHERE entid = ?", imageIdentifiers.lastCEID);
-            //    db.Close();
-            //}
-            //catch { }
+            catch { }
 
-            //loadOrders.Enqueue(new LoadOrder("Image restoration from previous database", oldFiles));
-            //PrintWarning($"{imageIdentifiers.imageIds.Count - failed} images queued for restoration, {failed} images failed");
+            loadOrders.Enqueue(new LoadOrder("Image restoration from previous database", oldFiles));
+            PrintWarning($"{imageIdentifiers.imageIds.Count - failed} images queued for restoration, {failed} images failed");
             imageIdentifiers.lastCEID = CommunityEntity.ServerInstance.net.ID;
             SaveData();
 
             orderPending = false;
             ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
         }
-
+       
         #endregion Functions
 
         #region Workshop Names and Image URLs
+
         private void AddDefaultUrls()
         {
-            foreach (ItemDefinition itemDefinition in ItemManager.itemList)
+            foreach(ItemDefinition itemDefinition in ItemManager.itemList)
             {
                 string identifier = $"{itemDefinition.shortname}_0";
                 if (!imageUrls.URLs.ContainsKey(identifier))
-                    imageUrls.URLs.Add(identifier, $"{configData.ImageURL}{itemDefinition.shortname}.png");
-                else imageUrls.URLs[identifier] = $"{configData.ImageURL}{itemDefinition.shortname}.png";
+                    imageUrls.URLs.Add(identifier, $"https://www.rustedit.io/images/imagelibrary/{itemDefinition.shortname}.png");
             }
             SaveUrls();
         }
 
         private readonly Dictionary<string, string> workshopNameToShortname = new Dictionary<string, string>
         {
-            {"longtshirt", "tshirt.long" },
-            {"cap", "hat.cap" },
-            {"beenie", "hat.beenie" },
-            {"boonie", "hat.boonie" },
-            {"balaclava", "mask.balaclava" },
-            {"pipeshotgun", "shotgun.waterpipe" },
-            {"woodstorage", "box.wooden" },
             {"ak47", "rifle.ak" },
-            {"bearrug", "rug.bear" },
-            {"boltrifle", "rifle.bolt" },
+            {"balaclava", "mask.balaclava" },
             {"bandana", "mask.bandana" },
-            {"hideshirt", "attire.hide.vest" },
-            {"snowjacket", "jacket.snow" },
+            {"bearrug", "rug.bear" },
+            {"beenie", "hat.beenie" },
+            {"boltrifle", "rifle.bolt" },
+            {"boonie", "hat.boonie" },
             {"buckethat", "bucket.helmet" },
-            {"semiautopistol", "pistol.semiauto" },
             {"burlapgloves", "burlap.gloves" },
-            {"roadsignvest", "roadsign.jacket" },
-            {"roadsignpants", "roadsign.kilt" },
             {"burlappants", "burlap.trousers" },
+            {"cap", "hat.cap" },
             {"collaredshirt", "shirt.collared" },
-            {"mp5", "smg.mp5" },
-            {"sword", "salvaged.sword" },
-            {"workboots", "shoes.boots" },
-            {"vagabondjacket", "jacket" },
-            {"hideshoes", "attire.hide.boots" },
             {"deerskullmask", "deer.skull.mask" },
-            {"minerhat", "hat.miner" },
+            {"hideshirt", "attire.hide.vest" },
+            {"hideshoes", "attire.hide.boots" },
+            {"longtshirt", "tshirt.long" },
             {"lr300", "rifle.lr300" },
-            {"lr300.item", "rifle.lr300" },
-            {"burlap.gloves", "burlap.gloves.new"},
-            {"leather.gloves", "burlap.gloves"},
-            {"python", "pistol.python" },
-            {"m39", "rifle.m39"},
-            {"woodendoubledoor", "door.double.hinged.wood"}
+            {"minerhat", "hat.miner" },
+            {"mp5", "smg.mp5" },
+            {"pipeshotgun", "shotgun.waterpipe" },
+            {"roadsignpants", "roadsign.kilt" },
+            {"roadsignvest", "roadsign.jacket" },
+            {"semiautopistol", "pistol.semiauto" },
+            {"snowjacket", "jacket.snow" },
+            {"sword", "salvaged.sword" },
+            {"vagabondjacket", "jacket" },
+            {"woodstorage", "box.wooden" },
+            {"workboots", "shoes.boots" }
         };
-
+       
         #endregion Workshop Names and Image URLs
 
         #region API
@@ -328,7 +394,7 @@ namespace Oxide.Plugins
             string value;
             if (imageUrls.URLs.TryGetValue(identifier, out value))
                 return value;
-            return string.Empty;
+            return imageIdentifiers.imageIds["NONE_0"];
         }
 
         [HookMethod("GetImage")]
@@ -339,12 +405,12 @@ namespace Oxide.Plugins
             if (imageIdentifiers.imageIds.TryGetValue(identifier, out value))
                 return value;
             else
-            {                
+            {
                 if (imageUrls.URLs.TryGetValue(identifier, out value))
                 {
                     AddImage(value, imageName, imageId);
                     return imageIdentifiers.imageIds["LOADING_0"];
-                }
+                }               
             }
 
             if (returnUrl && !string.IsNullOrEmpty(value))
@@ -383,11 +449,8 @@ namespace Oxide.Plugins
         [HookMethod("HasImage")]
         public bool HasImage(string imageName, ulong imageId)
         {
-            string key = $"{imageName}_{imageId}";
-            string value;
-
-            if (imageIdentifiers.imageIds.TryGetValue(key, out value) && IsInStorage(uint.Parse(value)))            
-                return true;            
+            if (imageIdentifiers.imageIds.ContainsKey($"{imageName}_{imageId}") && IsInStorage(uint.Parse(imageIdentifiers.imageIds[$"{imageName}_{imageId}"])))
+                return true;
 
             return false;
         }
@@ -468,34 +531,21 @@ namespace Oxide.Plugins
                     callback.Invoke();
             }
         }
-
+        
         [HookMethod("LoadImageList")]
         public void LoadImageList(string title, List<KeyValuePair<string, ulong>> imageList, Action callback = null)
         {
             Dictionary<string, string> newLoadOrderURL = new Dictionary<string, string>();
-            List<KeyValuePair<string, ulong>> workshopDownloads = new List<KeyValuePair<string, ulong>>();
 
-            foreach (KeyValuePair<string, ulong> image in imageList)
+            foreach (var image in imageList)
             {
-                if (HasImage(image.Key, image.Value))                
+                if (HasImage(image.Key, image.Value))
                     continue;
 
                 string identifier = $"{image.Key}_{image.Value}";
 
-                if (imageUrls.URLs.ContainsKey(identifier) && !newLoadOrderURL.ContainsKey(identifier))
-                {
+                if (imageUrls.URLs.ContainsKey(identifier) && !newLoadOrderURL.ContainsKey(identifier))                
                     newLoadOrderURL.Add(identifier, imageUrls.URLs[identifier]);
-                }
-                else
-                {
-                    workshopDownloads.Add(new KeyValuePair<string, ulong>(image.Key, image.Value));
-                }
-            }
-
-            if (workshopDownloads.Count > 0)
-            {
-                QueueWorkshopDownload(title, newLoadOrderURL, workshopDownloads, 0, callback);
-                return;
             }
 
             if (newLoadOrderURL.Count > 0)
@@ -514,415 +564,25 @@ namespace Oxide.Plugins
         [HookMethod("RemoveImage")]
         public void RemoveImage(string imageName, ulong imageId)
         {
-            if (!HasImage(imageName, imageId))
+            if (HasImage(imageName, imageId))
                 return;
 
             uint crc = uint.Parse(GetImage(imageName, imageId));
             FileStorage.server.Remove(crc, FileStorage.Type.png, CommunityEntity.ServerInstance.net.ID);
         }
 
-        [HookMethod("SendImage")]
-        public void SendImage(BasePlayer player, string imageName, ulong imageId = 0)
-        {
-            if (!HasImage(imageName, imageId) || player?.net?.connection == null)
-                return;
-
-            uint crc = uint.Parse(GetImage(imageName, imageId));
-            byte[] array = FileStorage.server.Get(crc, FileStorage.Type.png, CommunityEntity.ServerInstance.net.ID);
-
-            if (array == null)
-                return;
-
-            CommunityEntity.ServerInstance.ClientRPCEx<uint, uint, byte[]>(new Network.SendInfo(player.net.connection)
-            {
-                channel = 2,
-                method = Network.SendMethod.Reliable
-            }, null, "CL_ReceiveFilePng", crc, (uint)array.Length, array);
-        }
         #endregion API
 
-        #region Steam API
-        private List<ulong> BuildApprovedItemList()
-        {
-            List<ulong> list = new List<ulong>();
-
-            foreach (InventoryDef item in Steamworks.SteamInventory.Definitions)
-            {
-                string shortname = item.GetProperty("itemshortname");
-                ulong workshopid;
-
-                if (item == null || string.IsNullOrEmpty(shortname))
-                    continue;
-
-                if (workshopNameToShortname.ContainsKey(shortname))
-                    shortname = workshopNameToShortname[shortname];
-
-                if (item.Id < 100)
-                    continue;
-
-                if (!ulong.TryParse(item.GetProperty("workshopid"), out workshopid))
-                    continue;
-
-                if (HasImage(shortname, workshopid))
-                    continue;
-
-                list.Add(workshopid);
-            }
-
-            return list;
-        }
-
-        private string BuildDetailsString(List<ulong> list, int page)
-        {            
-            int totalPages = Mathf.CeilToInt((float)list.Count / 100f);
-            int index = page * 100;
-            int limit = Mathf.Min((page + 1) * 100, list.Count);
-            string details = string.Format("?key={0}&itemcount={1}", configData.SteamAPIKey, (limit - index));
-
-            for (int i = index; i < limit; i++)            
-                details += string.Format("&publishedfileids[{0}]={1}", i - index, list[i]);
-            
-            return details;
-        }
-
-        private string BuildDetailsString(List<ulong> list)
-        {            
-            string details = string.Format("?key={0}&itemcount={1}", configData.SteamAPIKey, list.Count);
-
-            for (int i = 0; i < list.Count; i++)
-                details += string.Format("&publishedfileids[{0}]={1}", i, list[i]);
-
-            return details;
-        }
-
-        private bool IsValid(PublishedFileDetails item)
-        {
-            if (string.IsNullOrEmpty(item.preview_url))
-                return false;
-
-            if (item.tags == null)
-                return false;
-
-            return true;
-        }
-
-        private void GetItemSkins()
-        {
-            Steamworks.SteamInventory.OnDefinitionsUpdated -= GetItemSkins;
-
-            PrintWarning("Retrieving item skin lists...");
-
-            GetApprovedItemSkins(BuildApprovedItemList(), 0);
-        }
-
-        private void QueueFileQueryRequest(string details, Action<PublishedFileDetails[]> callback)
-        {
-            webrequest.Enqueue(STEAM_API_URL, details, (code, response) =>
-            {
-                try
-                {
-                    QueryResponse query = JsonConvert.DeserializeObject<QueryResponse>(response, errorHandling);
-                    if (query == null || query.response == null || query.response.publishedfiledetails.Length == 0)
-                    {
-                        if (code != 200)
-                            PrintError($"There was a error querying Steam for workshop item data : Code ({code})\n{details}");
-                        return;
-                    }
-                    else
-                    {
-                        if (query?.response?.publishedfiledetails?.Length > 0)
-                            callback.Invoke(query.response.publishedfiledetails);
-                    }
-                }
-                catch { }
-            }, this, Core.Libraries.RequestMethod.POST);
-        }
-
-        private void GetApprovedItemSkins(List<ulong> itemsToDownload, int page)
-        {
-            if (itemsToDownload.Count < 1)
-            {
-                Puts("Approved skins loaded");
-
-                SaveUrls();
-                SaveSkinInfo();
-
-                if (!orderPending)
-                    ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
-                return;
-            }
-
-            int totalPages = Mathf.CeilToInt((float)itemsToDownload.Count / 100f) - 1;
-
-            string details = BuildDetailsString(itemsToDownload, page);
-
-            QueueFileQueryRequest(details, (PublishedFileDetails[] items) =>
-            {
-                ServerMgr.Instance.StartCoroutine(ProcessApprovedBlock(itemsToDownload, items, page, totalPages));
-            });
-        }
-
-        private IEnumerator ProcessApprovedBlock(List<ulong> itemsToDownload, PublishedFileDetails[] items, int page, int totalPages)
-        {
-            PrintWarning($"Processing approved skins; Page {page + 1}/{totalPages + 1}");
-
-            Dictionary<string, Dictionary<ulong, string>> loadOrder = new Dictionary<string, Dictionary<ulong, string>>();
-
-            foreach (PublishedFileDetails item in items)
-            {
-                if (!IsValid(item))
-                    continue;
-
-                foreach (PublishedFileDetails.Tag tag in item.tags)
-                {
-                    if (string.IsNullOrEmpty(tag.tag))
-                        continue;
-
-                    ulong workshopid = Convert.ToUInt64(item.publishedfileid);
-
-                    string adjTag = tag.tag.ToLower().Replace("skin", "").Replace(" ", "").Replace("-", "").Replace(".item", "");
-                    if (workshopNameToShortname.ContainsKey(adjTag))
-                    {
-                        string shortname = workshopNameToShortname[adjTag];
-
-                        string identifier = $"{shortname}_{workshopid}";
-
-                        if (!imageUrls.URLs.ContainsKey(identifier))
-                            imageUrls.URLs.Add(identifier, item.preview_url.Replace("https", "http"));
-
-                        skinInformation.skinData[identifier] = new Dictionary<string, object>
-                                {
-                                    {"title", item.title },
-                                    {"votesup", 0 },
-                                    {"votesdown", 0 },
-                                    {"description", item.file_description },
-                                    {"score", 0 },
-                                    {"views", 0 },
-                                    {"created", new DateTime() },
-                                };
-                    }
-                }
-            }
-
-            yield return CoroutineEx.waitForEndOfFrame;
-            yield return CoroutineEx.waitForEndOfFrame;
-
-            if (page < totalPages)
-                GetApprovedItemSkins(itemsToDownload, page + 1);
-            else
-            {
-                itemsToDownload.Clear();
-
-                Puts("Approved skins loaded");
-
-                SaveUrls();
-                SaveSkinInfo();
-
-                if (!orderPending)
-                    ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
-            }
-        }
-
-        private void QueueWorkshopDownload(string title, Dictionary<string, string> newLoadOrderURL, List<KeyValuePair<string, ulong>> workshopDownloads, int page = 0, Action callback = null)
-        {
-            int rangeMin = page * 100;
-            int rangeMax = (page + 1) * 100;
-
-            if (rangeMax > workshopDownloads.Count)
-                rangeMax = workshopDownloads.Count;
-
-            List<ulong> requestedSkins = workshopDownloads.GetRange(rangeMin, rangeMax - rangeMin).Select(x => x.Value).ToList();
-
-            int totalPages = Mathf.CeilToInt((float)workshopDownloads.Count / 100f) - 1;
-
-            string details = BuildDetailsString(requestedSkins);
-
-            try
-            {
-                webrequest.Enqueue(STEAM_API_URL, details, (code, response) =>
-                {
-                    QueryResponse query = JsonConvert.DeserializeObject<QueryResponse>(response, errorHandling);
-                    if (query == null || query.response == null || query.response.publishedfiledetails.Length == 0)
-                    {
-                        if (code != 200)
-                            PrintError($"There was a error querying Steam for workshop item data : Code ({code})");
-
-                        if (page < totalPages)
-                            QueueWorkshopDownload(title, newLoadOrderURL, workshopDownloads, page + 1, callback);
-                        else
-                        {
-                            if (newLoadOrderURL.Count > 0)
-                            {
-                                loadOrders.Enqueue(new LoadOrder(title, newLoadOrderURL, null, false, page < totalPages ? null : callback));
-                                if (!orderPending)
-                                    ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
-                            }
-                            else
-                            {
-                                if (callback != null)
-                                    callback.Invoke();
-                            }
-                        }
-                        return;
-                    }
-                    else
-                    {
-                        if (query.response.publishedfiledetails.Length > 0)
-                        {
-                            Dictionary<string, Dictionary<ulong, string>> loadOrder = new Dictionary<string, Dictionary<ulong, string>>();
-
-                            foreach (PublishedFileDetails item in query.response.publishedfiledetails)
-                            {
-                                if (!string.IsNullOrEmpty(item.preview_url))
-                                {
-                                    ulong skinId = Convert.ToUInt64(item.publishedfileid);
-
-                                    KeyValuePair<string, ulong>? kvp = workshopDownloads.Find(x => x.Value == skinId);
-
-                                    if (kvp.HasValue)
-                                    {
-                                        string identifier = $"{kvp.Value.Key}_{kvp.Value.Value}";
-
-                                        if (!newLoadOrderURL.ContainsKey(identifier))
-                                            newLoadOrderURL.Add(identifier, item.preview_url);
-
-                                        if (!imageUrls.URLs.ContainsKey(identifier))
-                                            imageUrls.URLs.Add(identifier, item.preview_url);
-
-                                        skinInformation.skinData[identifier] = new Dictionary<string, object>
-                                        {
-                                            {"title", item.title },
-                                            {"votesup",  0 },
-                                            {"votesdown", 0 },
-                                            {"description", item.file_description },
-                                            {"score", 0 },
-                                            {"views", item.views },
-                                            {"created", new DateTime(item.time_created) },
-                                        };
-
-                                        requestedSkins.Remove(skinId);
-                                    }
-                                }
-                            }
-
-                            SaveUrls();
-                            SaveSkinInfo();
-
-                            if (requestedSkins.Count != 0)
-                            {
-                                Puts($"{requestedSkins.Count} workshop skin ID's for image batch ({title}) are invalid! They may have been removed from the workshop\nIDs: {requestedSkins.ToSentence()}");
-                            }
-                        }
-
-                        if (page < totalPages)
-                            QueueWorkshopDownload(title, newLoadOrderURL, workshopDownloads, page + 1, callback);
-                        else
-                        {
-                            if (newLoadOrderURL.Count > 0)
-                            {
-                                loadOrders.Enqueue(new LoadOrder(title, newLoadOrderURL, null, false, page < totalPages ? null : callback));
-                                if (!orderPending)
-                                    ServerMgr.Instance.StartCoroutine(ProcessLoadOrders());
-                            }
-                            else
-                            {
-                                if (callback != null)
-                                    callback.Invoke();
-                            }
-                        }
-                    }
-                },
-                this,
-                Core.Libraries.RequestMethod.POST);
-            }
-            catch { }
-        }
-
-        #region JSON Response Classes
-        public class QueryResponse
-        {
-            public Response response;
-        }
-
-        public class Response
-        {
-            public int total;
-            public PublishedFileDetails[] publishedfiledetails;
-        }
-
-        public class PublishedFileDetails
-        {
-            public int result;
-            public string publishedfileid;
-            public string creator;
-            public int creator_appid;
-            public int consumer_appid;
-            public int consumer_shortcutid;
-            public string filename;
-            public string file_size;
-            public string preview_file_size;
-            public string file_url;
-            public string preview_url;
-            public string url;
-            public string hcontent_file;
-            public string hcontent_preview;
-            public string title;
-            public string file_description;
-            public int time_created;
-            public int time_updated;
-            public int visibility;
-            public int flags;
-            public bool workshop_file;
-            public bool workshop_accepted;
-            public bool show_subscribe_all;
-            public int num_comments_public;
-            public bool banned;
-            public string ban_reason;
-            public string banner;
-            public bool can_be_deleted;
-            public string app_name;
-            public int file_type;
-            public bool can_subscribe;
-            public int subscriptions;
-            public int favorited;
-            public int followers;
-            public int lifetime_subscriptions;
-            public int lifetime_favorited;
-            public int lifetime_followers;
-            public string lifetime_playtime;
-            public string lifetime_playtime_sessions;
-            public int views;
-            public int num_children;
-            public int num_reports;
-            public Preview[] previews;
-            public Tag[] tags;
-            public int language;
-            public bool maybe_inappropriate_sex;
-            public bool maybe_inappropriate_violence;
-
-            public class Tag
-            {
-                public string tag;
-                public bool adminonly;
-            }
-
-        }
-
-        public class Preview
-        {
-            public string previewid;
-            public int sortorder;
-            public string url;
-            public int size;
-            public string filename;
-            public int preview_type;
-            public string youtubevideoid;
-            public string external_reference;
-        }
-        #endregion
-        #endregion
-
         #region Commands
+
+        [ConsoleCommand("workshopimages")]
+        private void cmdWorkshopImages(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection == null || arg.Connection.authLevel > 0)
+            {
+                ServerMgr.Instance.StartCoroutine(GetWorkshopSkins());
+            }
+        }
 
         [ConsoleCommand("cancelstorage")]
         private void cmdCancelStorage(ConsoleSystem.Arg arg)
@@ -987,7 +647,7 @@ namespace Oxide.Plugins
 
                 if (pendingAnswers.Contains(userId))
                 {
-                    SendReply(arg, "ImageLibrary data wipe aborted!");
+                    SendReply(arg, "ImageLibrary data wipe aborted!"); 
                     pendingAnswers.Remove(userId);
                 }
             }
@@ -1006,7 +666,7 @@ namespace Oxide.Plugins
             public Dictionary<string, byte[]> imageData;
 
             public Action callback;
-
+           
             public LoadOrder(string loadName, Dictionary<string, string> imageList, bool loadSilent = false, Action callback = null)
             {
                 this.loadName = loadName;
@@ -1120,26 +780,13 @@ namespace Oxide.Plugins
                     yield break;
                 }
 
-                if (www?.downloadHandler?.data != null)
+                Texture2D texture = new Texture2D(2, 2);
+                texture.LoadImage(www.downloadHandler.data);
+                if (texture != null)
                 {
-                    Texture2D texture = new Texture2D(2, 2);
-                    texture.LoadImage(www.downloadHandler.data);
-                    if (texture != null)
-                    {
-                        bool shouldStore = true;
-                        byte[] bytes = texture.EncodeToPNG();
-
-                        if (bytes.Length > 3145728)
-                        {
-                            Debug.Log($"[ImageLibrary] Failed to store image data for image : {info.name} for equest {request}\nURL: {info.url}\n{bytes.Length} bytes is larger then the allowed transferable size of 3145728 bytes");
-                            shouldStore = false;
-                        }
-
-                        DestroyImmediate(texture);
-
-                        if (shouldStore)
-                            StoreByteArray(bytes, info.name);
-                    }
+                    byte[] bytes = texture.EncodeToPNG();
+                    DestroyImmediate(texture);
+                    StoreByteArray(bytes, info.name);
                 }
                 www.Dispose();
             }
@@ -1177,80 +824,45 @@ namespace Oxide.Plugins
             [JsonProperty(PropertyName = "Avatars - Store player avatars")]
             public bool StoreAvatars { get; set; }
 
-            [JsonProperty(PropertyName = "Steam API key (get one here https://steamcommunity.com/dev/apikey)")]
-            public string SteamAPIKey { get; set; }
-
-            [JsonProperty(PropertyName = "URL to web folder containing all item icons")]
-            public string ImageURL { get; set; }
+            [JsonProperty(PropertyName = "Workshop - Download workshop image information")]
+            public bool WorkshopImages { get; set; }
 
             [JsonProperty(PropertyName = "Progress - Show download progress in console")]
             public bool ShowProgress { get; set; }
 
             [JsonProperty(PropertyName = "Progress - Time between update notifications")]
             public int UpdateInterval { get; set; }
-            
+
             [JsonProperty(PropertyName = "User Images - Manually define images to be loaded")]
             public Dictionary<string, string> UserImages { get; set; }
-
-            public Oxide.Core.VersionNumber Version { get; set; }
         }
 
-        protected override void LoadConfig()
+        private void LoadVariables()
         {
-            base.LoadConfig();
-            configData = Config.ReadObject<ConfigData>();
-
-            if (configData.Version < Version)
-                UpdateConfigValues();
-
-            Config.WriteObject(configData, true);
+            LoadConfigVariables();
+            SaveConfig();
         }
-
-        protected override void LoadDefaultConfig() => configData = GetBaseConfig();
-
-        private ConfigData GetBaseConfig()
+        protected override void LoadDefaultConfig()
         {
-            return new ConfigData
+            var config = new ConfigData
             {
                 ShowProgress = true,
-                SteamAPIKey = string.Empty,
-                StoreAvatars = false,
+                StoreAvatars = true,
+                WorkshopImages = true,
                 UpdateInterval = 20,
-                ImageURL = "https://www.rustedit.io/images/imagelibrary/",
-                UserImages = new Dictionary<string, string>(),
-                Version = Version
+                UserImages = new Dictionary<string, string>()
             };
+            SaveConfig(config);
         }
-
-        protected override void SaveConfig() => Config.WriteObject(configData, true);
-
-        private void UpdateConfigValues()
-        {
-            PrintWarning("Config update detected! Updating config values...");
-
-            ConfigData baseConfig = GetBaseConfig();
-
-            if (configData.Version < new VersionNumber(2, 0, 47))
-                configData = baseConfig;
-
-            if (configData.Version < new VersionNumber(2, 0, 53))
-                configData.StoreAvatars = false;
-
-            if (configData.Version < new VersionNumber(2, 0, 55))
-                configData.ImageURL = baseConfig.ImageURL;
-
-            configData.Version = Version;
-            PrintWarning("Config update completed!");
-        }
+        private void LoadConfigVariables() => configData = Config.ReadObject<ConfigData>();
+        private void SaveConfig(ConfigData config) => Config.WriteObject(config, true);
 
         #endregion Config
 
         #region Data Management
 
         private void SaveData() => identifiers.WriteObject(imageIdentifiers);
-
         private void SaveSkinInfo() => skininfo.WriteObject(skinInformation);
-
         private void SaveUrls() => urls.WriteObject(imageUrls);
 
         private void LoadData()
@@ -1284,7 +896,7 @@ namespace Oxide.Plugins
             if (imageIdentifiers == null)
                 imageIdentifiers = new ImageIdentifiers();
             if (imageUrls == null)
-                imageUrls = new ImageURLs();
+                imageUrls = new ImageURLs();            
         }
 
         private class ImageIdentifiers
@@ -1303,34 +915,6 @@ namespace Oxide.Plugins
             public Hash<string, string> URLs = new Hash<string, string>();
         }
 
-
-        public class AvatarRoot
-        {
-            public Response response { get; set; }
-
-            public class Response
-            {
-                public Player[] players { get; set; }
-
-                public class Player
-                {
-                    public string steamid { get; set; }
-                    public int communityvisibilitystate { get; set; }
-                    public int profilestate { get; set; }
-                    public string personaname { get; set; }
-                    public int lastlogoff { get; set; }
-                    public string profileurl { get; set; }
-                    public string avatar { get; set; }
-                    public string avatarmedium { get; set; }
-                    public string avatarfull { get; set; }
-                    public int personastate { get; set; }
-                    public string realname { get; set; }
-                    public string primaryclanid { get; set; }
-                    public int timecreated { get; set; }
-                    public int personastateflags { get; set; }
-                }
-            }
-        }
         #endregion Data Management
     }
 }

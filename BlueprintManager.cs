@@ -1,369 +1,299 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using Newtonsoft.Json;
 using Oxide.Core;
 using UnityEngine;
+using Oxide.Plugins.BlueprintManagerExtensions;
 
 namespace Oxide.Plugins
 {
-    [Info("Blueprint Manager", "Orange", "1.1.1")]
-    [Description("Manage blueprints on your server easily")]
-    public class BlueprintManager : RustPlugin
+    [Info("Blueprint Manager", "Jacob", "1.0.4")]
+    internal class BlueprintManager : RustPlugin
     {
-        #region Vars
-        
-        private Blueprints data = new Blueprints();
-        private const string permLVL1 = "blueprintmanager.lvl1";
-        private const string permLVL2 = "blueprintmanager.lvl2";
-        private const string permLVL3 = "blueprintmanager.lvl3";
-        private const string permAll = "blueprintmanager.all";
-        private const string permDefault = "blueprintmanager.default";
-        private const string permAdmin = "blueprintmanager.admin";
-        
-        private class Blueprints
-        {
-            public List<int> workbench1 = new List<int>();
-            public List<int> workbench2 = new List<int>();
-            public List<int> workbench3 = new List<int>();
-            public List<int> allBlueprints = new List<int>();
-            public List<int> defaultBlueprints = new List<int>();
-        }
-        
-        #endregion
+        /*
+         * Full credit to k1lly0u for the code from "NoWorkbench."
+         */
 
-        #region Oxide Hooks
+        #region Fields
 
-        private void Init()
-        {
-            permission.RegisterPermission(permAll, this);
-            permission.RegisterPermission(permLVL1, this);
-            permission.RegisterPermission(permLVL2, this);
-            permission.RegisterPermission(permLVL3, this);
-            permission.RegisterPermission(permAdmin, this);
-            permission.RegisterPermission(permDefault, this);
-            cmd.AddConsoleCommand("blueprintmanager", this, nameof(cmdBlueprintsConsole));
-        }
-
-        private void OnServerInitialized()
-        {
-            CheckBlueprints();
-            CheckPlayers();
-        }
-        
-        private void OnPlayerInit(BasePlayer player)
-        {
-            CheckPlayer(player);
-        }
+        public static BlueprintManager Instance;
+        private Configuration _configuration;
+        private TriggerWorkbench _workbenchTrigger;
+        private Workbench _workbench;
 
         #endregion
 
-        #region Core
-        
-        private void CheckBlueprints()
+        #region Properties
+
+        public List<string> GetDefaultBlueprints => _configuration.DefaultBlueprints.ConvertAll(x => x.ToString());
+
+        #endregion
+
+        #region Configuration 
+
+        private class Configuration
         {
-            foreach (var bp in ItemManager.bpList)
+            public readonly List<object> DefaultBlueprints = new List<object>();
+
+            public Configuration()
             {
-                if (bp.userCraftable && bp.defaultBlueprint == false)
+                GetConfig(ref DefaultBlueprints, "Settings", "Default blueprints");
+
+                Instance.SaveConfig();
+            }
+
+            private void GetConfig<T>(ref T variable, params string[] path)
+            {
+                if (path.Length == 0)
+                    return;
+
+                if (Instance.Config.Get(path) == null)
                 {
-                    var itemID = bp.targetItem.itemid;
-                    var shortname = bp.targetItem.shortname;
-                    if (config.blacklist.Contains(shortname))
-                    {
-                        continue;
-                    }
-
-                    switch (bp.workbenchLevelRequired)
-                    {
-                        case 1:
-                            data.workbench1.Add(itemID);
-                            break;
-                        
-                        case 2:
-                            data.workbench2.Add(itemID);
-                            break;
-                        
-                        case 3:
-                            data.workbench3.Add(itemID);
-                            break;
-                    }
-
-                    if (config.defaultBlueprints.Contains(shortname))
-                    {
-                        data.defaultBlueprints.Add(itemID);
-                    }
-                    
-                    data.allBlueprints.Add(itemID);
+                    SetConfig(ref variable, path);
+                    Instance.PrintWarning($"Added field to config: {string.Join("/", path)}");
                 }
+
+                variable = (T)Convert.ChangeType(Instance.Config.Get(path), typeof(T));
             }
+
+            private void SetConfig<T>(ref T variable, params string[] path) => Instance.Config.Set(path.Concat(new object[] { variable }).ToArray());
         }
 
-        private void CheckPlayers()
-        {
-            timer.Once(5f, () =>
-            {
-                foreach (var player in BasePlayer.activePlayerList)
-                {
-                    OnPlayerInit(player);
-                }
-            });
-        }
-
-        private void CheckPlayer(BasePlayer player)
-        {
-            var blueprints = GetBlueprints(player);
-            UnlockBlueprints(player, blueprints);
-        }
-
-        private List<int> GetBlueprints(BasePlayer player)
-        {
-            var list = new List<int>();
-
-            if (permission.UserHasPermission(player.UserIDString, permDefault))
-            {
-                list.AddRange(data.defaultBlueprints);
-            }
-
-            if (permission.UserHasPermission(player.UserIDString, permAll))
-            {
-                list.AddRange(data.allBlueprints);
-                return list;
-            }
-            
-            if (permission.UserHasPermission(player.UserIDString, permLVL3))
-            {
-                list.AddRange(data.workbench3);
-            }
-            
-            if (permission.UserHasPermission(player.UserIDString, permLVL2))
-            {
-                list.AddRange(data.workbench2);
-            }
-            
-            if (permission.UserHasPermission(player.UserIDString, permLVL1))
-            {
-                list.AddRange(data.workbench1);
-            }
-
-            return list;
-        }
-
-        private void UnlockBlueprints(BasePlayer player, List<int> blueprints)
-        {
-            var playerInfo = SingletonComponent<ServerMgr>.Instance.persistance.GetPlayerInfo(player.userID);
-            
-            foreach (var blueprint in blueprints)
-            {
-                if (playerInfo.unlockedItems.Contains(blueprint) == false)
-                {
-                    playerInfo.unlockedItems.Add(blueprint);
-                }
-            }
-            
-            SingletonComponent<ServerMgr>.Instance.persistance.SetPlayerInfo(player.userID, playerInfo);
-            player.SendNetworkUpdateImmediate();
-            player.ClientRPCPlayer(null, player, "UnlockedBlueprint", 0);
-        }
-
-        private void ResetBlueprints(BasePlayer player)
-        {
-            var playerInfo = SingletonComponent<ServerMgr>.Instance.persistance.GetPlayerInfo(player.userID);
-            playerInfo.unlockedItems = new List<int>();
-            SingletonComponent<ServerMgr>.Instance.persistance.SetPlayerInfo(player.userID, playerInfo);
-            player.SendNetworkUpdateImmediate();
-            player.ClientRPCPlayer(null, player, "UnlockedBlueprint", 0);
-        }
-        
-        private BasePlayer FindPlayer(string nameOrID)
-        {
-            var targets = BasePlayer.activePlayerList.Where(x => x.UserIDString == nameOrID || x.displayName.ToLower().Contains(nameOrID.ToLower())).ToArray();
-            
-            if (targets.Length == 0)
-            {
-                PrintWarning(GetMessage("No Players", nameOrID));
-                return null;
-            }
-
-            if (targets.Length > 1)
-            {
-                PrintWarning(GetMessage("Multiple Players", targets.Select(x => x.displayName).ToSentence()));
-                return null;
-            }
-
-            return targets[0];
-        }
+        protected override void LoadDefaultConfig() => PrintWarning("Generating new config file...");
 
         #endregion
 
         #region Commands
 
-        private void cmdBlueprintsConsole(ConsoleSystem.Arg arg)
+        [ChatCommand("blueprint")]
+        private void BlueprintCommand(BasePlayer player, string command, string[] args)
         {
-            var player = arg.Player();
-            if (player != null && permission.UserHasPermission(player.UserIDString, permAdmin) == false)
+            if (!permission.UserHasPermission(player.UserIDString, "blueprintmanager.admin"))
             {
-                Message(arg, "Permission");
+                PrintToChat(player, Lang(player, "NoPermission"));
                 return;
             }
 
-            var args = arg.Args;
-            if (args == null || args.Length < 2)
+            if (args.Length < 2)
             {
-                Message(arg, "Usage");
+                if (args.Length == 1 && args[0].ToLower() == "help")
+                    PrintToChat(player, Lang(player, "Help"));
+                else
+                    PrintToChat(player, Lang(player, "IncorrectArguments"));
+
                 return;
             }
 
-            var action = args[0].ToLower();
-
-            var target = FindPlayer(args[1]);
+            var target = FindPlayer(player, args[1]);
             if (target == null)
-            {
                 return;
-            }
 
-            switch (action)
+            switch (args[0].ToLower())
             {
-                case "reset":
-                    ResetBlueprints(target);
-                    break;
-                
                 case "unlock":
                     if (args.Length < 3)
                     {
-                        Message(arg, "Usage");
+                        PrintToChat(player, Lang(player, "IncorrectArguments"));
                         return;
                     }
 
-                    var itemID = ItemManager.FindItemDefinition(args[2])?.itemid ?? 0;
-                    UnlockBlueprints(target, new List<int>{itemID});
+                    var itemDefinition = GetItemDefinition(args[2]);
+                    if (itemDefinition == null)
+                    {
+                        PrintToChat(player, Lang(player, "InvalidItem", args[2].ToLower()));
+                        return;
+                    }
+
+                    PrintToChat(player, Lang(player, "ItemUnlocked", args[2].ToLower(), target.displayName));
+                    player.UnlockItem(args[2]);
                     break;
-                
+
                 case "unlockall":
-                    UnlockBlueprints(target, data.allBlueprints);
+                    PrintToChat(player, Lang(player, "AllUnlocked", target.displayName));
+                    target.UnlockAll();
                     break;
-                
-                default:
-                    Message(arg, "Usage");
-                    return;
+
+                case "resetall":
+                    PrintToChat(player, Lang(player, "AllReset", target.displayName));
+                    target.ResetAll();
+                    break;
             }
-            
-            Message(arg, "Success", target.displayName);
         }
 
         #endregion
-        
-        #region Configuration 1.1.2
 
-        private static ConfigData config;
+        #region Localization
 
-        private class ConfigData
+        protected override void LoadDefaultMessages() => lang.RegisterMessages(new Dictionary<string, string>
         {
-            [JsonProperty(PropertyName = "Blacklist")]
-            public List<string> blacklist;
-            
-            [JsonProperty(PropertyName = "Default blueprints")]
-            public List<string> defaultBlueprints;
+            {"NoPermission", "Error, you lack permission."},
+            {"IncorrectArguments", "Error, incorrect arguments. Try [#ADD8E6]/blueprint help.[/#]"},
+
+            {"NoPlayerFound", "Error, no player found by the name of [#ADD8E6]{0}[/#]."},
+            {"MultiplePlayersFound", "Error, multiple players found by the name of [#ADD8E6]{0}[/#]."},
+
+            {"ItemUnlocked", "Sucessfully unlocked item [#ADD8E6]{0}[/#] for [#ADD8E6]{1}[/#]."},
+            {"InvalidItem", "Error, no item found by the name of [#ADD8E6]{0}[/#], are you providing a short name?"},
+
+            {"AllUnlocked", "Sucessfully unlocked all items for [#ADD8E6]{0}[/#]."},
+
+            {"AllReset", "Sucessfully reset all items for [#ADD8E6]{0}[/#]."},
+
+            {"Help", "Help\n[#ADD8E6]/blueprint <unlock> <player> <shortName>[/#]\n[#ADD8E6]/blueprint <unlockall|resetall> <player>[/#]"}
+
+        }, this);
+
+        private string Lang(BasePlayer player, string key, params object[] args)
+        {
+            var message = lang.GetMessage(key, this, player.UserIDString);
+            if (args.Length != 0)
+                message = string.Format(message, args);
+
+            return covalence.FormatText(message);
         }
 
-        private ConfigData GetDefaultConfig()
+        #endregion
+
+        #region Mehods
+
+        private BasePlayer FindPlayer(BasePlayer player, string nameOrID)
         {
-            return new ConfigData
-            {
-                blacklist = new List<string>
-                {
-                    "explosive.timed",
-                    "rocket.launcher",
-                    "ammo.rocket.basic",
-                    "ammo.rocket.fire",
-                    "ammo.rocket.hv",
-                    "ammo.rifle.explosive"
-                },
-                defaultBlueprints = new List<string>
-                {
-                    "pistol.revolver",
-                    "pistol.semiauto",
-                    "pickaxe",
-                    "hatchet"
-                }
-            };
+            var targets = BasePlayer.activePlayerList.FindAll(x => nameOrID.IsSteamId() ? x.UserIDString == nameOrID : x.displayName.ToLower().Contains(nameOrID));
+            if (targets.Count == 1)
+                return targets[0];
+
+            PrintToChat(player, Lang(player, targets.Count == 0 ? "NoPlayerFound" : "MultiplePlayersFound"), nameOrID);
+            return null;
         }
 
-        protected override void LoadConfig()
+        public ItemDefinition GetItemDefinition(string shortName)
         {
-            base.LoadConfig();
+            if (string.IsNullOrEmpty(shortName))
+                return null;
 
-            try
-            {
-                config = Config.ReadObject<ConfigData>();
+            var itemDefinition = ItemManager.FindItemDefinition(shortName.ToLower());
 
-                if (config == null)
-                {
-                    LoadDefaultConfig();
-                }
-            }
-            catch
+            return itemDefinition;
+        }
+
+        private void SpawnWorkbench()
+        {
+            _workbench = GameManager.server.CreateEntity("assets/prefabs/deployable/tier 3 workbench/workbench3.deployed.prefab", new Vector3(0, -50, 0)) as Workbench;
+            _workbench.enableSaving = false;
+            _workbench.Spawn();
+
+            _workbench.GetComponent<DestroyOnGroundMissing>().enabled = false;
+            _workbench.GetComponent<GroundWatch>().enabled = false;
+
+            _workbenchTrigger = _workbench.GetComponentInChildren<TriggerWorkbench>();
+
+            foreach (var player in BasePlayer.activePlayerList)
+                OnPlayerInit(player);
+
+            _workbenchTrigger.name = "workbench";
+
+            timer.In(1, () =>
             {
-                PrintError("Configuration file is corrupt! Check your config file at https://jsonlint.com/");
-                
-                timer.Every(10f, () =>
-                {
-                    PrintError("Configuration file is corrupt! Check your config file at https://jsonlint.com/");
-                });
-                LoadDefaultConfig();
+                if (_workbench == null || _workbench.IsDestroyed)
+                    SpawnWorkbench();
+            });
+        }
+
+        #endregion
+
+        #region Oxide Hooks
+
+        private void Unload() => _workbench.DieInstantly();
+
+        private void OnServerInitialized()
+        {
+            permission.RegisterPermission("blueprintmanager.admin", this);
+
+            permission.RegisterPermission("blueprintmanager.all", this);
+            permission.RegisterPermission("blueprintmanager.config", this);
+            permission.RegisterPermission("blueprintmanager.noworkbench", this);
+
+            Instance = this;
+            _configuration = new Configuration();
+
+            SpawnWorkbench();
+
+            foreach (var player in BasePlayer.activePlayerList)
+                OnPlayerInit(player);
+        }
+
+        private void OnPlayerInit(BasePlayer player)
+        {
+            if (permission.UserHasPermission(player.UserIDString, "blueprintmanager.all"))
+                player.UnlockAll();
+            else if (permission.UserHasPermission(player.UserIDString, "blueprintmanager.config"))
+                player.UnlockConfig();
+
+            if (!permission.UserHasPermission(player.UserIDString, "blueprintmanager.noworkbench"))
                 return;
-            }
 
-            SaveConfig();
+            if (_workbenchTrigger != null)
+                player.EnterTrigger(_workbenchTrigger);
         }
 
-        protected override void LoadDefaultConfig()
+        private void OnEntityLeave(TriggerBase trigger, BaseEntity entity)
         {
-            config = GetDefaultConfig();
-        }
+            var player = entity.ToPlayer();
+            if (player == null)
+                return;
 
-        protected override void SaveConfig()
-        {
-            Config.WriteObject(config);
+            if (trigger.name == "workbench")
+                player.EnterTrigger(trigger);
         }
 
         #endregion
-        
-        #region Localization 1.1.1
-        
-        protected override void LoadDefaultMessages()
-        {
-            lang.RegisterMessages(new Dictionary<string, string>
-            {
-                {"Usage", "Usage:\n" +
-                          " * blueprintmanager reset 'player name or id' - resets blueprints for player\n" +
-                          " * blueprintmanager unlock 'player name or id' 'item shortname' - unlock specified blueprint for player\n" +
-                          " * blueprintmanager unlockall 'player name or id'- unlocks all blueprints for player"},
-                {"Permission", "You don't have permission to use that!"},
-                
-                {"No Players", "There are no players with that Name or steamID! ({0})"},
-                {"Multiple Players", "There are many players with that Name:\n{0}"},
-                {"Success", "Your action was done successfully for '{0}'!"}
-            }, this);
-        }
-        
-        private string GetMessage(string messageKey, string playerID, params object[] args)
-        {
-            return string.Format(lang.GetMessage(messageKey, this, playerID), args);
-        }
+    }
 
-        private void Message(ConsoleSystem.Arg arg, string messageKey, params object[] args)
+    namespace BlueprintManagerExtensions
+    {
+        static class Extensions
         {
-            var message = GetMessage(messageKey, null, args);
-            var player = arg.Player();
-            if (player != null)
+            public static void UnlockAll(this BasePlayer player)
             {
-                player.SendConsoleCommand("chat.add", (object) 0, (object) message);
+                var info = SingletonComponent<ServerMgr>.Instance.persistance.GetPlayerInfo(player.userID);
+                info.unlockedItems = ItemManager.bpList
+                    .Select(x => x.targetItem.itemid)
+                    .ToList();
+                SingletonComponent<ServerMgr>.Instance.persistance.SetPlayerInfo(player.userID, info);
+                player.SendNetworkUpdate();
             }
-            else
+
+            public static void UnlockItem(this BasePlayer player, string shortName)
             {
-                SendReply(arg, message);
+                var blueprintComponent = player.blueprints;
+                if (blueprintComponent == null) return;
+
+                var itemDefinition = BlueprintManager.Instance.GetItemDefinition(shortName);
+                if (itemDefinition == null)
+                    return;
+
+                blueprintComponent.Unlock(itemDefinition);
+            }
+
+            public static void UnlockConfig(this BasePlayer player)
+            {
+                foreach (var shortName in BlueprintManager.Instance.GetDefaultBlueprints)
+                {
+                    if (string.IsNullOrEmpty(shortName))
+                        continue;
+
+                    player.UnlockItem(shortName);
+                }
+            }
+
+            public static void ResetAll(this BasePlayer player)
+            {
+                var blueprintComponent = player.blueprints;
+                if (blueprintComponent == null)
+                    return;
+
+                blueprintComponent.Reset();
             }
         }
-
-        #endregion
     }
 }

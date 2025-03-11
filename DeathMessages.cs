@@ -1,31 +1,70 @@
-﻿using Newtonsoft.Json;
-using Oxide.Core;
-using Oxide.Core.Libraries;
-using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.InteropServices;
+using Newtonsoft.Json;
+
 
 namespace Oxide.Plugins
 {
-    [Info("DeathMessages", "TopPlugin.ru", "2.4.0")]
+    [Info("Death Messages", "Skrip|Tal", "2.1.55")]
     class DeathMessages : RustPlugin
     {
-        private static DeathMessages ins;
-
+        private static PluginConfig _config;
+        private string version = "2.1.55";
         private List<DeathMessage> _notes = new List<DeathMessage>();
         private Dictionary<ulong, HitInfo> _lastHits = new Dictionary<ulong, HitInfo>();
 
         #region Classes / Enums
 
-        public class ColorsPrivilage
+        class PluginConfig
         {
-            [JsonProperty("Цвет имени если игрока убили")]
-            public string ColorDeath;
-            [JsonProperty("Цвет имени если игрок убил")]
-            public string ColorAttacker;
+
+            [JsonProperty("A. Время показа сообщения (сек)")]
+            public int Cooldown { get; set; }
+            [JsonProperty("B. Размер текста")]
+            public int FontSize { get; set; }
+            [JsonProperty("C. Показывать убиства животных")]
+            public bool ShowDeathAnimals { get; set; }
+            [JsonProperty("D. Показывать убийства спящих")]
+            public bool ShowDeathSleepers { get; set; }
+            [JsonProperty("E. Хранение логов")]
+            public bool Log { get; set; }
+            [JsonProperty("F. Цвет атакующего")]
+            public string ColorAttacker { get; set; }
+            [JsonProperty("G. Цвет убитого")]
+            public string ColorVictim { get; set; }
+            [JsonProperty("H. Цвет оружия")]
+            public string ColorWeapon { get; set; }
+            [JsonProperty("I. Цвет дистанции")]
+            public string ColorDistance { get; set; }
+            [JsonProperty("J. Цвет части тела")]
+            public string ColorBodyPart { get; set; }
+            [JsonProperty("K. Дистанция")]
+            public double Distance { get; set; }
+            [JsonProperty("L. Название вертолета")]
+            public string HelicopterName { get; set; }
+            [JsonProperty("M. Название Bradlay (Танк)")]
+            public string BradleyAPCName { get; set; }
+            [JsonProperty("N. Имя NPC")]
+            public string NPCName { get; set; }
+            [JsonProperty("O. Имя Zombie")]
+            public string ZombieName { get; set; }
+
+            [JsonProperty("Оружие")]
+            public Dictionary<string, string> Weapons { get; set; }
+            [JsonProperty("Конструкции")]
+            public Dictionary<string, string> Structures { get; set; }
+            [JsonProperty("Ловушки")]
+            public Dictionary<string, string> Traps { get; set; }
+            [JsonProperty("Турели")]
+            public Dictionary<string, string> Turrets { get; set; }
+            [JsonProperty("Животные")]
+            public Dictionary<string, string> Animals { get; set; }
+            [JsonProperty("Сообщения")]
+            public Dictionary<string, string> Messages { get; set; }
+            [JsonProperty("Части тела")]
+            public Dictionary<string, string> BodyParts { get; set; }
         }
 
         enum AttackerType
@@ -111,28 +150,26 @@ namespace Oxide.Plugins
                 if (Entity == null)
                     return AttackerType.Invalid;
 
-                if (Entity is BaseAnimalNPC)
-                    return AttackerType.Animal;
-
                 if (Entity.name.Contains("machete.weapon"))
                     return AttackerType.Zombie;
 
-                if (Entity is NPCPlayer)
-                    return AttackerType.NPC;
+                if (Entity is NPCMurderer)
+                    return AttackerType.ZombieDeath;
 
-                if (Entity.IsNpc)
-                    return AttackerType.NPC;
+                if (Entity is NPCPlayer)
+                    return AttackerType.NPC;            
 
                 if (Entity is BasePlayer)
                     return AttackerType.Player;
 
-                if (Entity is BaseHelicopter)
-                    return AttackerType.Helicopter;
+                if (Entity is BaseHelicopter)   
+                    return AttackerType.Helicopter;				
 
-                if (Entity is BradleyAPC)
+                if (Entity is BradleyAPC)                
                     return AttackerType.BradleyAPC;
 
-
+                if (Entity.name.Contains("agents/"))
+                    return AttackerType.Animal;
 
                 if (Entity.name.Contains("barricades/") || Entity.name.Contains("wall.external.high"))
                     return AttackerType.Structure;
@@ -140,7 +177,7 @@ namespace Oxide.Plugins
                 if (Entity.name.Contains("beartrap.prefab") || Entity.name.Contains("landmine.prefab") || Entity.name.Contains("spikes.floor.prefab"))
                     return AttackerType.Trap;
 
-                if (Entity.name.Contains("autoturret_deployed.prefab") || Entity.name.Contains("flameturret.deployed.prefab") || Entity.name.Contains("sentry.scientist.static"))
+                if (Entity.name.Contains("autoturret_deployed.prefab") || Entity.name.Contains("flameturret.deployed.prefab"))
                     return AttackerType.Turret;
                 if (Entity.name.Contains("guntrap_deployed.prefab") || Entity.name.Contains("guntrap.deployed.prefab"))
                     return AttackerType.Guntrap;
@@ -150,19 +187,25 @@ namespace Oxide.Plugins
 
             private string InitializeName()
             {
+
                 if (Entity == null)
                     return null;
-                int name;
+
                 switch (Type)
                 {
+
+
                     case AttackerType.Player:
                         return Entity.ToPlayer().displayName;
+
                     case AttackerType.NPC:
-                        return string.IsNullOrEmpty(Entity.ToPlayer()?.displayName) ? _config.NPCName : int.TryParse(Entity.ToPlayer().displayName, out name) ? _config.NPCName : Entity.ToPlayer().displayName + $"( {_config.NPCName})";
+                        return string.IsNullOrEmpty(Entity.ToPlayer()?.displayName) ? _config.NPCName : Entity.ToPlayer()?.displayName;
+
                     case AttackerType.Helicopter:
                         return "Patrol Helicopter";
-                    case AttackerType.BradleyAPC:
-                    case AttackerType.Turret:
+						
+                    case AttackerType.BradleyAPC:  
+                    case AttackerType.Turret: 
                     case AttackerType.Guntrap:
                     case AttackerType.Trap:
                     case AttackerType.Animal:
@@ -191,42 +234,36 @@ namespace Oxide.Plugins
 
             private VictimType InitializeType()
             {
-                if (Entity == null)
-                    return VictimType.Invalid;
-
-                if (Entity is BaseAnimalNPC)
-                    return VictimType.Animal;
-
-                if (Entity.IsNpc)
-                    return VictimType.NPC;
-
+                if (Entity is NPCMurderer)
+                    return VictimType.Zombie;
 
                 if (Entity.name.Contains("machete.weapon"))
                     return VictimType.Zombie;
 
+                if (Entity == null)
+                    return VictimType.Invalid;
+
+
                 if (Entity is NPCPlayer)
                     return VictimType.NPC;
-
-
-
 
                 if (Entity is BasePlayer)
                     return VictimType.Player;
 
                 if (Entity is BaseHelicopter)
-                    return VictimType.Helicopter;
+                    return VictimType.Helicopter;				
 
                 if (Entity is BradleyAPC)
                     return VictimType.BradleyAPC;
 
+                if (Entity.name.Contains("agents/"))
+                    return VictimType.Animal;
+
                 return VictimType.Invalid;
             }
 
-
-
             private string InitializeName()
             {
-                int name;
                 switch (Type)
                 {
                     case VictimType.Zombie:
@@ -235,27 +272,26 @@ namespace Oxide.Plugins
                     case VictimType.Player:
                         return Entity.ToPlayer().displayName;
 
+
                     case VictimType.NPC:
-                        return string.IsNullOrEmpty(Entity.ToPlayer()?.displayName) ? _config.NPCName : int.TryParse(Entity.ToPlayer().displayName, out name) ? _config.NPCName : Entity.ToPlayer().displayName + $" ({_config.NPCName})";
+                        return string.IsNullOrEmpty(Entity.ToPlayer()?.displayName) ? _config.NPCName : Entity.ToPlayer()?.displayName;
 
                     case VictimType.Helicopter:
-                        return "Patrol Helicopter";
+                        return "Patrol Helicopter";						
 
                     case VictimType.BradleyAPC:
-                        return "BradleyAPCName";
+                        return "BradleyAPCName";   
 
                     case VictimType.Animal:
                         return FormatName(Entity.name);
                 }
+
                 return string.Empty;
             }
         }
 
         class DeathMessage
         {
-
-            public string UINotes;
-
             public DeathMessage(Attacker attacker, Victim victim, string weapon, string damageType, string bodyPart, double distance)
             {
                 Attacker = attacker;
@@ -264,12 +300,13 @@ namespace Oxide.Plugins
                 DamageType = damageType;
                 BodyPart = bodyPart;
                 Distance = distance;
+
                 Reason = InitializeReason();
                 Message = InitializeDeathMessage();
 
                 if (_config.Distance <= 0)
                 {
-                    Players = BasePlayer.activePlayerList.ToList();
+                    Players = BasePlayer.activePlayerList;
                 }
                 else
                 {
@@ -288,8 +325,6 @@ namespace Oxide.Plugins
 
                 if (attacker.Type == AttackerType.Player && !Players.Contains(attacker.Entity.ToPlayer()))
                     Players.Add(attacker.Entity.ToPlayer());
-
-                UINotes = CuiHelper.GetGuid();
             }
 
             public List<BasePlayer> Players { get; }
@@ -312,6 +347,7 @@ namespace Oxide.Plugins
 
             private DeathReason InitializeReason()
             {
+
                 if (Attacker.Type == AttackerType.Turret)
                     return DeathReason.Turret;
 
@@ -324,7 +360,7 @@ namespace Oxide.Plugins
                 else if (Attacker.Type == AttackerType.Helicopter)
                     return DeathReason.Helicopter;
 
-                else if (Attacker.Type == AttackerType.BradleyAPC)
+                else if (Attacker.Type == AttackerType.BradleyAPC)  
                     return DeathReason.BradleyAPC;
 
                 else if (Victim.Type == VictimType.Helicopter)
@@ -348,6 +384,7 @@ namespace Oxide.Plugins
                 else if (Weapon == "F1 Grenade" || Weapon == "Survey Charge" || Weapon == "Timed Explosive Charge" || Weapon == "Satchel Charge" || Weapon == "Beancan Grenade")
                     return DeathReason.Explosion;
 
+
                 else if (Weapon == "Flamethrower")
                     return DeathReason.Flamethrower;
 
@@ -358,6 +395,8 @@ namespace Oxide.Plugins
                     return DeathReason.ZombieDeath;
 
                 return DeathReason.Unknown;
+
+
             }
 
             private DeathReason GetDeathReason(string damage)
@@ -366,6 +405,7 @@ namespace Oxide.Plugins
 
                 if (reasons.Count() == 0)
                     return DeathReason.Unknown;
+
                 return reasons.First();
             }
 
@@ -383,11 +423,10 @@ namespace Oxide.Plugins
 
                 var attackerName = Attacker.Name;
                 if (string.IsNullOrEmpty(attackerName) && Attacker.Entity == null && Weapon.Contains("Heli"))
-                    attackerName = _config.HelicopterName;
+                    attackerName = _config.HelicopterName;				
 
                 if (string.IsNullOrEmpty(attackerName) && Attacker.Entity == null && Weapon.Contains("Bradl"))
-                    attackerName = _config.BradleyAPCName;
-
+                    attackerName = _config.BradleyAPCName;   
 
                 switch (Attacker.Type)
                 {
@@ -404,7 +443,7 @@ namespace Oxide.Plugins
                         break;
 
                     case AttackerType.BradleyAPC:
-                        attackerName = _config.BradleyAPCName;
+                        attackerName = _config.BradleyAPCName; 
                         break;
 
                     case AttackerType.NPC:
@@ -429,18 +468,25 @@ namespace Oxide.Plugins
                     case AttackerType.Structure:
                         attackerName = GetMessage(attackerName, _config.Structures);
                         break;
-
                 }
 
                 var victimName = Victim.Name;
+
                 switch (Victim.Type)
                 {
                     case VictimType.Helicopter:
                         victimName = _config.HelicopterName;
-                        break;
+                        break;						
 
                     case VictimType.BradleyAPC:
-                        victimName = _config.BradleyAPCName;
+                        victimName = _config.BradleyAPCName;  
+                        break;
+
+                    case VictimType.NPC:
+                        victimName = _config.NPCName;
+
+
+
                         break;
 
                     case VictimType.Zombie:
@@ -451,23 +497,13 @@ namespace Oxide.Plugins
                         victimName = GetMessage(victimName, _config.Animals);
                         break;
                 }
-                var reply = 3710;
-                var victimColor = _config.ColorPrivilage["deathmessages.default"].ColorDeath;
-                var attackerColor = _config.ColorPrivilage["deathmessages.default"].ColorAttacker;
-                foreach (var color in _config.ColorPrivilage)
-                {
-                    if (Attacker.Entity != null && Attacker.Entity.ToPlayer())
-                        if (ins.permission.UserHasPermission(Attacker.Entity.ToPlayer().UserIDString, color.Key))
-                            attackerColor = color.Value.ColorAttacker;
-                    if (Victim.Entity != null && Victim.Entity.ToPlayer())
-                        if (ins.permission.UserHasPermission(Victim.Entity.ToPlayer().UserIDString, color.Key))
-                            victimColor = color.Value.ColorDeath;
-                }
-                message = message.Replace("{victim}", $"<color={victimColor}>{victimName}</color>");
-                message = message.Replace("{attacker}", $"<color={attackerColor}>{attackerName}</color>");
+
+                message = message.Replace("{attacker}", $"<color={_config.ColorAttacker}>{attackerName}</color>");
+                message = message.Replace("{victim}", $"<color={_config.ColorVictim}>{victimName}</color>");
                 message = message.Replace("{distance}", $"<color={_config.ColorDistance}>{Math.Round(Distance, 0)}</color>");
                 message = message.Replace("{weapon}", $"<color={_config.ColorWeapon}>{GetMessage(Weapon, _config.Weapons)}</color>");
                 message = message.Replace("{bodypart}", $"<color={_config.ColorBodyPart}>{GetMessage(BodyPart, _config.BodyParts)}</color>");
+
                 return message;
             }
         }
@@ -475,204 +511,88 @@ namespace Oxide.Plugins
         #endregion
 
         #region Oxide Hooks
-        private static PluginConfig _config;
 
         protected override void LoadDefaultConfig()
         {
-            PrintWarning("Благодарим за приобритение плагина на сайте RustPlugin.ru. Если вы приобрели этот плагин на другом ресурсе знайте - это лишает вас гарантированных обновлений!");
-            _config = PluginConfig.DefaultConfig();
-        }
-        protected override void LoadConfig()
-        {
-            base.LoadConfig();
-            _config = Config.ReadObject<PluginConfig>();
-            if (_config.PluginVersion < Version)
-                UpdateConfigValues();
-            Config.WriteObject(_config, true);
-        }
-
-        private void UpdateConfigValues()
-        {
-            PluginConfig baseConfig = PluginConfig.DefaultConfig();
-            if (_config.PluginVersion < new VersionNumber(0, 1, 0))
+            Config.Clear();
+            Config.WriteObject(new PluginConfig
             {
-                PrintWarning("Config update detected! Updating config values...");
-                PrintWarning("Config update completed!");
-            }
-            _config.PluginVersion = Version;
-        }
+                Cooldown = 7,
+                FontSize = 15,
+                Distance = -1,
+                Log = true,
+                ShowDeathAnimals = true,
+                ShowDeathSleepers = true,
 
+                ColorAttacker = "#f0f223",
+                ColorVictim = "#f0f223",
+                ColorDistance = "#006ca9",
+                ColorWeapon = "#006ca9",
+                ColorBodyPart = "#006ca9",
 
-        protected override void SaveConfig()
-        {
-            Config.WriteObject(_config);
-        }
+                HelicopterName = "Вертолет",
+                BradleyAPCName = "Танк",  
+                NPCName = "НПЦ",
+                ZombieName = "Зомби",
 
-        class PluginConfig
-        {
-            [JsonProperty("Configuration Version")]
-            public VersionNumber PluginVersion = new VersionNumber();
-
-            [JsonProperty("A. Время показа сообщения (сек)")]
-            public int Cooldown { get; set; }
-            [JsonProperty("B. Размер текста")]
-            public int FontSize { get; set; }
-            [JsonProperty("C. Показывать убиства животных")]
-            public bool ShowDeathAnimals { get; set; }
-            [JsonProperty("C1. Показывать убиства NPC")]
-            public bool ShowDeathNPC { get; set; }
-            [JsonProperty("D. Показывать убийства спящих")]
-            public bool ShowDeathSleepers { get; set; }
-            [JsonProperty("E. Хранение логов")]
-            public bool Log { get; set; }
-            [JsonProperty("H. Цвет оружия")]
-            public string ColorWeapon { get; set; }
-            [JsonProperty("I. Цвет дистанции")]
-            public string ColorDistance { get; set; }
-            [JsonProperty("J. Цвет части тела")]
-            public string ColorBodyPart { get; set; }
-            [JsonProperty("K. Дистанция")]
-            public double Distance { get; set; }
-            [JsonProperty("L. Название вертолета")]
-            public string HelicopterName { get; set; }
-            [JsonProperty("M. Название Bradlay (Танк)")]
-            public string BradleyAPCName { get; set; }
-            [JsonProperty("N. Имя NPC")]
-            public string NPCName { get; set; }
-            [JsonProperty("O. Имя Zombie")]
-            public string ZombieName { get; set; }
-            [JsonProperty("P. Выводить убийства в консоль")]
-            public bool ShowColsole { get; set; }
-            [JsonProperty("Оружие")]
-            public Dictionary<string, string> Weapons { get; set; }
-            [JsonProperty("Цвета имени в UI")]
-            public Dictionary<string, ColorsPrivilage> ColorPrivilage
-            {
-                get; set;
-            }
-
-            [JsonProperty("Позиция: AnchorMin (Это изнаальная позиция точки, от неё в лево будет уходить основное UI по оффсетам, дефолт 1 1 - Верхний правый угол)")]
-            public string AnchorMin = "1 1";
-            [JsonProperty("Позиция: AnchorMax (Это изнаальная позиция точки, от неё в лево будет уходить основное UI по оффсетам, дефолт 1 1 - Верхний правый угол)")]
-            public string AnchorMax = "1 1";
-            [JsonProperty("Конструкции")]
-            public Dictionary<string, string> Structures { get; set; }
-            [JsonProperty("Ловушки")]
-            public Dictionary<string, string> Traps { get; set; }
-            [JsonProperty("Турели")]
-            public Dictionary<string, string> Turrets { get; set; }
-            [JsonProperty("Животные")]
-            public Dictionary<string, string> Animals { get; set; }
-            [JsonProperty("Сообщения ({attacker} - инициатор,  {victim} - жертва, {weapon} - оружие,  {distance} - дистанция, {bodypart} - часть тела")]
-            public Dictionary<string, string> Messages { get; set; }
-            [JsonProperty("Части тела")]
-            public Dictionary<string, string> BodyParts { get; set; }
-
-
-            [JsonIgnore]
-            [JsonProperty("Server Initialized")]
-            public bool Init = false;
-
-            public static PluginConfig DefaultConfig()
-            {
-                return new PluginConfig()
+                Weapons = new Dictionary<string, string>
                 {
-                    PluginVersion = new VersionNumber(),
-                    Cooldown = 7,
-                    FontSize = 15,
-                    Distance = -1,
-                    Log = true,
-                    ShowDeathAnimals = true,
-                    ShowDeathNPC = true,
-                    ShowDeathSleepers = true,
-                    ShowColsole = false,
-                    ColorDistance = "#ff9c00",
-                    ColorWeapon = "#ffffff",
-                    ColorBodyPart = "#ffffff",
-                    HelicopterName = "Вертолет",
-                    BradleyAPCName = "Танк",
-                    NPCName = "НПЦ",
-                    ZombieName = "Зомби",
-                    AnchorMin = "1 1",
-                    AnchorMax = "1 1",
-                    ColorPrivilage = new Dictionary<string, ColorsPrivilage>
-                    {
-                        ["deathmessages.default"] = new ColorsPrivilage
-                        {
-                            ColorAttacker = "#ff9c00",
-                            ColorDeath = "#ff9c00"
-                        },
-                        ["deathmessages.vip"] = new ColorsPrivilage
-                        {
-                            ColorAttacker = "#F70233",
-                            ColorDeath = "#757575"
-                        },
-                        ["deathmessages.elite"] = new ColorsPrivilage
-                        {
-                            ColorAttacker = "#DF0BBA",
-                            ColorDeath = "#D1D1D1"
-                        },
-                    },
-
-                    Weapons = new Dictionary<string, string>
-                {
-                    { "Assault Rifle", "Assault Rifle" },
-                    { "Beancan Grenade", "Beancan" },
+                    { "Assault Rifle", "AKA-47" },
+                    { "Beancan Grenade", "Бобовая граната" },
                     { "Nailgun", "Гвоздострел" },
-                    { "Bolt Action Rifle", "Bolt Action Rifle" },
-                    { "Bone Club", "Bone Club" },
-                    { "Bone Knife", "Bone Knife" },
-                    { "Crossbow", "Crossbow" },
-                    { "Flamethrower", "Flamethrower" },
-                       { "Explosivesatchel", "Explosivesatchel" },
+                    { "Bolt Action Rifle", "Снайперская винтовка" },
+                    { "Bone Club", "Костяная дубина" },
+                    { "Bone Knife", "Костяной нож" },
+                    { "Crossbow", "Арбалет" },
+					{ "Chainsaw", "Бензопила" },
+					{ "Compound Bow", "Блочный лук" },
+					{ "Flamethrower", "Огнемёт" },
+   					{ "Explosivesatchel", "Сумка с зарядом" },
                     { "Custom SMG", "SMG" },
-                    { "Double Barrel Shotgun", "Double Shotgun" },
-                    { "Compound Bow", "Compound Bow" },
-                    { "Eoka Pistol", "Eoka" },
-                    { "F1 Grenade", "F1" },
-                    { "Flame Thrower", "Flame Thrower" },
-                    { "Hunting Bow", "Hunting Bow" },
-                    { "Longsword", "Longsword" },
+                    { "Double Barrel Shotgun", "Двухстволка" },
+                    { "Eoka Pistol", "Самодельный пистолет" },
+                    { "F1 Grenade", "F1-граната" },
+                    { "Hunting Bow", "Охотничий лук" },
+                    { "Longsword", "Длинный меч" },
                     { "LR-300 Assault Rifle", "LR-300" },
-                    { "M249", "М249" },
-                    { "M92 Pistol", "M92" },
-                    { "Mace", "Mace" },
-                    { "Machete", "Machete" },
+                    { "M249", "Пулемёт М249" },
+                    { "M92 Pistol", "Беретта M92" },
+                    { "Mace", "Булава" },
+                    { "Machete", "Мачете" },
                     { "MP5A4", "MP5A4" },
-                    { "Pump Shotgun", "Shotgun" },
-                    { "Python Revolver", "Python Revolver" },
-                    { "Revolver", "Revolver" },
-                    { "Salvaged Cleaver", "Salvaged Cleaver" },
-                    { "Salvaged Sword", "Salvaged Sword" },
-                    { "Semi-Automatic Pistol", "Semi-Automatic Pistol" },
-                    { "Semi-Automatic Rifle", "Semi-Automatic Rifle" },
-                    { "Stone Spear", "Stone Spear" },
-                    { "Thompson", "Thompson" },
-                    { "Waterpipe Shotgun", "Waterpipe Shotgun" },
-                    { "Wooden Spear", "Wooden Spear" },
-                    { "Hatchet", "Hatchet" },
-                    { "Pick Axe", "Pick Axe" },
-                    { "Salvaged Axe", "Salvaged Axe" },
-                    { "Salvaged Hammer", "Salvaged Hammer" },
-                    { "Salvaged Icepick", "Salvaged Icepick" },
-                    { "Satchel Charge", "Satchel Charge" },
-                    { "Stone Hatchet", "Stone Hatchet" },
-                    { "Stone Pick Axe", "Stone Pick Axe" },
-                    { "Survey Charge", "Survey Charge" },
+					{ "Jackhammer", "Отбойник" },
+                    { "Pump Shotgun", "Помповый дробовик" },
+                    { "Python Revolver", "Питон револьвер" },
+                    { "Revolver", "Револьвер" },
+                    { "Salvaged Cleaver", "Самодельный тесак" },
+                    { "Salvaged Sword", "Самодельный меч" },
+                    { "Semi-Automatic Pistol", "Полуавтоматический пистолет" },
+                    { "Semi-Automatic Rifle", "Полуавтоматическая винтовка" },
+                    { "Stone Spear", "Каменное копьё" },
+					{ "Spas-12 Shotgun", "Дробовик Spas-12" },
+                    { "Thompson", "Томпсон" },
+                    { "Waterpipe Shotgun", "Самодельный дробовик" },
+                    { "Wooden Spear", "Деревянное копьё" },
+                    { "Hatchet", "Топор" },
+                    { "Pick Axe", "Кирка" },
+                    { "Salvaged Axe", "Самодельный топор" },
+                    { "Salvaged Hammer", "Самодельный молот" },
+                    { "Salvaged Icepick", "Самодельный ледоруб" },
+                    { "Satchel Charge", "Сумка с зарядом" },
+                    { "Stone Hatchet", "Каменный топор" },
+                    { "Stone Pick Axe", "Каменная кирка" },
+                    { "Survey Charge", "Геологический заряд" },
                     { "Timed Explosive Charge", "С4" },
-                    { "Torch", "Torch" },
-                    { "Stone Pickaxe", "Stone Pickaxe" },
+                    { "Torch", "Факел" },
                     { "RocketSpeed", "Скоростная ракета" },
                     { "Incendiary Rocket", "Зажигательная ракета" },
                     { "Rocket", "Обычная ракета" },
-                    { "RocketHeli", "Напалм" },
-                    { "RocketBradley", "Напалм" },
-                    { "Spas-12 Shotgun", "Spas-12 Shotgun" },
-                    {"Multiple Grenade Launcher", "Multiple Grenade Launcher" },
-                    {"40mm.grenade.he", "Multiple Grenade Launcher" },
+                    { "RocketHeli", "Напалм вертолёта" },
+                    { "RocketBradley", "Напалм танка" }
+
                 },
 
-                    Structures = new Dictionary<string, string>
+                Structures = new Dictionary<string, string>
                 {
                     { "Wooden Barricade", "Деревянная баррикада" },
                     { "Barbed Wooden Barricade", "Колючая деревянная баррикада" },
@@ -683,22 +603,21 @@ namespace Oxide.Plugins
                     { "High External Stone Gate", "Высокие внешние каменные ворота" }
                 },
 
-                    Traps = new Dictionary<string, string>
+                Traps = new Dictionary<string, string>
                 {
                     { "Snap Trap", "Капкан" },
                     { "Land Mine", "Мина" },
                     { "Wooden Floor Spikes", "Деревянные колья" }
                 },
 
-                    Turrets = new Dictionary<string, string>
+                Turrets = new Dictionary<string, string>
                 {
                     { "Flame Turret", "Огнеметная турель" },
                     { "Auto Turret", "Автотурель" },
-                    { "Guntrap", "Автодробовик" },
-                    { "Static Turret", "Автоматическая туррель" },
+                    { "Guntrap", "Автодробовик" }
                 },
 
-                    Animals = new Dictionary<string, string>
+                Animals = new Dictionary<string, string>
                 {
                     { "Boar", "Кабан" },
                     { "Horse", "Лошадь" },
@@ -708,7 +627,7 @@ namespace Oxide.Plugins
                     { "Bear", "Медведь" }
                 },
 
-                    BodyParts = new Dictionary<string, string>
+                BodyParts = new Dictionary<string, string>
                 {
                     { "body", "Тело" },
                     { "pelvis", "Таз" },
@@ -744,7 +663,7 @@ namespace Oxide.Plugins
                     { "right eye", "Правый глаз" }
                 },
 
-                    Messages = new Dictionary<string, string>
+                Messages = new Dictionary<string, string>
                 {
                     { "Arrow", "{attacker} убил {victim} ({weapon}, {distance} м.)" },
                     { "Blunt",  "{attacker} убил {victim} ({weapon})" },
@@ -777,8 +696,10 @@ namespace Oxide.Plugins
                     { "Guntrap", "{victim} был убит ловушкой-дробовиком" },
                     { "Unknown", "У {victim} что-то пошло не так." },
                     { "Bleeding", "{victim} умер от кровотечения" },
+
+                    //  Sleeping
                     { "Blunt Sleeping", "{attacker} убил {victim} ({weapon})" },
-                    { "Bullet Sleeping", "{attacker} убил {victim} ({weapon}, {distance} метров)" },
+                    { "Bullet Sleeping", "{attacker} убил {victim} с ({weapon},  с {distance} метров)" },
                     { "Flamethrower Sleeping", "{attacker} сжег игрока {victim} ({weapon})" },
                     { "Explosion Sleeping", "{attacker} убил {victim} ({weapon})" },
                     { "Generic Sleeping", "Смерть забрала {victim} с собой пока он спал." },
@@ -790,14 +711,14 @@ namespace Oxide.Plugins
                     { "Unknown Sleeping", "У игрока {victim} что-то пошло не так." },
                     { "Turret Sleeping", "{attacker} был убит автоматической турелью." }
                 }
-                };
-            }
+            }, true);
+
+            //PrintWarning("Благодарим за приобритение плагина на сайте RustPlugin.ru. Если вы приобрели этот плагин на другом ресурсе знайте - это лишает вас гарантированных обновлений!");
         }
 
         private void OnServerInitialized()
         {
-            ins = this;
-            PermissionService.RegisterPermissions(this, _config.ColorPrivilage.Keys.ToList());
+            _config = Config.ReadObject<PluginConfig>();
         }
 
         private Dictionary<uint, BasePlayer> LastHeli = new Dictionary<uint, BasePlayer>();
@@ -807,58 +728,54 @@ namespace Oxide.Plugins
             if (entity is BasePlayer)
                 _lastHits[entity.ToPlayer().userID] = info;
             if (entity is BaseHelicopter && info.InitiatorPlayer != null)
-                LastHeli[(uint)entity.net.ID.Value] = info.InitiatorPlayer;
+                LastHeli[entity.net.ID] = info.InitiatorPlayer;
         }
 
         private void OnEntityDeath(BaseCombatEntity victim, HitInfo info)
         {
-            try
+            var _weapon = FirstUpper(info?.Weapon?.GetItem()?.info?.displayName?.english) ?? FormatName(info?.WeaponPrefab?.name);
+            var _damageType = FirstUpper(victim.lastDamage.ToString());
+            if (info == null)
+                if (!(victim is BasePlayer) || !victim.ToPlayer().IsWounded() || !_lastHits.TryGetValue(victim.ToPlayer().userID, out info))
+            return;
+            if (victim as BaseCorpse != null) return;
+            var _victim = new Victim(victim);
+            var _attacker = new Attacker(info.Initiator);
+            if (_victim == null)
+                return;
+            if (_attacker == null)
+                return;
+            if (_victim.Type == VictimType.Invalid)
+                return;
+            if (_attacker.Type == AttackerType.Invalid)
+                return;
+            if (_victim.Type == VictimType.Helicopter)
             {
-                if (info == null)
-                    if (!(victim is BasePlayer) || !victim.ToPlayer().IsWounded() || !_lastHits.TryGetValue(victim.ToPlayer().userID, out info))
-                        return;
-                if (victim is BaseCorpse) return;
-                var _weapon = FirstUpper(info?.Weapon?.GetItem()?.info?.displayName?.english) ?? FormatName(info?.WeaponPrefab?.name);
-                var _damageType = FirstUpper(victim.lastDamage.ToString());
-
-                var _victim = new Victim(victim);
-                if (_victim == null)
-                    return;
-                var _attacker = new Attacker(info.Initiator);
-                if (_attacker == null)
-                    return;
-                if (_victim.Type == VictimType.Invalid)
-                    return;
-
-                if ((_victim.Type == VictimType.Zombie && _attacker.Type == AttackerType.NPC))
-                    return;
-
-                if (!_config.ShowDeathAnimals && _victim.Type == VictimType.Animal || _attacker.Type == AttackerType.Animal) return;
-
-                if (!_config.ShowDeathNPC && _victim.Type == VictimType.NPC || _attacker.Type == AttackerType.NPC)
-                    return;
-
-                if (_victim.Type == VictimType.Player && _victim.Entity.ToPlayer().IsSleeping() && !_config.ShowDeathSleepers)
-                    return;
-
-                var _bodyPart = victim?.skeletonProperties?.FindBone(info.HitBone)?.name?.english ?? "";
-                var _distance = info.ProjectileDistance;
-
-                if (_config.Log && _victim.Type == VictimType.Player && _attacker.Type == AttackerType.Player)
+                if (LastHeli.ContainsKey(victim.net.ID))
                 {
-                    LogToFile("log", $"[{DateTime.Now.ToShortTimeString()}] {info.Initiator} убил {victim} ({_weapon} [{_bodyPart}] с дистанции {_distance})", this, true);
+                    _attacker = new Attacker(LastHeli[victim.net.ID]);
                 }
-
-                if (_config.ShowColsole && _attacker.Type == AttackerType.Player)
-                {
-                    Puts($"[{DateTime.Now.ToShortTimeString()}] {info.Initiator} убил {victim} ({_weapon} [{_bodyPart}] с дистанции {_distance})");
-                }
-
-                AddNote(new DeathMessage(_attacker, _victim, _weapon, _damageType, _bodyPart, _distance));
             }
-            catch (NullReferenceException)
+            if ((_victim.Type == VictimType.Zombie && _attacker.Type == AttackerType.NPC))
+                return;
+            if (!_config.ShowDeathAnimals && _victim.Type == VictimType.Animal)
             {
+                return;
             }
+            if (!_config.ShowDeathAnimals && _attacker.Type == AttackerType.Animal)
+            {
+                return;
+            }
+            if (_victim.Type == VictimType.Player && _victim.Entity.ToPlayer().IsSleeping() && !_config.ShowDeathSleepers)
+                return;
+            var _bodyPart = victim?.skeletonProperties?.FindBone(info.HitBone)?.name?.english ?? "";
+            var _distance = info.ProjectileDistance;
+            if (_config.Log && _victim.Type == VictimType.Player && _attacker.Type == AttackerType.Player)
+            {
+
+                LogToFile("log", $"[{DateTime.Now.ToShortTimeString()}] {info.Initiator} убил {victim} ({_weapon} [{_bodyPart}] с дистанции {_distance})", this, true);
+            }
+            AddNote(new DeathMessage(_attacker, _victim, _weapon, _damageType, _bodyPart, _distance));
         }
 
         private void Unload()
@@ -874,12 +791,14 @@ namespace Oxide.Plugins
         private void AddNote(DeathMessage note)
         {
             _notes.Insert(0, note);
+            if (_notes.Count > 8)
+                _notes.RemoveRange(7, _notes.Count - 8);
+
             RefreshUI(note);
             timer.Once(_config.Cooldown, () =>
             {
                 _notes.Remove(note);
-                foreach (var player in note.Players)
-                    CuiHelper.DestroyUi(player, note.UINotes);
+                RefreshUI(note);
             });
         }
 
@@ -890,7 +809,10 @@ namespace Oxide.Plugins
         private void RefreshUI(DeathMessage note)
         {
             foreach (var player in note.Players)
+            {
+                DestroyUI(player);
                 InitilizeUI(player);
+            }
         }
 
         private void DestroyUI(BasePlayer player)
@@ -900,7 +822,7 @@ namespace Oxide.Plugins
 
         private void InitilizeUI(BasePlayer player)
         {
-            var notes = _notes.Where(x => x.Players.Contains(player));
+            var notes = _notes.Where(x => x.Players.Contains(player)).Take(8);
 
             if (notes.Count() == 0)
                 return;
@@ -910,31 +832,31 @@ namespace Oxide.Plugins
             container.Add(new CuiPanel
             {
                 Image = { Color = "0 0 0 0" },
-                RectTransform = { AnchorMin = _config.AnchorMin, AnchorMax = _config.AnchorMax }
-            }, "Hud", "ui.deathmessages");
+                RectTransform = { AnchorMin = "0.5 0.8", AnchorMax = "0.99 0.995" }
+            }, name: "ui.deathmessages");
 
-            double index = 0;
+            double index = 1;
             foreach (var note in notes)
             {
-                CuiHelper.DestroyUi(player, note.UINotes);
-                var label = InitilizeLabel(container, note.UINotes, note.Message, $"{index - (20 + _config.Distance)}", $"{index}");
-                index -= 20 + _config.Distance;
+                InitilizeLabel(container, note.Message, $"0 {index - 0.2}", $"0.99 {index}");
+                index -= 0.14;
             }
+
             CuiHelper.AddUi(player, container);
         }
 
-        private string InitilizeLabel(CuiElementContainer container, string Name, string text, string offsetMin, string Offsetmax)
+        private string InitilizeLabel(CuiElementContainer container, string text, string anchorMin, string anchorMax)
         {
+            string Name = CuiHelper.GetGuid();
             container.Add(new CuiElement
             {
                 Name = Name,
                 Parent = "ui.deathmessages",
-                FadeOut = 0.3f,
                 Components =
                 {
-                    new CuiTextComponent { Align = UnityEngine.TextAnchor.MiddleRight, FontSize = _config.FontSize, Text = text, Font = "robotocondensed-regular.ttf", FadeIn = 0.3f},
-                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "0 0", OffsetMin = $"-400 {offsetMin}", OffsetMax = $"-10 {Offsetmax}" },
-                    new CuiOutlineComponent { Color = "0 0 0 0.5", Distance = "1.0 -0.5" }
+                    new CuiTextComponent { Align = UnityEngine.TextAnchor.MiddleRight, FontSize = _config.FontSize, Text = text },
+                    new CuiRectTransformComponent { AnchorMin = anchorMin, AnchorMax = anchorMax },
+                    new CuiOutlineComponent { Color = "0 0 0 1", Distance = "1.0 -0.5" }
                 }
             });
             return Name;
@@ -956,9 +878,9 @@ namespace Oxide.Plugins
         {
             if (string.IsNullOrEmpty(prefab))
                 return string.Empty;
-            var reply = 1;
-            if (reply == 0) { }
+
             var formatedPrefab = FirstUpper(prefab.Split('/').Last().Replace(".prefab", "").Replace(".entity", "").Replace(".weapon", "").Replace(".deployed", "").Replace("_", "."));
+
             switch (formatedPrefab)
             {
                 case "Autoturret.deployed": return "Auto Turret";
@@ -967,6 +889,7 @@ namespace Oxide.Plugins
                 case "Beartrap": return "Snap Trap";
                 case "Landmine": return "Land Mine";
                 case "Spikes.floor": return "Wooden Floor Spikes";
+
                 case "Barricade.wood": return "Wooden Barricade";
                 case "Barricade.woodwire": return "Barbed Wooden Barricade";
                 case "Barricade.metal": return "Metal Barricade";
@@ -974,8 +897,9 @@ namespace Oxide.Plugins
                 case "Wall.external.high.stone": return "High External Stone Wall";
                 case "Gates.external.high.stone": return "High External Wooden Gate";
                 case "Gates.external.high.wood": return "High External Stone Gate";
+
                 case "Stone.hatchet": return "Stone Hatchet";
-                case "Stone.pickaxe": return "Stone Pickaxe";
+				case "Stone.pickaxe": return "Stone Pickaxe";
                 case "Survey.charge": return "Survey Charge";
                 case "Explosive.satchel": return "Satchel Charge";
                 case "Explosive.timed": return "Timed Explosive Charge";
@@ -987,12 +911,13 @@ namespace Oxide.Plugins
                 case "Spear.stone": return "Stone Spear";
                 case "Spear.wooden": return "Wooden Spear";
                 case "Knife.bone": return "Bone Knife";
-                case "Rocket.basic": return "Rocket";
+                case "Rocket.basic": return "Rocket";    
                 case "Flamethrower": return "Flamethrower";
                 case "Rocket.hv": return "RocketSpeed";
                 case "Rocket.heli": return "RocketHeli";
                 case "Rocket.bradley": return "RocketBradley";
-                case "sentry.scientist.static": return "Static Turret";
+
+
                 default: return formatedPrefab;
             }
         }
@@ -1004,29 +929,8 @@ namespace Oxide.Plugins
 
             return name;
         }
-        #endregion
 
-        #region Permissions
-        public static class PermissionService
-        {
-            public static Permission permission = Interface.GetMod().GetLibrary<Permission>();
-
-            public static bool HasPermission(ulong playerid = 3799040, string permissionName = "")
-            {
-                return !string.IsNullOrEmpty(permissionName) && permission.UserHasPermission(playerid.ToString(), permissionName);
-            }
-
-            public static void RegisterPermissions(Plugin owner, List<string> permissions)
-            {
-                if (owner == null) throw new ArgumentNullException("owner⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠");
-                if (permissions == null) throw new ArgumentNullException("commands⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠");
-
-                foreach (var permissionName in permissions.Where(permissionName => !permission.PermissionExists(permissionName)))
-                {
-                    permission.RegisterPermission(permissionName, owner);
-                }
-            }
-        }
         #endregion
     }
 }
+                                                                                                     

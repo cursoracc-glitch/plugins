@@ -1,4 +1,4 @@
-using Facepunch;
+﻿using Facepunch;
 using Oxide.Core;
 using Oxide.Core.Configuration;
 using Oxide.Core.Libraries;
@@ -12,7 +12,6 @@ using UnityEngine;
 namespace Oxide.Plugins
 {
     [Info("Remove", "Ryamkk", "1.2.42")]
-      //  Слив плагинов server-rust by Apolo YouGame
     class Remove : RustPlugin
     {
 		[PluginReference]
@@ -335,7 +334,6 @@ namespace Oxide.Plugins
         void TryRemove(BasePlayer player, BaseEntity removeObject) => RemoveAllFrom(removeObject.transform.position);
 		
         object OnHammerHit(BasePlayer player, HitInfo info, Vector3 pos)
-      //  Слив плагинов server-rust by Apolo YouGame
         {
             var entity = info?.HitEntity;
             if (entity == null) return null;

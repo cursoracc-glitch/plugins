@@ -1,17 +1,18 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Oxide.Core;
-using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using UnityEngine;
+
 namespace Oxide.Plugins
 {
-    [Info("Duel", "rustmods.ru", "4.2.63")]
+    [Info("Duel", "RustPlugin.ru", "4.0.2")]
     [Description("Automatic Duel (Bets) with GUI, weapons list, auto-created arenas, save players loot and position")]
     class Duel : RustPlugin
     {
@@ -122,7 +123,7 @@ namespace Oxide.Plugins
         int maxWinsTop = 5;
         int maxLoseTop = 5;
 
-        static bool debug = true;
+        static bool debug = true; //сохранять активность в Warnings.log?
 
         #endregion
 
@@ -133,59 +134,41 @@ namespace Oxide.Plugins
         static string duelCreatePermission = "duel.create";
         private readonly int triggerLayer = LayerMask.GetMask("Trigger");
         bool isIni = false;
+        static FieldInfo buildingPrivlidges;
+        private MethodInfo newbuildingid = typeof(BuildingBlock).GetMethod("NewBuildingID", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
         static List<ActiveDuel> createdDuels = new List<ActiveDuel>();
         static List<TeamDuel> createdTeamDuels = new List<TeamDuel>();
         static List<ulong?> toRemoveCorpse = new List<ulong?>();
         Dictionary<ulong, float> lastRequestTime = new Dictionary<ulong, float>();
         Dictionary<ulong, float> lastTeamDuelCreateTime = new Dictionary<ulong, float>();
-        static Dictionary<string, ulong> Wears = new Dictionary<string, ulong> //item shortname : skinid
+        static Dictionary<int, ulong> Wears = new Dictionary<int, ulong> //item id : skinid
         {
-            {"metal.facemask", 0}, //shirt 
-            {"metal.plate.torso", 0}, // Hat
-            {"shoes.boots", 0}, // Pants
-            {"hoodie", 0}, // Boots
-			{"pants", 0}, // tolsovka
-            {"roadsign.kilt", 0} // dorognie znaki
+            {1110385766, 0}, //shirt 
+            {-194953424, 0}, // Hat
+            {237239288, 0}, // Pants
+            {-1549739227, 0}, // Boots
+			{1751045826, 0}, // tolsovka
+            {1850456855, 0} // dorognie znaki
         };
-        static Dictionary<string, ulong> WearsBlue = new Dictionary<string, ulong> //item id : skinid
+        static Dictionary<int, ulong> WearsBlue = new Dictionary<int, ulong> //item id : skinid
         {
-            {"metal.facemask", 0}, //hoodie
-            {"metal.plate.torso", 0}, // Hat
-            {"shoes.boots", 0}, // Pants
-            {"hoodie", 0}, // Boots
-			{"pants", 14178}, // tolsovka
-            {"roadsign.kilt", 0} // dorognie znaki
+            {1110385766, 0}, //hoodie
+            {-194953424, 0}, // Hat
+            {237239288, 0}, // Pants
+            {-1549739227, 0}, // Boots
+			{1751045826, 14178}, // tolsovka
+            {1850456855, 0} // dorognie znaki
         };
-        static Dictionary<string, ulong> WearsRed = new Dictionary<string, ulong> //item id : skinid
+        static Dictionary<int, ulong> WearsRed = new Dictionary<int, ulong> //item id : skinid
         {
-            {"metal.facemask", 0}, //hoodie 
-            {"metal.plate.torso", 0}, // Hat
-            {"shoes.boots", 0}, // Pants
-            {"hoodie", 0}, // Boots
-			{"pants", 0}, // tolsovka
-            {"roadsign.kilt", 0} // dorognie znaki
+            {1110385766, 0}, //hoodie 
+            {-194953424, 0}, // Hat
+            {237239288, 0}, // Pants
+            {-1549739227, 0}, // Boots
+			{1751045826, 0}, // tolsovka
+            {1850456855, 0} // dorognie znaki
         };
         private List<BaseEntity> ArenaEntities = new List<BaseEntity>();
-        #endregion
-
-        #region Helperss
-        [PluginReference]
-        Plugin NoEscape;
-
-        bool IsRaidBlock(BasePlayer player)
-        {
-            if (plugins.Exists("NoEscape"))
-            {
-                var block = (bool)NoEscape?.Call("IsRaidBlocked", player);
-                if (block)
-                {
-                    SendReply(player, "У Вас рейдблок, Duel запрещена");
-                    return true;
-                }
-            }
-            return false;
-        }
-
         #endregion
 
         #region ChatCommand
@@ -202,7 +185,6 @@ namespace Oxide.Plugins
                 SendReply(player, duelCommand);
                 return;
             }
-            if (IsRaidBlock(player)) return;
             if (player.metabolism.radiation_poison.value > 5)
             {
                 SendReply(player, "У Вас облучение радиацией. Duel запрещена");
@@ -240,8 +222,8 @@ namespace Oxide.Plugins
                     }
 
                 }
+                return;
             }
-
             if (aim == "accept")
             {
                 if (arg.Length == 2)
@@ -284,6 +266,7 @@ namespace Oxide.Plugins
                         return;
                     }
                 }
+                return;
             }
             if (aim == "create")
             {
@@ -322,6 +305,7 @@ namespace Oxide.Plugins
                     player.ChatMessage("Ошибка. Укажите количество участников (от 2 до 6) в каждой команде\n/duel create [2-6]");
                     return;
                 }
+                return;
             }
             if (aim == "top")
             {
@@ -426,60 +410,60 @@ namespace Oxide.Plugins
         }
         void RemoveGarbage(BaseEntity entity)
         {
-            if (entity == null) return;
-            if (entity?.net?.ID == null) return;
             if (!isIni) return;
-            if (entity.transform.position.y > 450f && IsArenaZone(entity.transform.position))
+            var cont = entity as DroppedItemContainer;
+            if (cont != null)
             {
-                var cont = entity as DroppedItemContainer;
-                if (cont != null)
+                if (IsArenaZone(cont.transform.position))
                 {
                     cont.ResetRemovalTime(0.1f);
                 }
-                var corpse = entity as BaseCorpse;
-                if (corpse != null)
+            }
+            var corpse = entity as BaseCorpse;
+            if (corpse != null)
+            {
+                if (toRemoveCorpse.Count == 0) return;
+                if (corpse)
                 {
-                    if (toRemoveCorpse.Count == 0) return;
-                    if (corpse)
+                    if ((corpse is PlayerCorpse) && corpse?.parentEnt?.ToPlayer())
                     {
-                        if ((corpse is PlayerCorpse) && corpse?.parentEnt?.ToPlayer())
+                        if (corpse?.parentEnt?.ToPlayer() != null)
                         {
-                            if (corpse?.parentEnt?.ToPlayer() != null)
+                            if (toRemoveCorpse.Contains(corpse?.parentEnt?.ToPlayer().userID))
                             {
-                                if (toRemoveCorpse.Contains(corpse?.parentEnt?.ToPlayer().userID))
-                                {
-                                    corpse.ResetRemovalTime(0.1f);
-                                    toRemoveCorpse.Remove(corpse?.parentEnt?.ToPlayer().userID);
-                                    return;
-                                }
+                                corpse.ResetRemovalTime(0.1f);
+                                toRemoveCorpse.Remove(corpse?.parentEnt?.ToPlayer().userID);
+                                return;
                             }
                         }
                     }
                 }
-                if (entity is PlayerCorpse || entity.name.Contains("item_drop_backpack"))
+            }
+            if (entity is PlayerCorpse || entity.name.Contains("item_drop_backpack"))
+            {
+                if (entity.transform.position.y > 900f)
                 {
                     NextTick(() =>
                     {
                         if (entity != null && !entity.IsDestroyed)
                         {
-
                             entity.Kill();
                         }
                     });
                 }
-                if (entity is WorldItem)
+            }
+            if (entity is WorldItem)
+            {
+                if ((entity as WorldItem).item.GetOwnerPlayer() == null) return;
+                var activeDuel = PlayersActiveDuel((entity as WorldItem).item.GetOwnerPlayer().userID);
+                if (activeDuel != null)
                 {
-                    if ((entity as WorldItem).item.GetOwnerPlayer() == null) return;
-                    var activeDuel = PlayersActiveDuel((entity as WorldItem).item.GetOwnerPlayer().userID);
-                    if (activeDuel != null)
-                    {
-                        activeDuel.dropedWeapons.Add((entity as WorldItem).item);
-                        return;
-                    }
-                    if (NeedToRemoveFromTeamDuel((entity as WorldItem).item.GetOwnerPlayer().userID))
-                    {
-                        createdTeamDuels[0].droppedWeapons.Add((entity as WorldItem).item);
-                    }
+                    activeDuel.dropedWeapons.Add((entity as WorldItem).item);
+                    return;
+                }
+                if (NeedToRemoveFromTeamDuel((entity as WorldItem).item.GetOwnerPlayer().userID))
+                {
+                    createdTeamDuels[0].droppedWeapons.Add((entity as WorldItem).item);
                 }
             }
         }
@@ -948,7 +932,7 @@ namespace Oxide.Plugins
                 }
             }
 
-            void FixedUpdate()
+            void Update()
             {
                 if (isActive)
                 {
@@ -1383,6 +1367,7 @@ namespace Oxide.Plugins
                             teamDuel.teamblue[i].player.ChatMessage(teamAboutToBegin);
                             teamDuel.teamred[i].player.ChatMessage(teamAboutToBegin);
                         }
+                        return;
                         PrintToChat(String.Format(teamJoinAboutToBeginAnnounce, ispermduel, player.displayName, where));
                         return;
                     }
@@ -1635,8 +1620,7 @@ namespace Oxide.Plugins
             public Vector3 Home;
             public Vector3 spawnPos;
 
-            //public List<ItemsToRestore> InvItems = new List<ItemsToRestore>();
-
+            public List<ItemsToRestore> InvItems = new List<ItemsToRestore>();
             void Awake()
             {
                 isDeath = false;
@@ -1661,8 +1645,7 @@ namespace Oxide.Plugins
                 if (player.IsWounded())
                 {
                     player.StopWounded();
-                    player.DisablePlayerCollider();
-
+                    player.UpdatePlayerCollider(false);
                 }
                 player.Teleport(spawnPos);
             }
@@ -1715,7 +1698,8 @@ namespace Oxide.Plugins
                     Invoke("PrepairToDuel", 1f);
                     return;
                 }
-                SavePlayer(player);
+                SavePlayer();
+
                 canDoSomeThings = false;
                 player.metabolism.Reset();
                 player.metabolism.calories.Add(500);
@@ -1724,8 +1708,7 @@ namespace Oxide.Plugins
                 if (player.IsWounded())
                 {
                     player.StopWounded();
-                    player.DisablePlayerCollider();
-
+                    player.UpdatePlayerCollider(false);
                 }
                 TPPlayer(player, spawnPos);
                 canMove = false;
@@ -1750,7 +1733,6 @@ namespace Oxide.Plugins
             public void ReturnPlayer(int reason = 0)
             {
                 if (isReturned) return;
-                player.Respawn();
                 SendChatMessage(reason);
                 if (!savedHome)
                 {
@@ -1768,17 +1750,12 @@ namespace Oxide.Plugins
                 CuiHelper.DestroyUi(player, "mouse");
                 CuiHelper.DestroyUi(player, "weaponsguiteamweapons");
                 canMove = true;
-                player.InitializeHealth(health, 100);
-                // player.health = health;
+                TeleportHome();
+                RestoreInventory(); //проверить
+                player.InitializeHealth(health, health);
                 player.metabolism.calories.@value = calories;
                 player.metabolism.hydration.@value = hydration;
                 player.metabolism.bleeding.@value = 0;
-                player.EnablePlayerCollider();
-                player.lifeStory.secondsAlive = 0;
-                player.SendNetworkUpdateImmediate();
-                TeleportHome();
-                RestoreInventory(player); //проверить
-
                 isReturned = true;
                 Destroy();
             }
@@ -1844,11 +1821,11 @@ namespace Oxide.Plugins
                 savedHome = true;
             }
 
-            public void SavePlayer(BasePlayer player)
+            public void SavePlayer()
             {
                 SaveHome();
                 SaveHealth();
-                SaveInventory(player);
+                SaveInventory();
             }
 
             public void TeleportHome()
@@ -1856,188 +1833,83 @@ namespace Oxide.Plugins
                 TPPlayer(player, Home);
                 savedHome = false;
             }
-            class PlayerInfo
+            public void SaveInventory()
             {
-                public bool RestoreOnce = false;
-                public List<SavedItem> Items;
-            }
-
-            static Dictionary<ulong, PlayerInfo> cachedInventories = new Dictionary<ulong, PlayerInfo>();
-
-            bool SaveInventory(BasePlayer player)
-            {
-                List<SavedItem> items = GetPlayerItems(player);
-                if (!cachedInventories.ContainsKey(player.userID))
-                    cachedInventories.Add(player.userID, new PlayerInfo { });
-                cachedInventories[player.userID].Items = items;
-                StringBuilder sb = new StringBuilder(500);
-                sb.Append(player.displayName + " SAVE" + '\n');
-                foreach (var i in items)
-                    sb.Append(i.shortname + '\n');
-                sb.Clear();
-                return true;
-            }
-
-            List<SavedItem> GetPlayerItems(BasePlayer player)
-            {
-                List<SavedItem> kititems = (from item in player.inventory.containerBelt.itemList where item != null select ProcessItem(item, "belt")).ToList();
-                kititems.AddRange(from item in player.inventory.containerWear.itemList where item != null select ProcessItem(item, "wear"));
-                kititems.AddRange(from item in player.inventory.containerMain.itemList where item != null select ProcessItem(item, "main"));
+                if (savedInventory)
+                    return;
+                InvItems.Clear();
+                InvItems.AddRange(GetItems(player.inventory.containerWear, "wear"));
+                InvItems.AddRange(GetItems(player.inventory.containerMain, "main"));
+                InvItems.AddRange(GetItems(player.inventory.containerBelt, "belt"));
+                savedInventory = true;
                 player.inventory.Strip();
-                return kititems;
             }
-
-            //private IEnumerable<ItemsToRestore> GetItems(ItemContainer container, string containerName)
-            //{
-
-            //    return container.itemList.Select(item => new ItemsToRestore
-            //    {
-            //        itemid = item.info.itemid,
-            //        container = containerName,
-            //        amount = item.amount,
-            //        ammo = weapon.primaryMagazine.contents,
-            //        position = item.position,
-            //        skin = item.skin,
-            //        condition = item.condition,
-            //        bptarget = item.blueprintTarget,
-            //        contents = item.contents?.itemList.Select(item1 => new ItemsToRestore
-            //        {
-            //            itemid = item1.info.itemid,
-            //            amount = item1.amount,
-            //            condition = item1.condition
-            //        }).ToArray()
-            //});
-            //}
-
-            SavedItem ProcessItem(Item item, string container)
+            private IEnumerable<ItemsToRestore> GetItems(ItemContainer container, string containerName)
             {
-                SavedItem iItem = new SavedItem
+                return container.itemList.Select(item => new ItemsToRestore
                 {
-                    shortname = item.info?.shortname,
+                    itemid = item.info.itemid,
+                    container = containerName,
                     amount = item.amount,
-                    mods = new List<SavedItem>(),
-                    container = container,
-                    skinid = item.skin,
-                    blueprint = item.blueprintTarget
-                };
-                if (item.info == null) return iItem;
-                iItem.itemid = item.info.itemid;
-                iItem.weapon = false;
-                if (item.hasCondition)
-                    iItem.condition = item.condition;
-                FlameThrower flameThrower = item.GetHeldEntity()?.GetComponent<FlameThrower>();
-                if (flameThrower != null)
-                    iItem.flamefuel = flameThrower.ammo;
-                if (item.info.category.ToString() != "Weapon") return iItem;
-                BaseProjectile weapon = item.GetHeldEntity() as BaseProjectile;
-                if (weapon == null) return iItem;
-                if (weapon.primaryMagazine == null) return iItem;
-                iItem.ammoamount = weapon.primaryMagazine.contents;
-                iItem.ammotype = weapon.primaryMagazine.ammoType.shortname;
-                iItem.weapon = true;
-                if (item.contents != null)
-                    foreach (var mod in item.contents.itemList)
-                        if (mod.info.itemid != 0)
-                            iItem.mods.Add(ProcessItem(mod, "noun"));
-                return iItem;
+                    position = item.position,
+                    ammo = (item.GetHeldEntity() as BaseProjectile)?.primaryMagazine.contents ?? 0,
+                    skin = item.skin,
+                    condition = item.condition,
+                    contents = item.contents?.itemList.Select(item1 => new ItemsToRestore
+                    {
+                        itemid = item1.info.itemid,
+                        amount = item1.amount,
+                        condition = item1.condition
+                    }).ToArray()
+                });
             }
 
-
-
-            bool RestoreInventory(BasePlayer player)
+            public void RestoreInventory()
             {
-                if (!cachedInventories.ContainsKey(player.userID))
-                    return false;
+                if (!savedInventory) return;
                 player.inventory.Strip();
-                StringBuilder sb = new StringBuilder(500);
-
-                sb.Append($"RESTORE {player.displayName}\n");
-                foreach (SavedItem kitem in cachedInventories[player.userID].Items)
+                foreach (var kitem in InvItems)
                 {
-                    sb.Append($"{kitem.shortname}\n");
-                    GiveItem(player, kitem.weapon ? BuildWeapon(kitem) : BuildItem(kitem), kitem.container);
+                    if (kitem.amount == 0) continue;
+                    var item = ItemManager.CreateByItemID(kitem.itemid, kitem.amount, kitem.skin);
+                    if (item == null) continue;
+                    item.condition = kitem.condition;
+                    var weapon = item.GetHeldEntity() as BaseProjectile;
+                    if (weapon != null) weapon.primaryMagazine.contents = kitem.ammo;
+                    item.MoveToContainer(kitem.container == "belt" ? player.inventory.containerBelt : kitem.container == "wear" ? player.inventory.containerWear : player.inventory.containerMain, kitem.position, false);
+                    if (kitem.contents == null) continue;
+                    foreach (var ckitem in kitem.contents)
+                    {
+                        if (ckitem.amount == 0) continue;
+                        var item1 = ItemManager.CreateByItemID(ckitem.itemid, ckitem.amount);
+                        if (item1 == null) continue;
+                        item1.condition = ckitem.condition;
+                        item1.MoveToContainer(item.contents);
+                    }
                 }
-                sb.Clear();
-                return true;
+                savedInventory = false;
             }
-
-            void GiveItem(BasePlayer player, Item item, string container)
-            {
-                if (item == null) return;
-                ItemContainer cont;
-                switch (container)
-                {
-                    case "wear":
-                        cont = player.inventory.containerWear;
-                        break;
-                    case "belt":
-                        cont = player.inventory.containerBelt;
-                        break;
-                    default:
-                        cont = player.inventory.containerMain;
-                        break;
-                }
-                item.MoveToContainer(cont);
-            }
-
-            Item BuildItem(SavedItem sItem)
-            {
-                if (sItem.amount < 1) sItem.amount = 1;
-                Item item = ItemManager.CreateByItemID(sItem.itemid, sItem.amount, sItem.skinid);
-                item.blueprintTarget = sItem.blueprint;
-                if (item.hasCondition) item.condition = sItem.condition;
-                FlameThrower flameThrower = item.GetHeldEntity()?.GetComponent<FlameThrower>();
-                if (flameThrower)
-                    flameThrower.ammo = sItem.flamefuel;
-                return item;
-            }
-
-            Item BuildWeapon(SavedItem sItem)
-            {
-                Item item = ItemManager.CreateByItemID(sItem.itemid, 1, sItem.skinid);
-                if (item.hasCondition)
-                    item.condition = sItem.condition;
-                var weapon = item.GetHeldEntity() as BaseProjectile;
-                if (weapon != null)
-                {
-                    var def = ItemManager.FindItemDefinition(sItem.ammotype);
-                    weapon.primaryMagazine.ammoType = def;
-                    weapon.primaryMagazine.contents = sItem.ammoamount;
-                }
-
-                if (sItem.mods != null)
-                    foreach (var mod in sItem.mods)
-                        item.contents.AddItem(BuildItem(mod).info, 1);
-                return item;
-            }
-
-
         }
-
         #region Class ItemsToRestore
-        class SavedItem
+        class ItemsToRestore
         {
-            public string shortname;
             public int itemid;
+            public bool bp;
+            public ulong skin;
             public string container;
-            public float condition;
             public int amount;
-            public int ammoamount;
-            public string ammotype;
-            public int flamefuel;
-            public ulong skinid;
-            public bool weapon;
-            public int blueprint;
-            public List<SavedItem> mods;
+            public float condition;
+            public int ammo;
+            public int position;
+            public ItemsToRestore[] contents;
         }
         #endregion
-
         #endregion
 
         #region BasePlayersFunctions
-        bool HavePerm(string permis, ulong playerid = 0)
+        bool HavePerm(string permis, ulong userID)
         {
-            if (permission.UserHasPermission(playerid.ToString(), permis))
+            if (permission.UserHasPermission(userID.ToString(), permis))
                 return true;
             return false;
         }
@@ -2124,6 +1996,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("duel")]
         void ccmdremove(ConsoleSystem.Arg arg)
         {
+
             if (arg.Connection?.player != null)
             {
 
@@ -2294,7 +2167,7 @@ namespace Oxide.Plugins
                     RectTransform = { AnchorMin = "0 0.4", AnchorMax = "0.5 0.6" }
                 }, panel);
 
-                #region OpponentsWeapon 
+                #region OpponentsWeapon
                 ActiveDuel playersDuel = null;
                 string opponentweapon = "";
                 foreach (var duel in createdDuels)
@@ -2379,7 +2252,7 @@ namespace Oxide.Plugins
         #region Oxide
         void OnPlayerRespawned(BasePlayer player)
         {
-            if (player.transform.position.y > 450f && !IsDuelPlayer(player))
+            if (player.transform.position.y > 900f && !IsDuelPlayer(player))
             {
                 new PluginTimers(this).Once(1, () =>
                 {
@@ -2396,77 +2269,14 @@ namespace Oxide.Plugins
             });
         }
 
-
-        object CanEntityTakeDamage(BaseCombatEntity victim, HitInfo hitInfo)
+        object OnEntityTakeDamage(BaseCombatEntity victim, HitInfo hitInfo)
         {
-            if (victim == null || hitInfo == null) return null;
             //Disabling decay of the arena
             if (hitInfo.damageTypes.Has(Rust.DamageType.Decay))
             {
                 if (IsArenaZone(victim.transform.position))
                 {
                     hitInfo.damageTypes.Scale(Rust.DamageType.Decay, 0);
-                    return false;
-                }
-            }
-
-            var attacker = hitInfo.InitiatorPlayer;
-            if (attacker == null) return null;
-
-
-            var victimPlayer = victim.GetComponent<BasePlayer>();
-            if (victimPlayer == null) return null;
-
-            if (IsPlayerOnActiveDuel(attacker) && IsPlayerOnActiveDuel(victimPlayer))
-            {
-                if (FindOpponent(attacker) != null)
-                    if (IsDuelPlayer(attacker) && !FindOpponent(attacker).canMove) return false; //отмена на дамаг от телепорта (если он будет)
-
-                 if (FindOpponent(victimPlayer) != null)
-                    if (IsDuelPlayer(victimPlayer) && !FindOpponent(victimPlayer).canMove) return false; //отмена на дамаг от телепорта (если он будет)
-
-                return true;
-            }
-
-            if (createdTeamDuels.Count > 0)
-            {
-                if (victim != null)
-                {
-                    if (victimPlayer != null)
-                    {
-                        DuelPlayer dueller = victimPlayer?.GetComponent<DuelPlayer>();
-                        if (dueller != null)
-                            if (!dueller.canMove) return false; //возвращать дамаг
-
-                        return true;
-                    }
-                }
-                var dvictim = createdTeamDuels[0].allPlayers.Find(x => x.player == victimPlayer);
-                if (dvictim != null)
-                {
-                    var dattacker = createdTeamDuels[0].allPlayers.Find(x => x.player == hitInfo.Initiator?.ToPlayer());
-                    if (dattacker != null)
-                    {
-                        if (dvictim.team == dattacker.team)
-                        {
-                            attacker.ChatMessage(String.Format(teamDamageTeammate, victimPlayer.displayName));
-                            return false; //отмена дамага по однотимным
-                        }
-                        return true;
-                    }
-                }
-            }
-            return null;
-        }
-
-        object OnEntityTakeDamage(BaseCombatEntity victim, HitInfo hitInfo)
-        {
-            if (hitInfo.damageTypes.Has(Rust.DamageType.Decay))
-            {
-                if (IsArenaZone(victim.transform.position))
-                {
-                    hitInfo.damageTypes.Scale(Rust.DamageType.Decay, 0);
-                    return false;
                 }
             }
             var attacker = hitInfo.Initiator?.ToPlayer();
@@ -2479,7 +2289,9 @@ namespace Oxide.Plugins
                     {
                         DuelPlayer dueller = victimPlayer?.GetComponent<DuelPlayer>();
                         if (dueller != null)
+                        {
                             if (!dueller.canMove) return false; //возвращать дамаг
+                        }
                     }
                 }
                 if (attacker == null) return null;
@@ -2527,11 +2339,12 @@ namespace Oxide.Plugins
             return null;
         }
 
-
-        object OnPlayerDeath(BasePlayer player, HitInfo info)
+        void OnEntityDeath(BaseEntity entity, HitInfo hitinfo)
         {
+            BasePlayer player = (entity as BasePlayer);
+            if (player == null) return;
             DuelPlayer dueller = player?.GetComponent<DuelPlayer>();
-            if (dueller == null) return null;
+            if (dueller == null) return;
             if (dueller.team != "" && dueller.haveweapon)
             {
                 var duel = createdTeamDuels[0];
@@ -2555,12 +2368,12 @@ namespace Oxide.Plugins
                 if (dueller.induel)
                     dueller.ReturnWithCooldown();
                 dueller.induel = false;
-                return null;
+                return;
             }
             var opponent = FindOpponent(player);
             if (opponent != null)
             {
-                if (opponent.isDeath || dueller.isDeath || !dueller.haveweapon || !opponent.haveweapon) return null;
+                if (opponent.isDeath || dueller.isDeath || !dueller.haveweapon || !opponent.haveweapon) return;
                 opponent.isDeath = true;
                 player.ChatMessage(statLoss);
                 var duel = FindDuelByPlayer(player);
@@ -2572,10 +2385,10 @@ namespace Oxide.Plugins
                 foreach (var top in Ts)
                 {
                     top.Win = opponent.player.UserIDString;
+                    SaveData();
                 }
                 EndDuel(player, 7, opponent.player.UserIDString, player.UserIDString);
             }
-            return null;
         }
 
         void OnEntitySpawned(BaseEntity entity) => RemoveGarbage(entity); //remove corpses and etc
@@ -2597,7 +2410,7 @@ namespace Oxide.Plugins
                     }
                 }
             }
-
+            SaveData();
 
             foreach (var player in BasePlayer.activePlayerList)
             {
@@ -2605,18 +2418,16 @@ namespace Oxide.Plugins
                 CuiHelper.DestroyUi(player, "weaponsguiteamweapons");
                 CuiHelper.DestroyUi(player, "weaponsgui");
                 CuiHelper.DestroyUi(player, "mouse");
-                CuiHelper.DestroyUi(player, "mouse");
-
             }
             if (createdTeamDuels.Count > 0)
                 createdTeamDuels[0].Destroy();
             Puts("Арены удалены");
-            foreach (var entity in ArenaEntities)
+            ArenaEntities.ForEach(entity =>
             {
                 if (!entity.IsDestroyed)
                     entity.Kill();
-            };
-            SaveData();
+
+            });
         }
 
         void OnPlayerDisconnected(BasePlayer player)
@@ -2728,7 +2539,6 @@ namespace Oxide.Plugins
             "bp",
             "backpack",
             "skin",
-            "skins",
             "skinbox",
             "rec",
             "tpa",
@@ -2739,48 +2549,33 @@ namespace Oxide.Plugins
             "remove"
         };
 
-
-        private object OnUserCommand(IPlayer ipl, string command, string[] args)
+        object OnPlayerCommand(ConsoleSystem.Arg arg, BasePlayer player)
         {
-            if (ipl == null || !ipl.IsConnected) return null;
-            var player = ipl.Object as BasePlayer;
-            if (player == null) return null;
-            DuelPlayer dueller = player.GetComponent<DuelPlayer>();
-            if (dueller == null) return null;
-            if (dueller.canDoSomeThings) return null;
-            if (Commands.Contains(command.ToLower()))
+            if (arg.Args == null) return null;
+            foreach (var command in Commands)
             {
-                SendReply(player, cantUseCommand.Replace("{0}", command));
-                return false;
+                if (string.Join(" ", arg.Args).Contains(command))
+                {
+                    DuelPlayer dueller = arg.Player()?.GetComponent<DuelPlayer>();
+                    if (dueller == null) return null;
+                    if (dueller.canDoSomeThings) return null;
+                    SendReply(arg.Player(), cantUseCommand.Replace("{0}", command));
+                    return false;
+                }
             }
             return null;
         }
 
-        void OnServerInitialized(bool serverInitialized)
+        void OnServerInitialized()
         {
-            if (TruePVE)
-                Unsubscribe("OnEntityTakeDamage");
-            else
-                Subscribe("OnEntityTakeDamage");
-
-
             if (!permission.PermissionExists(duelCreatePermission)) permission.RegisterPermission(duelCreatePermission, this);
             if (!permission.PermissionExists(duelJoinPermission)) permission.RegisterPermission(duelJoinPermission, this);
-
-            if (serverInitialized)
+            PrintWarning("Инициализация плагина выполнена. Ожидайте 10 секунд для инициализации файлов арен.");
+            timer.Once(10f, () =>
             {
-                PrintWarning("Инициализация плагина выполнена. Ожидайте 10 секунд для инициализации файлов арен.");
-                timer.Once(10f, () =>
-                {
-                    CreateDuelArena();
-                    isIni = true;
-                });
-            }
-            else
-            {
-                CreateDuelArena();
                 isIni = true;
-            }
+                CreateDuelArena();
+            });
         }
         #endregion
 
@@ -2808,7 +2603,7 @@ namespace Oxide.Plugins
             {
                 foreach (var item in WearsBlue)
                 {
-                    player.inventory.GiveItem(ItemManager.CreateByName(item.Key, 1, item.Value), player.inventory.containerWear);
+                    player.inventory.GiveItem(ItemManager.CreateByItemID(item.Key, 1, item.Value), player.inventory.containerWear);
                 }
                 return;
             }
@@ -2816,13 +2611,13 @@ namespace Oxide.Plugins
             {
                 foreach (var item in WearsRed)
                 {
-                    player.inventory.GiveItem(ItemManager.CreateByName(item.Key, 1, item.Value), player.inventory.containerWear);
+                    player.inventory.GiveItem(ItemManager.CreateByItemID(item.Key, 1, item.Value), player.inventory.containerWear);
                 }
                 return;
             }
             foreach (var item in Wears)
             {
-                player.inventory.GiveItem(ItemManager.CreateByName(item.Key, 1, item.Value), player.inventory.containerWear);
+                player.inventory.GiveItem(ItemManager.CreateByItemID(item.Key, 1, item.Value), player.inventory.containerWear);
             }
         }
         static List<string> weapons = new List<string>
@@ -2850,13 +2645,11 @@ namespace Oxide.Plugins
             "Камень",
             "Меч"
         };
-
-        public static void GiveAndShowItem(BasePlayer player, string item, int amount, ulong skindid = 0)
+        public static void GiveAndShowItem(BasePlayer player, int item, int amount, ulong skindid = 0)
         {
-            player.inventory.GiveItem(ItemManager.CreateByName(item, amount, skindid), player.inventory.containerBelt);
+            player.inventory.GiveItem(ItemManager.CreateByItemID(item, amount, skindid), player.inventory.containerBelt);
             player.Command("note.inv", new object[] { item, amount });
         }
-
         public static void GiveWeapon(BasePlayer player)
         {
             DuelPlayer dueller = player.GetComponent<DuelPlayer>();
@@ -2865,175 +2658,175 @@ namespace Oxide.Plugins
             switch (dueller.weapon)
             {
                 case "M249":
-                    GiveAndShowItem(player, "lmg.m249", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.rifle", 200); // 5.56
-                    GiveAndShowItem(player, "ammo.rifle.hv", 200); // 5.56 мм ВС
+                    GiveAndShowItem(player, -2069578888, 1);//M249
+                    GiveAndShowItem(player, -2072273936, 5);//Bandage
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -1211166256, 200); // 5.56
+                    GiveAndShowItem(player, 1712070256, 200); // 5.56 мм ВС
                     break;
                 case "AK-47":
-                    GiveAndShowItem(player, "rifle.ak", 1, 10138);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.rifle", 200); // 5.56
-                    GiveAndShowItem(player, "ammo.rifle.hv", 200); // 5.56 мм ВС
+                    GiveAndShowItem(player, 1545779598, 1, 10138);//AK-47
+                    GiveAndShowItem(player, -2072273936, 5);//Bandage
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -1211166256, 200); // 5.56
+                    GiveAndShowItem(player, 1712070256, 200); // 5.56 мм ВС
                     break;
                 case "Болт":
-                    GiveAndShowItem(player, "rifle.bolt", 1, 10117);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.rifle", 100); // 5.56
-                    GiveAndShowItem(player, "ammo.rifle.hv", 100); // 5.56 мм ВС
+                    GiveAndShowItem(player, 1588298435, 1, 10117);
+                    GiveAndShowItem(player, -2072273936, 5);//Bandage
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -1211166256, 100); // 5.56
+                    GiveAndShowItem(player, 1712070256, 100); // 5.56 мм ВС
                     break;
                 case "LR-300":
-                    GiveAndShowItem(player, "rifle.lr300", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.rifle", 200); // 5.56
-                    GiveAndShowItem(player, "ammo.rifle.hv", 200); // 5.56 мм ВС
+                    GiveAndShowItem(player, -1812555177, 1);
+                    GiveAndShowItem(player, -2072273936, 5);//Bandage
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -1211166256, 200); // 5.56
+                    GiveAndShowItem(player, 1712070256, 200); // 5.56 мм ВС
                     break;
                 case "Берданка":
-                    GiveAndShowItem(player, "rifle.semiauto", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.rifle", 100); // 5.56
-                    GiveAndShowItem(player, "ammo.rifle.hv", 100); // 5.56 мм ВС
+                    GiveAndShowItem(player, -904863145, 1);
+                    GiveAndShowItem(player, -2072273936, 5);//Bandage
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -1211166256, 100); // 5.56
+                    GiveAndShowItem(player, 1712070256, 100); // 5.56 мм ВС
                     break;
                 case "Питон":
-                    GiveAndShowItem(player, "pistol.python", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.pistol", 100); // pistol bullet
-                    GiveAndShowItem(player, "ammo.pistol.hv", 100); // 9 мм ВС
+                    GiveAndShowItem(player, 1373971859, 1);
+                    GiveAndShowItem(player, -2072273936, 5);//Bandage
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, 785728077, 100); // pistol bullet
+                    GiveAndShowItem(player, -1691396643, 100); // 9 мм ВС
                     break;
                 case "П250":
-                    GiveAndShowItem(player, "pistol.semiauto", 1, 805925675);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.pistol", 100); // pistol bullet
-                    GiveAndShowItem(player, "ammo.pistol.hv", 100); // 9 мм ВС
+                    GiveAndShowItem(player, 818877484, 1, 805925675);
+                    GiveAndShowItem(player, -2072273936, 5);//Bandage
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, 785728077, 100); // pistol bullet
+                    GiveAndShowItem(player, -1691396643, 100); // 9 мм ВС
                     break;
                 case "M92":
-                    GiveAndShowItem(player, "pistol.m92", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.pistol", 100); // pistol bullet
-                    GiveAndShowItem(player, "ammo.pistol.hv", 100); // 9 мм ВС
+                    GiveAndShowItem(player, -852563019, 1);
+                    GiveAndShowItem(player, -2072273936, 5);//Bandage
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, 785728077, 100); // pistol bullet
+                    GiveAndShowItem(player, -1691396643, 100); // 9 мм ВС
                     break;
                 case "Револьвер":
-                    GiveAndShowItem(player, "pistol.revolver", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "ammo.pistol", 100); // 9 мм
-                    GiveAndShowItem(player, "ammo.pistol.hv", 100); // 9 мм ВС
+                    GiveAndShowItem(player, 649912614, 1);
+                    GiveAndShowItem(player, -2072273936, 5);//Bandage
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 785728077, 100); // 9 мм
+                    GiveAndShowItem(player, -1691396643, 100); // 9 мм ВС
                     break;
                 case "Лук":
-                    GiveAndShowItem(player, "bow.hunting", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "arrow.wooden", 600); // arrows
+                    GiveAndShowItem(player, 1443579727, 1);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, -1234735557, 600); // arrows
                     break;
                 case "Копьё":
-                    GiveAndShowItem(player, "spear.wooden", 1);
-                    GiveAndShowItem(player, "spear.wooden", 1);
-                    GiveAndShowItem(player, "spear.wooden", 1);
-                    GiveAndShowItem(player, "spear.wooden", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
+                    GiveAndShowItem(player, 1540934679, 1);
+                    GiveAndShowItem(player, 1540934679, 1);
+                    GiveAndShowItem(player, 1540934679, 1);
+                    GiveAndShowItem(player, 1540934679, 1);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
                     break;
                 case "Нож":
-                    GiveAndShowItem(player, "knife.bone", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
+                    GiveAndShowItem(player, 1814288539, 1);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
                     break;
                 case "Томпсон":
-                    GiveAndShowItem(player, "smg.thompson", 1, 561462394);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.pistol", 100); // pistol bullet
-                    GiveAndShowItem(player, "ammo.pistol.hv", 100); // 9 мм ВС
+                    GiveAndShowItem(player, -1758372725, 1, 561462394);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, 785728077, 100); // pistol bullet
+                    GiveAndShowItem(player, -1691396643, 100); // 9 мм ВС
                     break;
                 case "Смг":
-                    GiveAndShowItem(player, "smg.2", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.pistol", 100); // pistol bullet
-                    GiveAndShowItem(player, "ammo.pistol.hv", 100); // 9 мм ВС
+                    GiveAndShowItem(player, 1796682209, 1);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -785728077, 100); // pistol bullet
+                    GiveAndShowItem(player, -1691396643, 100); // 9 мм ВС
                     break;
                 case "Арбалет":
-                    GiveAndShowItem(player, "crossbow", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "arrow.wooden", 600); // arrows
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
+                    GiveAndShowItem(player, 1965232394, 1);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, -1234735557, 600); // arrows
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
                     break;
                 case "Дробовик":
-                    GiveAndShowItem(player, "shotgun.pump", 1, 731119713);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.shotgun", 100); // картечь
-                    GiveAndShowItem(player, "ammo.shotgun.slug", 100); // пулевой
+                    GiveAndShowItem(player, 795371088, 1, 731119713);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -1685290200, 100); // картечь
+                    GiveAndShowItem(player, -727717969, 100); // пулевой
                     break;
                 case "Пайп":
-                    GiveAndShowItem(player, "shotgun.waterpipe", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.shotgun", 100); // картечь
-                    GiveAndShowItem(player, "ammo.shotgun.slug", 100); // пулевой
+                    GiveAndShowItem(player, -1367281941, 1);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -1685290200, 100); // картечь
+                    GiveAndShowItem(player, -727717969, 100); // пулевой
                     break;
                 case "Двухстволка":
-                    GiveAndShowItem(player, "shotgun.double", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.shotgun", 100); // картечь
-                    GiveAndShowItem(player, "ammo.shotgun.slug", 100); // пулевой
+                    GiveAndShowItem(player, -765183617, 1);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -1685290200, 100); // картечь
+                    GiveAndShowItem(player, -727717969, 100); // пулевой
                     break;
                 case "ЕОКА":
-                    GiveAndShowItem(player, "pistol.eoka", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "ammo.handmade.shell", 100); // fuel
+                    GiveAndShowItem(player, -75944661, 1);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 588596902, 600); // fuel
                     break;
                 case "Камень":
-                    GiveAndShowItem(player, "rock", 1, 807372963);
+                    GiveAndShowItem(player, 963906841, 1, 807372963);
                     break;
                 case "MP5":
-                    GiveAndShowItem(player, "smg.mp5", 1, 800974015);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
-                    GiveAndShowItem(player, "weapon.mod.flashlight", 1); //фонарик 
-                    GiveAndShowItem(player, "weapon.mod.holosight", 1); //коллиматор
-                    GiveAndShowItem(player, "ammo.pistol", 100); // pistol bullet
+                    GiveAndShowItem(player, 1318558775, 1, 800974015);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
+                    GiveAndShowItem(player, 952603248, 1); //фонарик 
+                    GiveAndShowItem(player, -855748505, 1); //коллиматор
+                    GiveAndShowItem(player, -1691396643, 100); // pistol bullet
                     break;
                 case "Меч":
-                    GiveAndShowItem(player, "salvaged.sword", 1);
-                    GiveAndShowItem(player, "bandage", 5);
-                    GiveAndShowItem(player, "syringe.medical", 3);
+                    GiveAndShowItem(player, 1326180354, 1);
+                    GiveAndShowItem(player, -2072273936, 5);
+                    GiveAndShowItem(player, 1079279582, 3);//Medical Syringe
                     break;
             }
             dueller.haveweapon = true;
@@ -3077,8 +2870,8 @@ namespace Oxide.Plugins
 
         void SaveData()
         {
-            if (Tops != null) Interface.Oxide.DataFileSystem.WriteObject("DuelStavki", Tops);
-            if (db != null) Interface.Oxide.DataFileSystem.WriteObject("Duel", db);
+            Interface.Oxide.DataFileSystem.WriteObject("DuelStavki", Tops);
+            Interface.Oxide.DataFileSystem.WriteObject("Duel", db);
         }
 
         void OnServerSave()
@@ -3107,8 +2900,7 @@ namespace Oxide.Plugins
                 namewin[pl.Value.name] = pl.Value.wins;
                 namelosses[pl.Value.name] = pl.Value.losses;
             }
-            var reply = 0;
-            if (reply == 0) { }
+            var reply = 16;
             int i = 0;
             int j = 0;
             foreach (var pair in namewin.OrderByDescending(pair => pair.Value))
@@ -3203,104 +2995,103 @@ namespace Oxide.Plugins
 
                 if (i == 1)
                 {
-                    arena.player1pos = new Vector3(-2994.1f, 491.0f, 523.6f);
-                    arena.player2pos = new Vector3(-2973.1f, 491.0f, 494.6f);
+                    arena.player1pos = new Vector3(-2994.1f, 991.0f, 523.6f);
+                    arena.player2pos = new Vector3(-2973.1f, 991.0f, 494.6f);
 
-                    arena.teamblueSpawns.Add(new Vector3(-2988.8f, 491.0f, 531.6f));
-                    arena.teamblueSpawns.Add(new Vector3(-2993.2f, 491.0f, 523.9f));
-                    arena.teamblueSpawns.Add(new Vector3(-2994.6f, 491.0f, 522.8f));
-                    arena.teamblueSpawns.Add(new Vector3(-3001.8f, 491.0f, 519.2f));
-                    arena.teamblueSpawns.Add(new Vector3(-2996.0f, 491.0f, 526.5f));
+                    arena.teamblueSpawns.Add(new Vector3(-2988.8f, 991.0f, 531.6f));
+                    arena.teamblueSpawns.Add(new Vector3(-2993.2f, 991.0f, 523.9f));
+                    arena.teamblueSpawns.Add(new Vector3(-2994.6f, 991.0f, 522.8f));
+                    arena.teamblueSpawns.Add(new Vector3(-3001.8f, 991.0f, 519.2f));
+                    arena.teamblueSpawns.Add(new Vector3(-2996.0f, 991.0f, 526.5f));
 
-                    arena.teamredSpawns.Add(new Vector3(-2970.9f, 491.0f, 491.6f));
-                    arena.teamredSpawns.Add(new Vector3(-2973.7f, 491.0f, 494.1f));
-                    arena.teamredSpawns.Add(new Vector3(-2972.5f, 491.0f, 495.3f));
-                    arena.teamredSpawns.Add(new Vector3(-2978.6f, 491.0f, 489.9f));
-                    arena.teamredSpawns.Add(new Vector3(-2967.0f, 491.0f, 498.6f));
+                    arena.teamredSpawns.Add(new Vector3(-2970.9f, 991.0f, 491.6f));
+                    arena.teamredSpawns.Add(new Vector3(-2973.7f, 991.0f, 494.1f));
+                    arena.teamredSpawns.Add(new Vector3(-2972.5f, 991.0f, 495.3f));
+                    arena.teamredSpawns.Add(new Vector3(-2978.6f, 991.0f, 489.9f));
+                    arena.teamredSpawns.Add(new Vector3(-2967.0f, 991.0f, 498.6f));
                 }
                 if (i == 2)
                 {
-                    arena.player1pos = new Vector3(-2995.7f, 492.7f, 1005.0f);
-                    arena.player2pos = new Vector3(-2980.1f, 492.7f, 1000.6f);
+                    arena.player1pos = new Vector3(-2995.7f, 992.7f, 1005.0f);
+                    arena.player2pos = new Vector3(-2980.1f, 992.7f, 1000.6f);
                 }
                 if (i == 3)
                 {
-                    arena.player1pos = new Vector3(-3002.7f, 498.7f, 1508.7f);
-                    arena.player2pos = new Vector3(-2994.6f, 498.7f, 1493.6f);
+                    arena.player1pos = new Vector3(-3002.7f, 998.7f, 1508.7f);
+                    arena.player2pos = new Vector3(-2994.6f, 998.7f, 1493.6f);
                 }
                 if (i == 4)
                 {
-                    arena.player1pos = new Vector3(-3000.3f, 492.0f, 2011.3f);
-                    arena.player2pos = new Vector3(-2975.3f, 492.0f, 2001.9f);
+                    arena.player1pos = new Vector3(-3000.3f, 992.0f, 2011.3f);
+                    arena.player2pos = new Vector3(-2975.3f, 992.0f, 2001.9f);
                 }
                 if (i == 5)
                 {
-                    arena.player1pos = new Vector3(-2985.5f, 491.7f, 2514.1f);
-                    arena.player2pos = new Vector3(-2989.3f, 491.7f, 2496.8f);
+                    arena.player1pos = new Vector3(-2985.5f, 991.7f, 2514.1f);
+                    arena.player2pos = new Vector3(-2989.3f, 991.7f, 2496.8f);
                 }
                 if (i == 6)
                 {
                     x = -2500;
 
-                    arena.player1pos = new Vector3(-2515.1f, 500.0f, 18.7f);
-                    arena.player2pos = new Vector3(-2484.1f, 500.0f, -22.4f);
+                    arena.player1pos = new Vector3(-2515.1f, 1000.0f, 18.7f);
+                    arena.player2pos = new Vector3(-2484.1f, 1000.0f, -22.4f);
 
-                    arena.teamblueSpawns.Add(new Vector3(-2494.1f, 500.0f, -29.1f));
-                    arena.teamblueSpawns.Add(new Vector3(-2489.5f, 500.0f, -25.2f));
-                    arena.teamblueSpawns.Add(new Vector3(-2484.7f, 500.0f, -21.6f));
-                    arena.teamblueSpawns.Add(new Vector3(-2479.8f, 500.0f, -18.2f));
-                    arena.teamblueSpawns.Add(new Vector3(-2475.1f, 500.0f, -14.4f));
+                    arena.teamblueSpawns.Add(new Vector3(-2494.1f, 1000.0f, -29.1f));
+                    arena.teamblueSpawns.Add(new Vector3(-2489.5f, 1000.0f, -25.2f));
+                    arena.teamblueSpawns.Add(new Vector3(-2484.7f, 1000.0f, -21.6f));
+                    arena.teamblueSpawns.Add(new Vector3(-2479.8f, 1000.0f, -18.2f));
+                    arena.teamblueSpawns.Add(new Vector3(-2475.1f, 1000.0f, -14.4f));
 
-                    arena.teamredSpawns.Add(new Vector3(-2524.1f, 500.0f, 10.6f));
-                    arena.teamredSpawns.Add(new Vector3(-2519.3f, 500.0f, 14.2f));
-                    arena.teamredSpawns.Add(new Vector3(-2514.5f, 500.0f, 17.7f));
-                    arena.teamredSpawns.Add(new Vector3(-2509.7f, 500.0f, 21.4f));
-                    arena.teamredSpawns.Add(new Vector3(-2505.0f, 500.0f, 25.0f));
+                    arena.teamredSpawns.Add(new Vector3(-2524.1f, 1000.0f, 10.6f));
+                    arena.teamredSpawns.Add(new Vector3(-2519.3f, 1000.0f, 14.2f));
+                    arena.teamredSpawns.Add(new Vector3(-2514.5f, 1000.0f, 17.7f));
+                    arena.teamredSpawns.Add(new Vector3(-2509.7f, 1000.0f, 21.4f));
+                    arena.teamredSpawns.Add(new Vector3(-2505.0f, 1000.0f, 25.0f));
                     arenaList.Add(arena);
-                    arena.pos = new Vector3(x, 500, 0);
+                    arena.pos = new Vector3(x, 1000, 0);
 
-                    var preloadData1 = PreLoadData(data["entities"] as List<object>, new Vector3(x, 500, 0), 1, true, true);
-                    Paste(preloadData1, new Vector3(x, 500, 0), true);
-
+                    var preloadData1 = PreLoadData(data["entities"] as List<object>, new Vector3(x, 1000, 0), 1, true, true);
+                    Paste(preloadData1, new Vector3(x, 1000, 0), true);
                     continue;
                 }
                 if (i == 7)
                 {
                     x = -2500;
 
-                    arena.player1pos = new Vector3(-2500.6f, 500, 521.1f);
-                    arena.player2pos = new Vector3(-2488.4f, 500, 476.5f);
+                    arena.player1pos = new Vector3(-2500.6f, 1000.0f, 521.1f);
+                    arena.player2pos = new Vector3(-2488.4f, 1000.0f, 476.5f);
 
-                    arena.teamblueSpawns.Add(new Vector3(-2505.6f, 500, 470.6f));
-                    arena.teamblueSpawns.Add(new Vector3(-2503.2f, 500, 468.3f));
-                    arena.teamblueSpawns.Add(new Vector3(-2495.4f, 500, 473.7f));
-                    arena.teamblueSpawns.Add(new Vector3(-2483.8f, 500, 476.7f));
-                    arena.teamblueSpawns.Add(new Vector3(-2470.8f, 500, 480.3f));
-                    arena.teamblueSpawns.Add(new Vector3(-2471.4f, 500, 476.9f));
+                    arena.teamblueSpawns.Add(new Vector3(-2505.6f, 1000.0f, 470.6f));
+                    arena.teamblueSpawns.Add(new Vector3(-2503.2f, 1000.0f, 468.3f));
+                    arena.teamblueSpawns.Add(new Vector3(-2495.4f, 1000.0f, 473.7f));
+                    arena.teamblueSpawns.Add(new Vector3(-2483.8f, 1000.0f, 476.7f));
+                    arena.teamblueSpawns.Add(new Vector3(-2470.8f, 1000.0f, 480.3f));
+                    arena.teamblueSpawns.Add(new Vector3(-2471.4f, 1000.0f, 476.9f));
 
-                    arena.teamredSpawns.Add(new Vector3(-2483.6f, 500, 526.3f));
-                    arena.teamredSpawns.Add(new Vector3(-2485.6f, 500, 528.7f));
-                    arena.teamredSpawns.Add(new Vector3(-2494.3f, 500, 523.3f));
-                    arena.teamredSpawns.Add(new Vector3(-2506.7f, 500, 519.9f));
-                    arena.teamredSpawns.Add(new Vector3(-2518.2f, 500, 516.6f));
-                    arena.teamredSpawns.Add(new Vector3(-2517.6f, 500, 519.9f));
+                    arena.teamredSpawns.Add(new Vector3(-2483.6f, 1000.0f, 526.3f));
+                    arena.teamredSpawns.Add(new Vector3(-2485.6f, 1000.0f, 528.7f));
+                    arena.teamredSpawns.Add(new Vector3(-2494.3f, 1000.0f, 523.3f));
+                    arena.teamredSpawns.Add(new Vector3(-2506.7f, 1000.0f, 519.9f));
+                    arena.teamredSpawns.Add(new Vector3(-2518.2f, 1000.0f, 516.6f));
+                    arena.teamredSpawns.Add(new Vector3(-2517.6f, 1000.0f, 519.9f));
                     PrintWarning("Все спауны созданы");
                     arenaList.Add(arena);
-                    arena.pos = new Vector3(x, 500, 500);
+                    arena.pos = new Vector3(x, 1000, 500);
+
                     PrintWarning("Все арены созданы");
-                    var preloadData2 = PreLoadData(data["entities"] as List<object>, new Vector3(x, 500, 500), 1, true, true);
-                    Paste(preloadData2, new Vector3(x, 500, 500), true);
+                    var preloadData2 = PreLoadData(data["entities"] as List<object>, new Vector3(x, 1000, 500), 1, true, true);
+                    Paste(preloadData2, new Vector3(x, 1000, 500), true);
                     continue;
                 }
                 arenaList.Add(arena);
-                arena.pos = new Vector3(x, 500, i * 500);
+                arena.pos = new Vector3(x, 1000, i * 500);
 
-                var preloadData = PreLoadData(data["entities"] as List<object>, new Vector3(x, 500, i * 500), 1, true, true);
-                Paste(preloadData, new Vector3(x, 500, i * 500), true);
+                var preloadData = PreLoadData(data["entities"] as List<object>, new Vector3(x, 1000, i * 500), 1, true, true);
+                Paste(preloadData, new Vector3(x, 1000, i * 500), true);
             }
 
         }
-
         List<Dictionary<string, object>> PreLoadData(List<object> entities, Vector3 startPos, float RotationCorrection, bool deployables, bool inventories)
         {
             var eulerRotation = new Vector3(0f, RotationCorrection, 0f);
@@ -3337,6 +3128,25 @@ namespace Oxide.Plugins
                     var pos = (Vector3)data["position"];
                     var rot = (Quaternion)data["rotation"];
 
+                    //bool isplaced = false;
+                    //if (checkPlaced)
+                    //{
+                    //    foreach (var col in Physics.OverlapSphere(pos, 1f))
+                    //    {
+                    //        var ent = col.GetComponentInParent<BaseEntity>();
+                    //        if (ent != null)
+                    //        {
+                    //            if (ent.PrefabName == prefabname && ent.transform.position == pos && ent.transform.rotation == rot)
+                    //            {
+                    //                isplaced = true;
+                    //                break;
+                    //            }
+                    //        }
+                    //    }
+                    //}
+
+                    //if (isplaced) continue;
+
                     var entity = GameManager.server.CreateEntity(prefabname, pos, rot, true);
                     if (entity != null)
                     {
@@ -3357,9 +3167,7 @@ namespace Oxide.Plugins
                         }
                         entity.skinID = skinid;
                         entity.Spawn();
-                        buildingblock.CancelInvoke("DecayTick");
-                        buildingblock.decay = null;
-                        buildingblock.SendNetworkUpdateImmediate();
+
                         bool killed = false;
 
                         if (killed) continue;
@@ -3367,8 +3175,9 @@ namespace Oxide.Plugins
                         var basecombat = entity.GetComponentInParent<BaseCombatEntity>();
                         if (basecombat != null)
                         {
-                            basecombat.SetHealth(basecombat.MaxHealth());
+                            basecombat.ChangeHealth(basecombat.MaxHealth());
                         }
+
 
                         var box = entity.GetComponentInParent<StorageContainer>();
                         if (box != null)
@@ -3409,12 +3218,28 @@ namespace Oxide.Plugins
                                 }
                             };
                         }
+
+                        var sign = entity.GetComponentInParent<Signage>();
+                        if (sign != null)
+                        {
+                            var imageByte = FileStorage.server.Get(sign.textureID, FileStorage.Type.png, sign.net.ID);
+
+                            data.Add("sign", new Dictionary<string, object>
+                            {
+                                {"locked", sign.IsLocked() }
+                            });
+
+                            if (sign.textureID > 0 && imageByte != null)
+                                ((Dictionary<string, object>)data["sign"]).Add("texture", Convert.ToBase64String(imageByte));
+                        }
+
                         pastedEntities.Add(entity);
                         ArenaEntities.Add(entity);
                     }
                 }
                 catch (Exception e)
                 {
+                    // PrintError(string.Format("Trying to paste {0} send this error: {1}", data["prefabname"].ToString(), e.Message));
                 }
             }
             return pastedEntities;
@@ -3433,27 +3258,18 @@ namespace Oxide.Plugins
         public List<DuelStavki> Tops = new List<DuelStavki>();
         public class DuelStavki
         {
-            public DuelStavki(string SteamId, string Win, int item, int kolvo, bool weapon, int patron, string ammotype, int flamefuel)
+            public DuelStavki(string SteamId, string Win, int item, int kolvo)
             {
                 this.SteamId = SteamId;
                 this.Win = Win;
                 this.item = item;
                 this.kolvo = kolvo;
-                this.weapon = weapon;
-                this.patron = patron;
-                this.ammotype = ammotype;
-                this.flamefuel = flamefuel;
             }
 
             public string SteamId { get; set; }
             public string Win { get; set; }
             public int item { get; set; }
             public int kolvo { get; set; }
-            public bool weapon { get; set; }
-            public int patron { get; set; }
-            public string ammotype { get; set; }
-            public int flamefuel { get; set; }
-
         }
         #endregion
 
@@ -3467,7 +3283,7 @@ namespace Oxide.Plugins
         private float radiationMax;
 
         [PluginReference]
-        private Plugin Ignore, TruePVE;
+        private Plugin Ignore;
 
         private Dictionary<string, DateTime> tradeCooldowns = new Dictionary<string, DateTime>();
 
@@ -3647,27 +3463,17 @@ namespace Oxide.Plugins
                     string n1 = con.Win;
                     int n2 = con.item;
                     int n3 = con.kolvo;
-                    bool weapon = con.weapon;
-                    var item = ItemManager.CreateByItemID(n2, n3);
-                    FlameThrower flameThrower = item.GetHeldEntity()?.GetComponent<FlameThrower>();
-                    if (flameThrower)
-                        flameThrower.ammo = con.flamefuel;
-                    if (weapon)
-                    {
-                        BaseProjectile weapons = item.GetHeldEntity() as BaseProjectile;
-                        weapons.primaryMagazine.contents = con.patron;
-                        var def = ItemManager.FindItemDefinition(con.ammotype);
-                        weapons.primaryMagazine.ammoType = def;
-                    }
 
                     foreach (var player in BasePlayer.activePlayerList)
                     {
+
                         if (player.UserIDString.Equals(n1) && !player.IsDead() && !player.IsSleeping() && !player.IsWounded() && !IsDuelPlayer(player))
                         {
-                            player.inventory.GiveItem(item);
+                            player.inventory.GiveItem(ItemManager.CreateByItemID(n2, n3));
                             Tops.Remove(con);
                         }
                     }
+                    SaveData();
                 }
             });
 
@@ -3684,34 +3490,26 @@ namespace Oxide.Plugins
                         if (player.UserIDString.Equals(con.SteamId) && !player.IsDead() && !player.IsSleeping() && !player.IsWounded() && !IsDuelPlayer(player))
                         {
                             timer.Once(3f, delegate
-                            {
-                                if (player.UserIDString.Equals(con.SteamId) && !player.IsDead() && !player.IsSleeping() && !player.IsWounded() && !IsDuelPlayer(player))
-                                {
-                                    if (con == null) return;
-                                    bool weapon = con.weapon;
-                                    var item = ItemManager.CreateByItemID(con.item, con.kolvo);
-                                    FlameThrower flameThrower = item.GetHeldEntity()?.GetComponent<FlameThrower>();
-                                    if (flameThrower)
-                                        flameThrower.ammo = con.flamefuel;
-                                    if (weapon)
-                                    {
-                                        BaseProjectile weapons = item.GetHeldEntity() as BaseProjectile;
-                                        weapons.primaryMagazine.contents = con.patron;
-                                        var def = ItemManager.FindItemDefinition(con.ammotype);
-                                        weapons.primaryMagazine.ammoType = def;
-
-                                    }
-                                    player.inventory.GiveItem(item);
-                                    Tops.Remove(con);
-                                }
-                            });
+                           {
+                               if (player.UserIDString.Equals(con.SteamId) && !player.IsDead() && !player.IsSleeping() && !player.IsWounded() && !IsDuelPlayer(player))
+                               {
+                                   if (con == null) return;
+                                   player.inventory.GiveItem(ItemManager.CreateByItemID(con.item, con.kolvo));
+                                   Tops.Remove(con);
+                                   SaveData();
+                               }
+                           });
                         }
                     }
                 }
             });
             Tops = Interface.GetMod().DataFileSystem.ReadObject<List<DuelStavki>>("DuelStavki");
+            buildingPrivlidges = typeof(BasePlayer).GetField("buildingPrivilege", (BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.NonPublic));
             db = Interface.GetMod().DataFileSystem.ReadObject<StoredData>("Duel");
+
+
             LoadMessages();
+
             CheckConfig();
             box = GetConfig("Settings", "box", "assets/prefabs/deployable/woodenbox/woodbox_deployed.prefab");
             slots = GetConfig("Settings", "slots", 1);
@@ -3828,7 +3626,7 @@ namespace Oxide.Plugins
             return null;
         }
 
-        void OnPlayerConnected(BasePlayer player)
+        void OnPlayerInit(BasePlayer player)
         {
             onlinePlayers[player].View = null;
             onlinePlayers[player].Trade = null;
@@ -3944,7 +3742,6 @@ namespace Oxide.Plugins
                 player.ChatMessage("Вы уже находитесь на дуэли.");
                 return;
             }
-            if (IsRaidBlock(player)) return;
             if (player.metabolism.radiation_poison.value > 5)
             {
                 SendReply(player, "У Вас облучение радиацией. Duel запрещена");
@@ -3954,26 +3751,6 @@ namespace Oxide.Plugins
             {
                 if (args[0] == "a")
                 {
-                    if (pendingTrades.ContainsKey(player))
-                    {
-                        SendReply(player, GetMsg("Status: Pending", player));
-                        return;
-                    }
-                    BasePlayer source = null;
-
-                    foreach (KeyValuePair<BasePlayer, PendingTrade> kvp in pendingTrades)
-                    {
-                        if (kvp.Value.Target == player)
-                        {
-                            source = kvp.Key;
-                            break;
-                        }
-                    }
-                    if (IsDuelPlayer(source))
-                    {
-                        player.ChatMessage("Ваш противник уже находиться на Duel.");
-                        return;
-                    }
                     AcceptTrade(player);
                     return;
                 }
@@ -4434,6 +4211,7 @@ namespace Oxide.Plugins
                     break;
                 }
             }
+
             if (source != null && pendingTrade != null)
             {
                 pendingTrade.Destroy();
@@ -4500,7 +4278,7 @@ namespace Oxide.Plugins
                 ItemContainer container = new ItemContainer();
                 container.playerOwner = player;
                 container.ServerInitialize((Item)null, slots);
-                if ((int)container.uid.Value == 0)
+                if ((int)container.uid == 0)
                     container.GiveUID();
 
                 view.enableSaving = false;
@@ -4550,30 +4328,27 @@ namespace Oxide.Plugins
                 {
                     if (item.position != -1)
                     {
-                        BaseProjectile weapon = item.GetHeldEntity() as BaseProjectile;
-                        if (weapon != null)
-                        {
-                            Tops.Add(new DuelStavki(player.UserIDString, "", item.info.itemid, item.amount, true, weapon.primaryMagazine != null ? weapon.primaryMagazine.contents : 0, weapon.primaryMagazine != null ? weapon.primaryMagazine.ammoType.shortname : "", 0));
-                        }
-                        else
-                        {
-                            //FlameThrower flameThrower = item.GetHeldEntity()?.GetComponent<FlameThrower>();
-                            //if (flameThrower != null)
-                            //    iItem.flamefuel = flameThrower.ammo;
-                            FlameThrower flameThrower = item.GetHeldEntity()?.GetComponent<FlameThrower>();
-                            Tops.Add(new DuelStavki(player.UserIDString, "", item.info.itemid, item.amount, false, 0, "", flameThrower != null ? flameThrower.ammo : 0));
-                        }
-
+                        Tops.Add(new DuelStavki(player.UserIDString, "", item.info.itemid, item.amount));
                         //item.MoveToContainer(player.inventory.containerMain);
+                        SaveData();
                     }
                 }
             }
-            player.EndLooting();
+            if (player.inventory.loot.entitySource != null)
+            {
+                player.inventory.loot.Invoke("SendUpdate", 0.1f);
+                view.SendMessage("PlayerStoppedLooting", player, SendMessageOptions.DontRequireReceiver);
+                player.SendConsoleCommand("inventory.endloot", null);
+            }
+
             player.inventory.loot.entitySource = null;
             player.inventory.loot.itemSource = null;
             player.inventory.loot.containers = new List<ItemContainer>();
+
             view.inventory = new ItemContainer();
+
             onlinePlayer.Clear();
+
             view.Kill(BaseNetworkable.DestroyMode.None);
 
             if (onlinePlayers.Values.Count(p => p.View != null) <= 0)
@@ -4744,3 +4519,4 @@ namespace Oxide.Plugins
         #endregion
     }
 }
+                

@@ -71,7 +71,7 @@ namespace Oxide.Plugins
 
         private const string permBoost = "metabolism.boost";
         private const string permNone = "metabolism.none";
-        private const string permSpawn = "metabolism.active";
+        private const string permSpawn = "metabolism.spawn";
 
         private void Init()
         {
