@@ -11,7 +11,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info(FF, "Nogrod", "2.0.3", ResourceId = 687)]
+    [Info(FF, "Nogrod", "2.0.1", ResourceId = 687)]
     public class FriendlyFire : RustPlugin
     {
         private const string FF = "FriendlyFire";
@@ -67,18 +67,18 @@ namespace Oxide.Plugins
         {
             lang.RegisterMessages(new Dictionary<string, string>
             {
-                {"CannotHurt", "<color=\"#ffd479\">{0}</color> является вашим другом, вы не можите нанести ему урон. Чтобы отключить, введите: <color=\"#ffd479\">/ff on</color>"},
-                {"Usage", "Введи: <color=\"#ffd479\">/ff [on|off]</color>"},
-                {"FFFriends", "Дружественный огонь: <color=\"#ffd479\">{0}</color>"},
-                {"FFNotAvailable", "Плагин не доступен."},
-                {"FFEnabled", "<color=red>включен</color>"},
-                {"FFDisabled", "<color=green>выключен</color>"},
-                {"NoFriends", "У вас нет друзей."},
-                {"FFToggle", "Чтобы включить или отключить дружественный огонь, введите: <color=\"#ffd479\">/ff on|off</color>"},
-                {"FFAlready", "Дружественный огонь для ваших друзей уже <color=\"#ffd479\">{0}</color>."},
-                {"FFChanged", "У вас <color=\"#ffd479\">{0}</color> дружественный огонь для ваших друзей."},
-                {"FFHelp1", "<color=\"#ffd479\">/ff</color> - Просмотр статуса  дружественного огня"},
-                {"FFHelp2", "<color=\"#ffd479\">/ff on</color> - Переключает дружественный огонь <color=red>on</color> или <color=green>off</color>"}
+                {"CannotHurt", "{0} is your friend and cannot be hurt. To disable, type: <color=\"#33cccc\">/ff on</color>"},
+                {"Usage", "Usage: <color=\"#33cccc\">/ff [on|off]</color>"},
+                {"FFFriends", "Friendly fire is {0} for your friends:"},
+                {"FFNotAvailable", "Friendly fire is not available."},
+                {"FFEnabled", "<color=red>enabled</color>"},
+                {"FFDisabled", "<color=green>disabled</color>"},
+                {"NoFriends", "You do not have any friends."},
+                {"FFToggle", "To toggle friendly fire on or off, type: <color=\"#33cccc\">/ff on|off</color>"},
+                {"FFAlready", "Friendly fire for your friends is already {0}."},
+                {"FFChanged", "You have {0} friendly fire for your friends."},
+                {"FFHelp1", "<color=\"#33cccc\">/ff</color> - Displays your friendly fire status"},
+                {"FFHelp2", "<color=\"#33cccc\">/ff on|off</color> - Toggles friendly fire <color=red>on</color> or <color=green>off</color>"}
             }, this);
             configData = Config.ReadObject<ConfigData>();
             try
@@ -136,7 +136,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("ff.toggle")]
         private void ccmdFFToggle(ConsoleSystem.Arg arg)
         {
-            if (arg.Connection != null && (arg.Player() == null || !arg.Player().IsAdmin)) return;
+            if (arg.connection != null && (arg.Player() == null || !arg.Player().IsAdmin())) return;
             configData.FriendlyFire = !configData.FriendlyFire;
             Config.WriteObject(configData, true);
         }

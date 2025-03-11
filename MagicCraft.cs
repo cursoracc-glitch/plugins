@@ -1,16 +1,13 @@
-﻿// Reference: Rust.Workshop
+// Reference: Rust.Workshop
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Rust;
 using Oxide.Core;
 using Oxide.Core.Plugins;
-using System.Reflection;
-using Newtonsoft.Json;
-
 namespace Oxide.Plugins
 {
-    [Info("MagicCraft", "Norn", "0.3.0", ResourceId = 1347)]
+    [Info("MagicCraft", "Norn", "0.2.7", ResourceId = 1347)]
     [Description("An alternative crafting system.")]
     public class MagicCraft : RustPlugin
     {
@@ -61,19 +58,33 @@ namespace Oxide.Plugins
         {
             storedData = Interface.GetMod().DataFileSystem.ReadObject<StoredData>(this.Title);
             ConfigurationCheck();
-            webrequest.EnqueueGet("http://s3.amazonaws.com/s3.playrust.com/icons/inventory/rust/schema.json", PullWorkshopIDS, this);
+            int config_protocol = Convert.ToInt32(Config["Internal", "Protocol"]);
             if (Config["Messages", "ItemFailed"] == null) { Puts("Updating configuration..."); LoadDefaultConfig(); }
-            GenerateItems();
+            if (Config["Internal", "Protocol"] == null) { Config["Internal", "Protocol"] = Protocol.network; }
+            else if (Convert.ToInt32(Config["Internal", "Protocol"]) != Protocol.network && !Convert.ToBoolean(Config["Settings", "IgnoreProtocolChanges"]))
+            {
+                Config["Internal", "Protocol"] = Protocol.network;
+                Puts("Updating item list from protocol " + config_protocol.ToString() + " to protocol " + Config["Internal", "Protocol"].ToString() + ".");
+                GenerateItems(true);
+                SaveConfig();
+            }
+            else
+            {
+                GenerateItems(false);
+            }
         }
         protected override void LoadDefaultConfig()
         {
             Puts("Generating Magic Craft configuration...");
             Config.Clear();
+            // --- [ INTERNAL CONFIG ] ---
+            Config["Internal", "Protocol"] = Protocol.network;
             // --- [ SETTINGS ] ---
+            Config["Settings", "IgnoreProtocolChanges"] = false;
             Config["Settings", "BypassInvFull"] = true;
             // --- [ COOLDOWN ] ---
             Config["Cooldown", "Enabled"] = true;
-            Config["Cooldown", "Timer"] = 4;
+            Config["Cooldown", "Timer"] = 6;
             Config["Cooldown", "Trigger"] = 499;
             // --- [ Dependencies ] ---
             Config["Dependencies", "PopupNotifications"] = false;
@@ -81,12 +92,18 @@ namespace Oxide.Plugins
             Config["Messages", "Enabled"] = true;
             Config["Messages", "ItemCrafted"] = false;
             Config["Messages", "ItemFailed"] = true;
-            timer.Once(10, () => GenerateItems());
+            timer.Once(10, () => GenerateItems(true));
             SaveConfig();
         }
 
-        void GenerateItems()
+        void GenerateItems(bool reset = false)
         {
+            if (reset)
+            {
+                Interface.GetMod().DataFileSystem.WriteObject(this.Title + ".old", storedData);
+                storedData.CraftList.Clear();
+                Puts("Generating new item list...");
+            }
             mcITEMS = ItemManager.itemList.ToDictionary(i => i.shortname);
             int loaded = 0, enabled = 0;
             foreach (var definition in mcITEMS)
@@ -189,12 +206,12 @@ namespace Oxide.Plugins
                         ItemDefinition item = GetItem(itemname);
                         int final_amount = task.blueprint.amountToCreate * amount;
                         var results = CalculateStacks(final_amount, item);
-                        if (results.Count() > 1)
-                        {
-                            if (Convert.ToBoolean(Config["Settings", "BypassInvFull"]) && InventorySlots(crafter, false, true) + results.Count() >= MAX_INV_SLOTS) { if (Convert.ToBoolean(Config["Messages", "Enabled"]) && Convert.ToBoolean(Config["Messages", "ItemFailed"])) { PrintToChatEx(crafter, Lang("InventoryFullBypassStack", crafter.UserIDString, results.Count(), final_amount.ToString(), item.displayName.english)); } return null; }
-                            foreach (var stack_amount in results) { SAFEGiveItem(crafter, item.itemid, (ulong)task.skinID, (int)stack_amount); }
-                        }
-                        else { SAFEGiveItem(crafter, item.itemid, (ulong)task.skinID, final_amount); }
+                            if (results.Count() > 1)
+                            {
+                                if (Convert.ToBoolean(Config["Settings", "BypassInvFull"]) && InventorySlots(crafter, false, true) + results.Count() >= MAX_INV_SLOTS) { if (Convert.ToBoolean(Config["Messages", "Enabled"]) && Convert.ToBoolean(Config["Messages", "ItemFailed"])) { PrintToChatEx(crafter, Lang("InventoryFullBypassStack", crafter.UserIDString, results.Count(), final_amount.ToString(), item.displayName.english)); } return null; }
+                                foreach (var stack_amount in results) { SAFEGiveItem(crafter, item.itemid, (ulong)task.skinID, (int)stack_amount); }
+                            }
+                            else { SAFEGiveItem(crafter, item.itemid, (ulong)task.skinID, final_amount); }
                         if (Convert.ToBoolean(Config["Messages", "Enabled"]) && Convert.ToBoolean(Config["Messages", "ItemCrafted"]))
                         {
                             string returnstring = null;
@@ -216,32 +233,11 @@ namespace Oxide.Plugins
         private bool SAFEGiveItem(BasePlayer player, int itemid, ulong skinid, int amount)
         {
             Item i;
-            if (!player.IsConnected) return false;
-            if (skinid != 0 && SkinFromInventoryID.ContainsKey(skinid) && SkinFromInventoryID[skinid] != 0) { i = ItemManager.CreateByItemID(itemid, amount, SkinFromInventoryID[skinid]); }
+            if (!player.isConnected) return false;
+            if (Rust.Workshop.Approved.FindByInventoryId(skinid) != null) { i = ItemManager.CreateByItemID(itemid, amount, Rust.Workshop.Approved.FindByInventoryId(skinid).WorkshopdId); }
             else { i = ItemManager.CreateByItemID(itemid, amount, skinid); }
             if (i != null) if (!i.MoveToContainer(player.inventory.containerMain) && !i.MoveToContainer(player.inventory.containerBelt)) { i.Drop(player.eyes.position, player.eyes.BodyForward() * 2f); }
             return true;
-        }
-        Dictionary<ulong, ulong> SkinFromInventoryID = new Dictionary<ulong, ulong>();
-        private void PullWorkshopIDS(int code, string response)
-        {
-            if (response != null && code == 200)
-            {
-                SkinFromInventoryID.Clear();
-                ulong wsdl;
-                var schema = JsonConvert.DeserializeObject<Rust.Workshop.ItemSchema>(response);
-                foreach (var item in schema.items)
-                {
-                    if (string.IsNullOrEmpty(item.itemshortname)) continue;
-                    if (item.workshopdownload == null) { wsdl = 0; } else { wsdl = Convert.ToUInt64(item.workshopdownload); }
-                    SkinFromInventoryID.Add(item.itemdefid, wsdl);
-                }
-                Puts($"Pulled {SkinFromInventoryID.Count} skins.");
-            }
-            else
-            {
-                PrintWarning($"Failed to pull skins... Error {code}");
-            }
         }
         private void PrintToChatEx(BasePlayer player, string result, string tcolour = "#66FF66")
         {

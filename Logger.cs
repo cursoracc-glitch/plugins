@@ -1,345 +1,172 @@
-﻿using Newtonsoft.Json;
-using Oxide.Core;
-using Oxide.Core.Libraries.Covalence;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Net;
-
-// TODO: Finish implementing ItemList and ItemListType config settings
-// TODO: Finish implementing RotateLog config option
-// TODO: Fix RCON clients screwing up with log output from select commands
-/*
-    playerlist
-    status
-    banlist
-    banlistex
-    bans
-    server.fps
-    server.hostname
-    server.description
-    serverinfo
-    plugins
-*/
+using System.Text.RegularExpressions;
 
 namespace Oxide.Plugins
 {
-    [Info("Logger", "Wulf/lukespragg", "2.2.1")]
-    [Description("Configurable logging of chat, commands, connections, and more")]
-    public class Logger : CovalencePlugin
+    [Info("Logger", "Wulf/lukespragg", "1.2.0", ResourceId = 670)]
+    [Description("Configurable logging of chat, commands, and more")]
+
+    class Logger : RustPlugin
     {
-        #region Configuration
+        #region Initialization
 
-        private Configuration config;
-
-        public class Configuration
-        {
-            [JsonProperty(PropertyName = "Log chat messages (true/false)")]
-            public bool LogChat { get; set; } = true;
-
-            [JsonProperty(PropertyName = "Log command usage (true/false)")]
-            public bool LogCommands { get; set; } = true;
-
-            [JsonProperty(PropertyName = "Log player connections (true/false)")]
-            public bool LogConnections { get; set; } = true;
-
-            [JsonProperty(PropertyName = "Log player disconnections (true/false)")]
-            public bool LogDisconnections { get; set; } = true;
-
-            [JsonProperty(PropertyName = "Log player respawns (true/false)")]
-            public bool LogRespawns { get; set; } = true;
-
-#if RUST
-
-            [JsonProperty(PropertyName = "Log when crafting started (true/false)")]
-            public bool LogCraftingStarted { get; set; } = true;
-
-            [JsonProperty(PropertyName = "Log when crafting cancelled (true/false)")]
-            public bool LogCraftingCancelled { get; set; } = true;
-
-            [JsonProperty(PropertyName = "Log when crafting finished (true/false)")]
-            public bool LogCraftingFinished { get; set; } = true;
-
-            [JsonProperty(PropertyName = "Log items dropped by players (true/false)")]
-            public bool LogItemDrops { get; set; } = true;
-
-#endif
-
-            [JsonProperty(PropertyName = "Log output to console (true/false)")]
-            public bool LogToConsole { get; set; } = false;
-
-            // TODO: Option to listen to commands from admin, moderator, or all
-
-            [JsonProperty(PropertyName = "Rotate logs daily (true/false)")]
-            public bool RotateLogs { get; set; } = true;
-
-            [JsonProperty(PropertyName = "Command list (full or short commands)")]
-            public List<string> CommandList { get; set; } = new List<string>
-            {
-                /*"help", "version", "chat.say", "craft.add", "craft.canceltask", "global.kill",
-                "global.respawn", "global.respawn_sleepingbag", "global.status", "global.wakeup",
-                "inventory.endloot", "inventory.unlockblueprint"*/
-            };
-
-            [JsonProperty(PropertyName = "Command list type (blacklist or whitelist)")]
-            public string CommandListType { get; set; } = "blacklist";
-
-            //[JsonProperty(PropertyName = "Item list (full or short names)")]
-            //public List<string> ItemList { get; set; } = new List<string>
-            //{
-            //    /*"rock", "torch"*/
-            //};
-
-            //[JsonProperty(PropertyName = "Item list type (blacklist or whitelist)")]
-            //public string ItemListType { get; set; } = "blacklist";
-        }
-
-        protected override void LoadConfig()
-        {
-            base.LoadConfig();
-            try
-            {
-                config = Config.ReadObject<Configuration>();
-                if (config == null)
-                {
-                    LoadDefaultConfig();
-                }
-            }
-            catch
-            {
-                LoadDefaultConfig();
-            }
-            SaveConfig();
-        }
+        List<object> exclusions;
+        bool logChat;
+        bool logCommands;
+        bool logConnections;
+        bool logRespawns;
+        bool logToConsole;
 
         protected override void LoadDefaultConfig()
         {
-            string configPath = $"{Interface.Oxide.ConfigDirectory}{Path.DirectorySeparatorChar}{Name}.json";
-            LogWarning($"Could not load a valid configuration file, creating a new configuration file at {configPath}");
-            config = new Configuration();
+            Config["Exclusions"] = exclusions = GetConfig("Exclusions", new List<object>
+            {
+                "/help", "/version", "chat.say", "craft.add", "craft.canceltask", "global.kill", "global.respawn",
+                "global.respawn_sleepingbag", "global.status", "global.wakeup", "inventory.endloot", "inventory.unlockblueprint"
+            });
+            Config["LogChat"] = logChat = GetConfig("LogChat", false);
+            Config["LogCommands"] = logCommands = GetConfig("LogCommands", true);
+            Config["LogConnections"] = logConnections = GetConfig("LogConnections", true);
+            Config["LogRespawns"] = logRespawns = GetConfig("LogRespawns", false);
+            Config["LogToConsole"] = logToConsole = GetConfig("LogToConsole", true);
+            SaveConfig();
         }
 
-        protected override void SaveConfig() => Config.WriteObject(config);
+        void Init()
+        {
+            #if !RUST
+            throw new NotSupportedException("This plugin does not support this game");
+            #endif
 
-        #endregion Configuration
+            LoadDefaultConfig();
+            LoadDefaultMessages();
+
+            if (!logChat) Unsubscribe("OnPlayerChat");
+            if (!logCommands) Unsubscribe("OnServerCommand");
+            if (!logConnections) Unsubscribe("OnPlayerInit");
+            if (!logRespawns) Unsubscribe("OnPlayerRespawned");
+        }
+
+        #endregion
 
         #region Localization
 
-        private new void LoadDefaultMessages()
+        void LoadDefaultMessages()
         {
             // English
             lang.RegisterMessages(new Dictionary<string, string>
             {
-                ["CommandReason"] = "reason",
-                ["CraftingCancelled"] = "{0} ({1}) cancelled crafting {2} {3}",
-                ["CraftingFinished"] = "{0} ({1}) finished crafting {2} {3}",
-                ["CraftingStarted"] = "{0} ({1}) started crafting {2} {3}",
-                ["ItemDropped"] = "{0} ({1}) dropped {2} {3}",
-                ["NotAllowed"] = "You are not allowed to use the '{0}' command",
-                ["PlayerCommand"] = "{0} ({1}) ran command: {2} {3}",
-                ["PlayerConnected"] = "{0} ({1}) connected from {2}",
-                ["PlayerDisconnected"] = "{0} ({1}) disconnected",
-                ["PlayerMessage"] = "{0} ({1}) said: {2}",
-                ["PlayerRespawned"] = "{0} ({1}) respawned at {2}",
-                ["RconCommand"] = "{0} ran command: {1} {2}",
-                ["ServerCommand"] = "SERVER ran command: {0} {1}"
+                ["ChatCommand"] = "{0} ({1}) ran chat command: {2}",
+                ["Connected"] = "{0} ({1}) connected from {2}",
+                ["ConsoleCommand"] = "{0} ({1}) ran console command: {2} {3}",
+                ["Disconnected"] = "{0} ({1}) disconnected",
+                ["Respawned"] = "{0} ({1}) respawned at {2}"
             }, this);
+
+            // French
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["ChatCommand"] = "{0} ({1}) a couru chat commandeÂ : {2}",
+                ["Connected"] = "{0} ({1}) reliant {2}",
+                ["ConsoleCommand"] = "{0} ({1}) a couru la console de commandeÂ : {3} {2}",
+                ["Disconnected"] = "{0} ({1}) dÃ©connectÃ©",
+                ["Respawned"] = "{0} ({1}) rÃ©apparaÃ®tre Ã  {2}"
+            }, this, "fr");
+
+            // German
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["ChatCommand"] = "{0} ({1}) lief Chat-Befehl: {2}",
+                ["Connected"] = "{0} ({1}) {2} verbunden",
+                ["ConsoleCommand"] = "{0} ({1}) lief Konsole Befehl: {2} {3}",
+                ["Disconnected"] = "{0} ({1}) nicht getrennt",
+                ["Respawned"] = "{0} ({1}) bereits am {2}"
+            }, this, "de");
+
+            // Russian
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["ChatCommand"] = "{0} ({1}) Ð¿Ð¾Ð±ÐµÐ¶Ð°Ð» ÑÐ°Ñ ÐºÐ¾Ð¼Ð°Ð½Ð´Ñ: {2}",
+                ["Connected"] = "{0} ({1}) Ð¸Ð· {2}",
+                ["ConsoleCommand"] = "{0} ({1}) Ð¿Ð¾Ð±ÐµÐ¶Ð°Ð» ÐºÐ¾Ð¼Ð°Ð½Ð´Ð° ÐºÐ¾Ð½ÑÐ¾Ð»Ð¸: {2} {3}",
+                ["Disconnected"] = "{0} ({1}) Ð¾ÑÐºÐ»ÑÑÐµÐ½",
+                ["Respawned"] = "{0} ({1}) Ð²Ð¾Ð·ÑÐ¾Ð´Ð¸ÑÑÑ Ð² {2}"
+            }, this, "ru");
+
+            // Spanish
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["ChatCommand"] = "{0} ({1}) funcionÃ³ el comando chat: {2}",
+                ["Connected"] = "{0} ({1}) conectado de {2}",
+                ["ConsoleCommand"] = "{0} ({1}) funcionÃ³ el comando de consola: {2} {3}",
+                ["Disconnected"] = "{0} ({1}) desconectado",
+                ["Respawned"] = "{0} ({1}) hizo en {2}"
+            }, this, "es");
         }
 
-        #endregion Localization
-
-        #region Initialization
-
-        private const string commandReason = "loggerreason";
-        private const string permReason = "logger.reason";
-
-        private void Init()
-        {
-            permission.RegisterPermission(permReason, this);
-
-            AddCovalenceCommand(commandReason, "ReasonCommand");
-            AddLocalizedCommand("CommandReason", "ReasonCommand");
-
-            if (!config.LogChat) Unsubscribe("OnUserChat");
-            if (!config.LogCommands) Unsubscribe("OnServerCommand");
-            if (!config.LogConnections) Unsubscribe("OnUserConnected");
-            if (!config.LogDisconnections) Unsubscribe("OnUserDisconnected");
-            if (!config.LogRespawns) Unsubscribe("OnUserRespawned");
-#if RUST
-            if (!config.LogCraftingStarted) Unsubscribe("OnItemCraft");
-            if (!config.LogCraftingCancelled) Unsubscribe("OnItemCraftCancelled");
-            if (!config.LogCraftingFinished) Unsubscribe("OnItemCraftFinished");
-            if (!config.LogItemDrops) Unsubscribe("OnItemAction");
-#endif
-        }
-
-        #endregion Initialization
+        #endregion
 
         #region Logging
 
-        private void OnUserChat(IPlayer player, string message) => Log("chat", "PlayerMessage", player.Name, player.Id, message);
-
-        private void OnUserConnected(IPlayer player) => Log("connections", "PlayerConnected", player.Name, player.Id, player.Address);
-
-        private void OnUserDisconnected(IPlayer player) => Log("disconnections", "PlayerDisconnected", player.Name, player.Id);
-
-        private void OnUserRespawned(IPlayer player) => Log("respawns", "PlayerRespawned", player.Name, player.Id, player.Position().ToString());
-
-#if RUST
-        private void OnItemAction(Item item, string action)
+        void OnPlayerChat(ConsoleSystem.Arg arg)
         {
-            BasePlayer player = item.parent?.playerOwner;
+            var player = arg.connection.player as BasePlayer;
+            if (!logChat || player == null) return;
 
-            if (action.ToLower() == "drop" && player != null)
-            {
-                Log("itemdrops", "ItemDropped", player.displayName.Sanitize(), player.UserIDString, item.amount, item.info.displayName?.english ?? item.name);
-            }
+            var args = arg.GetString(0, "text");
+            Log("chat", $"{player.displayName} ({player.userID}): {args}");
         }
 
-        private void OnItemCraft(ItemCraftTask task)
+        void OnPlayerConnected(Network.Message packet)
         {
-            BasePlayer player = task.owner;
-            ItemDefinition item = task.blueprint.targetItem;
-            Log("crafting", "CraftingStarted", player.displayName.Sanitize(), player.UserIDString, task.amount, item.displayName.english);
+            if (!logConnections) return;
+            var con = packet.connection;
+            Log("connections", Lang("Connected", null, con.username, con.userid, IpAddress(con.ipaddress)));
         }
 
-        private void OnItemCraftCancelled(ItemCraftTask task)
+        void OnPlayerDisconnected(BasePlayer player)
         {
-            BasePlayer player = task.owner;
-            ItemDefinition item = task.blueprint.targetItem;
-            Log("crafting", "CraftingCancelled", player.displayName.Sanitize(), player.UserIDString, task.amount, item.displayName.english);
+            if (!logConnections) return;
+            Log("connections", Lang("Disconnected", null, player.displayName, player.UserIDString));
         }
 
-        private void OnItemCraftFinished(ItemCraftTask task, Item item)
+        void OnPlayerRespawned(BasePlayer player)
         {
-            BasePlayer player = task.owner;
-            Log("crafting", "CraftingFinished", player.displayName.Sanitize(), player.UserIDString, item.amount, item.info.displayName.english);
+            if (!logRespawns) return;
+            Log("respawns", Lang("Respawned", null, player.displayName, player.userID, player.transform.position));
         }
 
-        private void OnRconCommand(IPEndPoint ip, string command, string[] args)
+        void OnServerCommand(ConsoleSystem.Arg arg)
         {
-            if (command == "chat.say" || command == "say")
-            {
-                return;
-            }
+            if (!logCommands || arg.connection == null) return;
 
-            if (config.CommandListType.ToLower() == "blacklist" && config.CommandList.Contains(command) || config.CommandList.Contains(command))
-            {
-                return;
-            }
+            var command = arg.cmd.namefull;
+            var args = arg.GetString(0);
 
-            if (config.CommandListType.ToLower() == "whitelist" && !config.CommandList.Contains(command) && !config.CommandList.Contains(command))
-            {
-                return;
-            }
-
-            Log("commands", "RconCommand", ip.Address, command, string.Join(" ", args));
+            if (args.StartsWith("/") && !exclusions.Contains(args))
+                Log("commands", Lang("ChatCommand", null, arg.connection.username, arg.connection.userid, args));
+            if (command != "chat.say" && !exclusions.Contains(command))
+                Log("commands", Lang("ConsoleCommand", null, arg.connection.username, arg.connection.userid, command, arg.ArgsStr));
         }
 
-        private void OnServerCommand(ConsoleSystem.Arg arg)
-        {
-            string command = arg.cmd.Name;
-            string fullCommand = arg.cmd.FullName;
-
-            if (fullCommand == "chat.say")
-            {
-                return;
-            }
-
-            if (config.CommandListType.ToLower() == "blacklist" && config.CommandList.Contains(command) || config.CommandList.Contains(fullCommand))
-            {
-                return;
-            }
-
-            if (config.CommandListType.ToLower() == "whitelist" && !config.CommandList.Contains(command) && !config.CommandList.Contains(fullCommand))
-            {
-                return;
-            }
-
-            if (arg.Connection != null)
-            {
-                Log("commands", "PlayerCommand", arg.Connection.username.Sanitize(), arg.Connection.userid, fullCommand, arg.FullString);
-            }
-            else
-            {
-                Log("commands", "ServerCommand", fullCommand, arg.FullString);
-            }
-        }
-#endif
-
-        private void OnUserCommand(IPlayer player, string command, string[] args)
-        {
-            if (config.CommandListType.ToLower() == "blacklist" && config.CommandList.Contains(command) || config.CommandList.Contains("/" + command))
-            {
-                return;
-            }
-
-            if (config.CommandListType.ToLower() == "whitelist" && !config.CommandList.Contains(command) && !config.CommandList.Contains("/" + command))
-            {
-                return;
-            }
-
-            Log("commands", "PlayerCommand", player.Name, player.Id, command, string.Join(" ", args));
-        }
-
-        // TODO: Add command logged message in player's console/chat?
-        // TODO: Prompt for reason within X seconds when command is used?
-
-        #endregion Logging
-
-        #region Command
-
-        private void ReasonCommand(IPlayer player, string command, string[] args)
-        {
-            if (!player.HasPermission(permReason))
-            {
-                Message(player, "NotAllowed", command);
-                return;
-            }
-
-            Log("reasons", "Reason");
-            Message(player, "ReasonLogged", string.Join(" ", args));
-        }
-
-        #endregion Command
+        #endregion
 
         #region Helpers
 
-        private string Lang(string key, string id = null, params object[] args)
+        T GetConfig<T>(string name, T value) => Config[name] == null ? value : (T)Convert.ChangeType(Config[name], typeof(T));
+
+        string Lang(string key, string id = null, params object[] args) => string.Format(lang.GetMessage(key, this, id), args);
+
+        static string IpAddress(string ip) => Regex.Replace(ip, @":{1}[0-9]{1}\d*", "");
+
+        void Log(string fileName, string text)
         {
-            return string.Format(lang.GetMessage(key, this, id), args);
+            var dateTime = DateTime.Now.ToString("yyyy-MM-dd");
+            ConVar.Server.Log($"oxide/logs/{Title.ToLower()}-{fileName}_{dateTime}.txt", text);
+            if (logToConsole) Puts(text);
         }
 
-        private void AddLocalizedCommand(string key, string command)
-        {
-            foreach (string language in lang.GetLanguages(this))
-            {
-                Dictionary<string, string> messages = lang.GetMessages(language, this);
-                foreach (KeyValuePair<string, string> message in messages.Where(m => m.Key.Equals(key)))
-                {
-                    if (!string.IsNullOrEmpty(message.Value))
-                    {
-                        AddCovalenceCommand(message.Value, command);
-                    }
-                }
-            }
-        }
-
-        private void Log(string filename, string key, params object[] args)
-        {
-            if (config.LogToConsole)
-            {
-                Puts(Lang(key, null, args));
-            }
-            LogToFile(filename, $"[{DateTime.Now}] {Lang(key, null, args)}", this);
-        }
-
-        private void Message(IPlayer player, string key, params object[] args)
-        {
-            player.Reply(Lang(key, player.Id, args));
-        }
-
-        #endregion Helpers
+        #endregion
     }
 }

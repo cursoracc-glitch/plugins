@@ -1,2775 +1,2055 @@
-﻿using Newtonsoft.Json;
-using Oxide.Game.Rust.Cui;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using UnityEngine;
-using Facepunch;
 using Oxide.Core;
+using Oxide.Core.Configuration;
+using Oxide.Core.Plugins;
+using Oxide.Game.Rust.Cui;
+using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("EventManager", "senyaa & M&B-Studios", "2.2.2")]
+    [Info("Event Manager", "Reneb / k1lly0u", "2.0.24", ResourceId = 740)]
     class EventManager : RustPlugin
     {
-        #region Constants
-        const string USE_PERMISSION = "eventmanager.use";
-
-        const string SELECTED_CUI_NAME = "EventManager_EventSelected";
-        const string EDITENTRY_CUI_NAME = "EventManager_EditEntry";
-        const string SELECT_CUI_NAME = "EventManager_SelectUI";
-
-        const string SELECT_CCMD = "EM_SELECT";
-        const string SET_ENTRY_CCMD = "EM_SETENTRY";
-        const string SAVE_ENTRY_CCMD = "EM_SAVEENTRY";
-        const string EDIT_ENTRY_CCMD = "EM_EDITENTRY";
-        const string SHOW_PAGE_CCMD = "EM_SHOWPAGE";
-        const string DELETE_ENTRY_CCMD = "EM_DELETEENTRY";
-        const string NEW_ENTRY_CCMD = "EM_NEWENTRY";
-        #endregion
-
         #region Fields
-        static EventManager Instance;
-        EventController controller;
+        [PluginReference]
+        Plugin Spawns;
 
-        readonly Dictionary<int, string> DayList = new Dictionary<int, string>()
-        {
-            [1] = "Monday",
-            [2] = "Tuesday",
-            [3] = "Wednesday",
-            [4] = "Thursday",
-            [5] = "Friday",
-            [6] = "Saturday",
-            [0] = "Sunday",
-        };
+        [PluginReference]
+        Plugin Kits;
+
+        [PluginReference]
+        Plugin ZoneManager;
+
+        [PluginReference]
+        Plugin ServerRewards;
+
+        [PluginReference]
+        Plugin Economics;
+
+        private string EventSpawnFile;
+        private string EventGameName;
+        private string ZoneName;
+        private string TokenType;
+
+        private bool EventOpen;
+        private bool EventStarted;
+        private bool EventEnded;
+        private bool EventPending;
+        private int EventMaxPlayers = 0;
+        private int EventMinPlayers = 0;
+        private int EventAutoNum = -1;
+
+        public int PlayTimer;
+
+        public float LastAnnounce;
+        public bool AutoEventLaunched = false;
+        public bool UseClassSelection;
+        public GameMode EventMode;
+
+        private List<string> EventGames;
+        private List<EventPlayer> EventPlayers;
+        public List<ulong> Godmode;
+        public List<Timer> AutoArenaTimers;
+
+        private Dictionary<ulong, Timer> KillTimers;
+
+        private ConfigData configData;
+
+        ClassData classData;
+        private DynamicConfigFile Class_Data;
+
+        static bool Debug = false;
         #endregion
 
-        [ConsoleCommand("em_spawn")]
-        private void cmdSpawn(ConsoleSystem.Arg arg)
+        #region Classes        
+        class EventPlayer : MonoBehaviour
         {
-            if (arg.Player() != null)
-                if (!arg.Player().IsAdmin)
-                    return;
-            
-            if (arg.Args.IsNullOrEmpty())
-                return;
+            public BasePlayer player;
 
-            var prefabname = String.Join(" ", arg.Args);
+            public float health;
+            public float calories;
+            public float hydration;
 
+            public bool inEvent;
+            public bool savedInventory;
+            public bool savedHome;
+            public bool OOB;
 
-            var baseEntity = GameManager.server.CreateEntity(prefabname);
-            if (baseEntity)
+            public string currentClass;
+
+            public List<EventInvItem> InvItems = new List<EventInvItem>();
+            public Vector3 Home;
+
+            void Awake()
+            {                
+                inEvent = true;
+                savedInventory = false;
+                savedHome = false;
+                player = GetComponent<BasePlayer>();
+                ELog($"{player.displayName} component init");
+            }
+            public void SaveHealth()
             {
-                if (baseEntity.TryGetComponent<CH47HelicopterAIController>(out var ch47))
+                ELog($"{player.displayName} saving health");
+                health = player.health;
+                calories = player.metabolism.calories.value;
+                hydration = player.metabolism.hydration.value;
+            }
+            public void SaveHome()
+            {
+                ELog($"{player.displayName} saving home");
+                if (!savedHome)
+                    Home = player.transform.position;
+                savedHome = true;
+            }
+            public void TeleportHome()
+            {
+                ELog($"{player.displayName} TP home");
+                if (!savedHome)
+                    return;
+                TPPlayer(player, Home);
+                savedHome = false;
+            }
+            public void SaveInventory()
+            {
+                ELog($"{player.displayName} saving inv");
+                if (savedInventory)
+                    return;
+                InvItems.Clear();
+                InvItems.AddRange(GetItems(player.inventory.containerWear, "wear"));
+                InvItems.AddRange(GetItems(player.inventory.containerMain, "main"));
+                InvItems.AddRange(GetItems(player.inventory.containerBelt, "belt"));
+                ELog($"{player.displayName} inventory count: {InvItems.Count}");
+                savedInventory = true;
+            }
+            private IEnumerable<EventInvItem> GetItems(ItemContainer container, string containerName)
+            {
+                return container.itemList.Select(item => new EventInvItem
                 {
-                    ch47.TriggeredEventSpawn();
-                }
-                if (baseEntity.TryGetComponent<CargoShip>(out var cargo))
+                    itemid = item.info.itemid,
+                    container = containerName,
+                    amount = item.amount,
+                    ammo = (item.GetHeldEntity() as BaseProjectile)?.primaryMagazine.contents ?? 0,
+                    skin = item.skin,
+                    condition = item.condition,
+                    contents = item.contents?.itemList.Select(item1 => new EventInvItem
+                    {
+                        itemid = item1.info.itemid,
+                        amount = item1.amount,
+                        condition = item1.condition
+                    }).ToArray()
+                });
+            }
+            public void RestoreInventory()
+            {
+                ELog($"{player.displayName} restoring inventory, saved count: {InvItems.Count}");
+                player.inventory.Strip();
+                foreach (var kitem in InvItems)
                 {
-                    cargo.TriggeredEventSpawn();
+                    var item = ItemManager.CreateByItemID(kitem.itemid, kitem.amount, kitem.skin);
+                    item.condition = kitem.condition;
+                    var weapon = item.GetHeldEntity() as BaseProjectile;
+                    if (weapon != null) weapon.primaryMagazine.contents = kitem.ammo;
+                    player.inventory.GiveItem(item, kitem.container == "belt" ? player.inventory.containerBelt : kitem.container == "wear" ? player.inventory.containerWear : player.inventory.containerMain);
+                    if (kitem.contents == null) continue;
+                    foreach (var ckitem in kitem.contents)
+                    {
+                        var item1 = ItemManager.CreateByItemID(ckitem.itemid, ckitem.amount);
+                        if (item1 == null) continue;
+                        item1.condition = ckitem.condition;
+                        item1.MoveToContainer(item.contents);
+                    }
                 }
-                baseEntity.Spawn();
-                
+                ELog($"{player.displayName} restored count: {player.inventory.containerBelt.itemList.Count + player.inventory.containerMain.itemList.Count + player.inventory.containerWear.itemList.Count}");
+                savedInventory = false;
             }
         }
-
-        #region Event List
-        static readonly EventSettings RandomStartEv = new EventSettings()
+        class EventInvItem
         {
-            displayName = "RANDOM START"
-        };//
-
-        #region Data
-
-        private void SaveData()
-        {
-            var eventlistb = EventList.ToDictionary(p => $"{p.Key.Name}|{p.Key.Color}|{Guid.NewGuid().ToString()}", p => p.Value);
-            Interface.Oxide.DataFileSystem.WriteObject($"{Title}/events", eventlistb);
+            public int itemid;
+            public bool bp;
+            public int skin;
+            public string container;
+            public int amount;
+            public float condition;
+            public int ammo;
+            public EventInvItem[] contents;
         }
-
-        private void TryCreateNewDataFile()
+        class ConfigData
         {
-            if (EventList.IsNullOrEmpty())
+            public string Default_Gamemode { get; set; }
+            public string Default_Spawnfile { get; set; }
+            public int Battlefield_Timer { get; set; }
+            public bool KillDeserters { get; set; }
+            public int Required_AuthLevel { get; set; }
+            public string Messaging_MainColor { get; set; }
+            public string Messaging_MsgColor { get; set; }
+            public bool Announce_Event { get; set; }
+            public bool AnnounceDuring_Event { get; set; }
+            public int AnnounceEvent_Interval { get; set; }
+            public bool UseEconomicsAsTokens { get; set; }
+            public bool UseClassSelector_Default { get; set; }
+            public AutoEvents z_AutoEvents { get; set; }
+        }
+        class AutoEvents
+        {
+            public int GameInterval { get; set; }
+            public bool AutoCancel { get; set; }
+            public int AutoCancel_Timer { get; set; }
+            public List<AutoEventSetup> z_AutoEventSetup { get; set; }
+        }
+        class AutoEventSetup
+        {
+            public bool UseClassSelector { get; set; }
+            public string GameType { get; set; }
+            public GameMode EventMode { get; set; }
+            public string Spawnfile { get; set; }
+            public string Kit { get; set; }
+            public bool CloseOnStart { get; set; }
+            public int TimeToJoin { get; set; }
+            public int MinimumPlayers { get; set; }
+            public int MaximumPlayers { get; set; }
+            public int TimeLimit { get; set; }
+            public string ZoneID { get; set; }
+
+        }
+        class ClassData
+        {
+            public Dictionary<string, string> ClassKits = new Dictionary<string, string>();
+        }
+        public class UI
+        {
+            static public CuiElementContainer CreateElementContainer(string panelName, string color, string aMin, string aMax, bool useCursor)
             {
-                EventList = new Dictionary<AuthorName, List<EventSettings>>()
+                var NewElement = new CuiElementContainer()
                 {
-                    [new AuthorName()
                     {
-                        Name = "Facepunch",
-                        Color = "1 1 1 1"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
+                        new CuiPanel
                         {
-                            displayName = "Helicopter",
-                            Command = "em_spawn assets/prefabs/npc/patrol helicopter/patrolhelicopter.prefab",
+                            Image = {Color = color},
+                            RectTransform = {AnchorMin = aMin, AnchorMax = aMax},
+                            CursorEnabled = useCursor
                         },
-                        new EventSettings()
-                        {
-                            displayName = "Cargoship",
-                            Command = "em_spawn assets/content/vehicles/boats/cargoship/cargoshiptest.prefab",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Airdrop",
-                            Command = "em_spawn assets/prefabs/misc/supply drop/supply_drop.prefab",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Chinook 47",
-                            Command = "em_spawn assets/prefabs/npc/ch47/ch47scientists.entity.prefab",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "KpucTaJl",
-                        Color = "0.733 0.122 0.004 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Air Event",
-                            Command = "airstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Water Event",
-                            Command = "waterstart ",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Arctic Base Event",
-                            Command = "abstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Satellite Dish Event",
-                            Command = "satdishstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Junkyard Event",
-                            Command = "jstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Power Plant Event",
-                            Command = "ppstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Harbor Event",
-                            Command = "harborstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Squid Game",
-                            Command = "rlglstart",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "KpucTaJl",
-                        Color = "0.733 0.122 0.004 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "GasStation Event",
-                            Command = "gsstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Defendable-Bases Start",
-                            Command = "warstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Defendable-Bases Stop",
-                            Command = "warstop",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Adem",
-                        Color = "0.424 0.000 0.988 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Sputnik",
-                            Command = "sputnikstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Armored Train",
-                            Command = "atrainstart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Space",
-                            Command = "spacestart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Convoy",
-                            Command = "convoystart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Shipwreck",
-                            Command = "shipwreckstart ",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Mercury",
-                        Color = "1.000 0.573 0.000 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "IQSphereEvent",
-                            Command = "iqsp start",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "DezLife",
-                        Color = "0.659 1.000 0.000 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Cobalt Laboratory",
-                            Command = "cl start",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "XDChinookEvent",
-                            Command = "chinook call",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Cashr",
-                        Color = "0.000 0.224 0.863 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Rocket Event",
-                            Command = "rocket ||",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Nikedemos",
-                        Color = "1.000 0.000 0.600 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "CargoTrainEvent",
-                            Command = "trainevent_now",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Ridamees",
-                        Color = "0.071 0.478 0.059 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Stone Eventt",
-                            Command = "StoneStart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Metal Event",
-                            Command = "MetalStart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Sulfur Event",
-                            Command = "SulfurStart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "RaidRush Event",
-                            Command = "raidrush.start",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "BarrelBash Event",
-                            Command = "StartBarrelBash",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "BoxBattle Event",
-                            Command = "StartBoxBattle",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Fruster",
-                        Color = "0.455 0.106 0.059 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "CargoPlaneEvent",
-                            Command = "callcargoplane",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "AirfieldEvent",
-                            Command = "afestart",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "HelipadEvent",
-                            Command = "hpestart",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Bazz3l",
-                        Color = "0.075 0.682 0.925 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "GuardedCrate Easy",
-                            Command = "gcrate start Easy",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "GuardedCrate Medium",
-                            Command = "gcrate start Medium",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "GuardedCrate Hard",
-                            Command = "gcrate start Hard",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "GuardedCrate Elite",
-                            Command = "gcrate start Elite",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Nivex",
-                        Color = "0.949 0.651 0.996 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Dangerous Treasures",
-                            Command = "dtevent",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "RaidableBases Easy",
-                            Command = "rbevent easy",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "RaidableBases Medium",
-                            Command = "rbevent easy",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "RaidableBases Hard",
-                            Command = "rbevent easy",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "RaidableBases Nightmare",
-                            Command = "rbevent easy",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Dana",
-                        Color = "0.698 0.024 0.678 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Heli Regular",
-                            Command = "heli.call Regular",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Heli Millitary",
-                            Command = "heli.call Millitary",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Heli Elite",
-                            Command = "heli.call Elite",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Razor",
-                        Color = "0.243 0.204 0.690 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Jet Event",
-                            Command = "jet event 2 2 10",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "ThePitereq",
-                        Color = "0.851 0.612 0.208 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Meteor-Event-Kill",
-                            Command = "ms kill",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Meteor-Event-Start-Amount-10",
-                            Command = "ms run 10",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Meteor-Event-Start-Amount-20",
-                            Command = "ms run 20",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Meteor-Event-Start-Amount-30",
-                            Command = "ms run 30",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Meteor-Event-Start-Amount-40",
-                            Command = "ms run 40",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Meteor-Event-Start-Amount-50",
-                            Command = "ms run 50",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = " k1lly0u",
-                        Color = "0.455 0.106 0.159 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "PilotEjec",
-                            Command = "pe call",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "HeliRefuel",
-                            Command = "hr call",
-                        },
-                    },
-                    [new AuthorName()
-                    {
-                        Name = "Wrecks",
-                        Color = "0.561 0.498 0.718 1.00"
-                    }] = new List<EventSettings>()
-                    {
-                        new EventSettings()
-                        {
-                            displayName = "Bot-Purge-Event",
-                            Command = "Purge",
-                        },
-                        new EventSettings()
-                        {
-                            displayName = "Eradication Event",
-                            Command = "Erad",
-                        },
+                        new CuiElement().Parent = "Overlay",
+                        panelName
                     }
                 };
-                SaveData();
+                return NewElement;
             }
-        }
-        
-        void LoadData()
-        {
-            var EventListb = Interface.Oxide?.DataFileSystem?.ReadObject<Dictionary<string, List<EventSettings>>>($"{Title}/events")
-                        ?? new Dictionary<string, List<EventSettings>>();
-
-            EventList = EventListb.ToDictionary(p => new AuthorName(p.Key.Split('|')[0], p.Key.Split('|')[1]),
-                p => p.Value);
-            
-            
-            TryCreateNewDataFile();
-        }
-
-        #endregion
-        
-        static Dictionary<AuthorName, List<EventSettings>> EventList = new Dictionary<AuthorName, List<EventSettings>>();
-        static EventSettings GetEventByName(string name)
-        {
-            if (name == "RANDOM START")
-                return RandomStartEv;
-
-            foreach (var events in EventList.Values)
+            static public void CreatePanel(ref CuiElementContainer container, string panel, string color, string aMin, string aMax, bool cursor = false)
             {
-                foreach (var setting in events)
+                container.Add(new CuiPanel
                 {
-                    if (setting.displayName == name)
-                    {
-                        return setting;
-                    }
-                }
+                    Image = { Color = color },
+                    RectTransform = { AnchorMin = aMin, AnchorMax = aMax },
+                    CursorEnabled = cursor
+                },
+                panel);
             }
-            return null;
-        }
-        #endregion
-
-        #region Configuration
-        static Configuration config;
-        class Configuration
-        {
-            [JsonProperty(PropertyName = "Time Entries", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-            public Dictionary<string, EventSettingsEntry> Entries = new Dictionary<string, EventSettingsEntry>();
-        }
-        protected override void LoadConfig()
-        {
-            base.LoadConfig();
-            try
+            static public void CreateLabel(ref CuiElementContainer container, string panel, string color, string text, int size, string aMin, string aMax, TextAnchor align = TextAnchor.MiddleCenter)
             {
-                config = Config.ReadObject<Configuration>();
-                if (config == null)
+                container.Add(new CuiLabel
                 {
-                    throw new Exception();
-                }
+                    Text = { Color = color, FontSize = size, Align = align, Text = text },
+                    RectTransform = { AnchorMin = aMin, AnchorMax = aMax }
+                },
+                panel);
 
-                SaveConfig();
             }
-            catch
+            static public void CreateButton(ref CuiElementContainer container, string panel, string color, string text, int size, string aMin, string aMax, string command, TextAnchor align = TextAnchor.MiddleCenter)
             {
-                PrintError("Your configuration file contains an error. Using default configuration values.");
-                LoadDefaultConfig();
-            }
-        }
-
-        protected override void SaveConfig()
-        {
-            Config.WriteObject(config);
-        }
-
-        protected override void LoadDefaultConfig()
-        {
-            config = new Configuration();
-        }
-
-        #endregion
-
-        #region Types
-        internal class AuthorName
-        {
-            public AuthorName(){}
-            public AuthorName(string name, string color)
-            {
-                this.Name = name;
-                this.Color = color;
-            }
-            public string Name;
-            public string Color;
-        }
-        internal class EventSettings
-        {
-            [JsonProperty(PropertyName = "Event name", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-            public string displayName = "Air Event";
-
-            [JsonProperty(PropertyName = "The command to launch the event", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-            public string Command = "airevent start";
-
-            [JsonProperty(PropertyName = "Color", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-            public string Color = "0.1 0.1 0.1 0.95";
-        }
-
-        internal class EventSettingsEntry
-        {
-            public string GUID = "";
-            public string Name = "";
-            public bool StaticTime = true;
-            public int Hour = 12;
-            public int Minute = 30;
-            public int MinPlayers = 0;
-            public DateTime LastRun;
-            public Dictionary<int, bool> DaysActive = new Dictionary<int, bool>()
-            {
-                [1] = false,
-                [2] = false,
-                [3] = false,
-                [4] = false,
-                [5] = false,
-                [6] = false,
-                [0] = false,
-            };
-
-            public List<string> RandomStartEvents = new List<string>();
-            public string PrevStartedEv = "";
-
-            public EventSettingsEntry(string guid, string name)
-            {
-                GUID = guid;
-                Name = name;
-            }
-            public static string NewEntry(string name)
-            {
-                var guid = Guid.NewGuid().ToString();
-                config.Entries.Add(guid, new EventSettingsEntry(guid, name));
-                return guid;
-            }
-        }
-
-        
-        class EventController : FacepunchBehaviour
-        {
-            private void Awake()
-            {
-                InvokeRepeating(CheckEvents, 5, 5);
-            }
-
-            private List<string> ExecutedEvents = new();
-            private void CheckEvents()
-            {
-                var date = DateTime.Now;
-                var day = Convert.ToInt32(date.DayOfWeek);
-                var hour = date.Hour;
-                var minute = date.Minute;
-
-                foreach (var entry in config.Entries.Values)
+                container.Add(new CuiButton
                 {
-                    if (!entry.StaticTime)
-                    {
-                        continue;
-                    }
-
-                    if (!entry.DaysActive[day])
-                    {
-                        continue;
-                    }
-
-                    if (entry.Hour == hour && entry.Minute == minute)
-                    {
-                        if (entry.LastRun.Minute == minute && entry.LastRun.Hour == hour && entry.LastRun.DayOfWeek == date.DayOfWeek)
-                            continue;
-                        
-                        entry.LastRun = date;
-                        if (BasePlayer.activePlayerList.Count < entry.MinPlayers)
-                            continue;
-
-                        if (entry.Name == "RANDOM START" && entry.RandomStartEvents.Count > 0)
-                        {
-                            // var events = new List<string>();
-                            // events.AddRange(entry.RandomStartEvents.Where(x => x != entry.PrevStartedEv));
-                            // events.Shuffle((uint)UnityEngine.Random.Range(1, 1000000000));
-                            //
-                            // var evToRun = events.GetRandom();
-                            // if(entry.RandomStartEvents.Count > 1)
-                            // {
-                            //     while (evToRun == entry.PrevStartedEv)
-                            //         evToRun = events.GetRandom();
-                            // } 
-                            var validEvents = entry.RandomStartEvents.Where(e => !ExecutedEvents.Contains(e)).ToArray();
-                            if (validEvents.IsNullOrEmpty())
-                            {
-                                if (ExecutedEvents.IsNullOrEmpty())
-                                {
-                                    Instance.PrintError("Not founded events to start!");
-                                    return;
-                                }
-                                ExecutedEvents.Clear();
-                                CheckEvents();
-                                return;
-                            }
-                            int index = new System.Random().Next(validEvents.Length);
-                            var evToRun = validEvents[index];
-                            ExecutedEvents.Add(evToRun);
-                            entry.PrevStartedEv = evToRun;
-                            Instance.rust.RunServerCommand(GetEventByName(evToRun).Command);
-                            Instance.CallStartedHook(GetEventByName(evToRun).displayName);
-                            continue;
-                        }
-                        Instance.rust.RunServerCommand(GetEventByName(entry.Name).Command);
-                        Instance.CallStartedHook(GetEventByName(entry.Name).displayName);
-                    }
-                }
-
-                foreach (var entry in config.Entries.Values)
-                {
-                    if (entry.StaticTime)
-                    {
-                        continue;
-                    }
-
-                    if (!entry.DaysActive[day])
-                    {
-                        continue;
-                    }
-
-                    if ((date - entry.LastRun).TotalMinutes > ((entry.Hour * 60) + entry.Minute))
-                    {
-                        if (entry.LastRun.Minute == minute && entry.LastRun.Hour == hour && entry.LastRun.DayOfWeek == date.DayOfWeek)
-                            continue;
-                        
-                        entry.LastRun = date;
-                        if (BasePlayer.activePlayerList.Count < entry.MinPlayers)
-                            continue;
-
-                        if (entry.Name == "RANDOM START" && entry.RandomStartEvents.Count > 0)
-                        {
-                            var validEvents = entry.RandomStartEvents.Where(e => !ExecutedEvents.Contains(e)).ToArray();
-                            if (validEvents.IsNullOrEmpty())
-                            {
-                                if (ExecutedEvents.IsNullOrEmpty())
-                                {
-                                    Instance.PrintError("Not founded events to start!");
-                                    return;
-                                }
-                                ExecutedEvents.Clear();
-                                CheckEvents();
-                                return;
-                            }
-                            
-                            int index = new System.Random().Next(validEvents.Length);
-                            var evToRun = validEvents[index];
-                            ExecutedEvents.Add(evToRun);
-                            
-                            // var evToRun = entry.RandomStartEvents.GetRandom();
-                            // while(evToRun == entry.PrevStartedEv && entry.RandomStartEvents.Count > 1)
-                            //     evToRun = entry.RandomStartEvents.GetRandom();
-                            entry.PrevStartedEv = evToRun;
-                            Instance.rust.RunServerCommand(GetEventByName(evToRun).Command);
-                            Instance.CallStartedHook(GetEventByName(evToRun).displayName);
-                            continue;
-                        }
-
-                        Instance.rust.RunServerCommand(GetEventByName(entry.Name).Command);
-                        Instance.CallStartedHook(GetEventByName(entry.Name).displayName);
-                    }
-                }
+                    Button = { Color = color, Command = command, FadeIn = 1.0f },
+                    RectTransform = { AnchorMin = aMin, AnchorMax = aMax },
+                    Text = { Text = text, FontSize = size, Align = align }
+                },
+                panel);
             }
+        }
+        public enum GameMode
+        {
+            Normal,
+            Battlefield
         }
         #endregion
 
         #region Oxide Hooks
-        void Init()
+        void Loaded()
         {
-            Instance = this;
-        }
+            EventGames = new List<string>();
+            EventMode = GameMode.Normal;
+            EventPlayers = new List<EventPlayer>();
+            AutoArenaTimers = new List<Timer>();
+            KillTimers = new Dictionary<ulong, Timer>();
+            Class_Data = Interface.Oxide.DataFileSystem.GetFile("EventManager_Classes");
 
+        }
         void OnServerInitialized()
         {
+            lang.RegisterMessages(Messages, this);
+            LoadVariables();
             LoadData();
-
-            permission.RegisterPermission(USE_PERMISSION, this);
-            timer.Once(3f, () =>
-            {
-                controller = ServerMgr.Instance.gameObject.AddComponent<EventController>();
-            });
+            EventOpen = false;
+            EventStarted = false;
+            EventEnded = true;
+            EventPending = false;
+            UseClassSelection = configData.UseClassSelector_Default;
+            EventGameName = configData.Default_Gamemode;
+            timer.Once(0.2f, InitializeGames);
         }
-
-        private void OnServerSave() => SaveData();
-        
+        void InitializeGames()
+        {
+            //Interface.Oxide.CallHook("RegisterGame");
+            SelectSpawnfile(configData.Default_Spawnfile);
+        }
         void Unload()
         {
-            SaveData();
-            SaveConfig();
-            UnityEngine.Object.DestroyImmediate(controller);
-            Instance = null;
+            foreach (var player in BasePlayer.activePlayerList) DestroyUI(player);
+            EndEvent();
+            DestroyGame();
         }
-
-        
-        private Vector3 GetRandomSpawnPosCh47(){return TerrainMeta.RandomPointOffshore();}
+        void OnPlayerRespawned(BasePlayer player)
+        {
+            if (!EventStarted) return;
+            if (!player.GetComponent<EventPlayer>()) return;
+            if (player.GetComponent<EventPlayer>().inEvent)
+            {
+                if (!EventStarted) return;
+                TeleportPlayerToEvent(player);
+            }
+            else
+            {
+                RedeemInventory(player);
+                TeleportPlayerHome(player);
+                TryErasePlayer(player);
+            }
+        }
+        void OnPlayerAttack(BasePlayer player, HitInfo hitinfo)
+        {
+            if (!EventStarted) return;
+            if (player.GetComponent<EventPlayer>() == null || !(player.GetComponent<EventPlayer>().inEvent))
+                return;
+            if (hitinfo.HitEntity != null)
+                Interface.Oxide.CallHook("OnEventPlayerAttack", player, hitinfo);
+            return;
+        }
+        void OnEntityDeath(BaseEntity entity, HitInfo hitinfo)
+        {
+            if (!EventStarted) return;
+            if ((entity as BasePlayer)?.GetComponent<EventPlayer>() == null) return;
+            Interface.Oxide.CallHook("OnEventPlayerDeath", ((BasePlayer)entity), hitinfo);
+            return;
+        }
+        void OnPlayerDisconnected(BasePlayer player)
+        {
+            if (!EventStarted) return;
+            if (player.GetComponent<EventPlayer>() != null)
+                LeaveEvent(player);
+        }
+        void OnEntityTakeDamage(BaseEntity entity, HitInfo info)
+        {
+            if (!EventStarted) return;
+            var player = entity as BasePlayer;
+            if (Godmode == null || player == null) return;
+            if (Godmode.Contains(player.userID))
+            {
+                info.damageTypes = new DamageTypeList();
+                info.HitMaterial = 0;
+                info.PointStart = Vector3.zero;
+            }
+        }
         #endregion
 
-        #region UI
-
-        internal class NewEventData
+        #region Checks
+        bool hasEventStarted()
         {
-            public string Name;
-            public string Command;
-            public AuthorName Author;
+            return EventStarted;
+        }
+        bool isPlaying(BasePlayer player)
+        {
+            EventPlayer eplayer = player.GetComponent<EventPlayer>();
+            return eplayer != null && eplayer.inEvent;
+        }
+        object canRedeemKit(BasePlayer player)
+        {
+            if (!EventStarted) return null;
+            TryErasePlayer(player);
+            EventPlayer eplayer = player.GetComponent<EventPlayer>();
+            if (eplayer == null) return null;
+            return false;
+        }
+        object canShop(BasePlayer player)
+        {
+            if (!EventStarted) return null;
+            EventPlayer eplayer = player.GetComponent<EventPlayer>();
+            if (eplayer == null) return null;
+            return GetMessage("CanShop");
+        }
 
-            public EventSettings ToEntry()
+        object CanTeleport(BasePlayer player)
+        {
+            if (!EventStarted) return null;
+            EventPlayer eplayer = player.GetComponent<EventPlayer>();
+            if (eplayer == null) return null;
+            return GetMessage("CanTP");
+        }
+        #endregion
+
+        #region Config
+        private void LoadVariables()
+        {
+            LoadConfigVariables();
+            SaveConfig();
+        }
+        private void LoadConfigVariables()
+        {
+            configData = Config.ReadObject<ConfigData>();
+        }
+        protected override void LoadDefaultConfig()
+        {
+            Puts("Creating a new config file");
+            var config = new ConfigData
             {
-                var entry = new EventSettings
+                AnnounceDuring_Event = true,
+                AnnounceEvent_Interval = 120,
+                Announce_Event = true,
+                Battlefield_Timer = 1200,
+                Default_Gamemode = "Deathmatch",
+                Default_Spawnfile = "deathmatchspawns",
+                KillDeserters = true,
+                Required_AuthLevel = 1,
+                Messaging_MainColor = "#FF8C00",
+                Messaging_MsgColor = "#939393",
+                UseEconomicsAsTokens = false,
+                UseClassSelector_Default = true,
+                z_AutoEvents = new AutoEvents
                 {
-                    displayName = Name,
-                    Command = Command,
-                    Color = "0.1 0.1 0.1 0.95"
-                };
-                return entry;
-            }
+                    AutoCancel = true,
+                    AutoCancel_Timer = 300,
+                    GameInterval = 1200,
+                    z_AutoEventSetup = CreateDefaultAutoConfig()
+                }
+            };
+            SaveConfig(config);
         }
-        private Dictionary<ulong, NewEventData> _creatingEvents = new Dictionary<ulong, NewEventData>();
-        private const string Layer = "ui.EventManager.bg";
-
-        [ConsoleCommand("em_createconfirm")]
-        private void cmdCreateConfirm(ConsoleSystem.Arg arg)
+        void SaveConfig(ConfigData config)
         {
-            if (arg.Player() == null)
-                return;
-            if (!arg.Player().IPlayer.HasPermission(USE_PERMISSION))
-                return;
-            
-            if (!_creatingEvents.ContainsKey(arg.Player().userID))
-                return;
-            var e = _creatingEvents[arg.Player().userID];
-            
-            
-            EventList[e.Author].Add(e.ToEntry());
-
-            _creatingEvents.Remove(arg.Player().userID);
-            SaveData();
-            CuiHelper.DestroyUi(arg.Player(), Layer);
+            Config.WriteObject(config, true);
         }
-
-        [ConsoleCommand("em_cancelcreate")]
-        private void cmdCancelCreate(ConsoleSystem.Arg arg)
+        static List<AutoEventSetup> CreateDefaultAutoConfig()
         {
-            if (arg.Player() == null)
-                return;
-            if (!arg.Player().IPlayer.HasPermission(USE_PERMISSION))
-                return;
-            
-            _creatingEvents.Remove(arg.Player().userID);
-            CuiHelper.DestroyUi(arg.Player(), Layer);
-        }
-        [ConsoleCommand("em_setname")]
-        private void cmdSetName(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() == null)
-                return;
-            if (!arg.Player().IPlayer.HasPermission(USE_PERMISSION))
-                return;
-            
-            if (!_creatingEvents.TryGetValue(arg.Player().userID, out var ev))
-                return;
-
-            ev.Name = string.Join(" ", arg.Args);
-        }
-        [ConsoleCommand("em_setcommand")]
-        private void cmdSetCommand(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() == null)
-                return;
-            if (!arg.Player().IPlayer.HasPermission(USE_PERMISSION))
-                return;
-            
-            if (!_creatingEvents.TryGetValue(arg.Player().userID, out var ev))
-                return;
-
-            ev.Command = string.Join(" ", arg.Args);
-        }
-        [ConsoleCommand("em_setauthor")]
-        private void cmdSetAuthor(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() == null)
-                return;
-            if (!arg.Player().IPlayer.HasPermission(USE_PERMISSION))
-                return;
-            
-            if (!_creatingEvents.TryGetValue(arg.Player().userID, out var ev))
-                return;
-
-            ev.Author = EventList.Select(x => x.Key).FirstOrDefault(x => x.Name.Contains(arg.Args[0]))!;
-            
-            CuiHelper.DestroyUi(arg.Player(), Layer + ".eventcreator.div");
-            UI_UpdateCreator(arg.Player());
-        }
-
-        [ConsoleCommand("em_drawcreators")]
-        private void cmdDrawCreators(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() == null)
-                return;
-            
-            UI_DrawCreators(arg.Player());
-        }
-
-        private void UI_UpdateCreator(BasePlayer player)
-        {
-            var container = new CuiElementContainer();
-            
-            if (!_creatingEvents.TryGetValue(player.userID, out var ev))
-                return;
-            
-            
-            container.Add(new CuiButton
+            var newautoconfiglist = new List<AutoEventSetup>
             {
-                Button = { Color = "0.8078431 0.7803922 0.7411765 0.6588235", Command = "em_drawcreators"},
-                Text =
+                new AutoEventSetup
                 {
-                    Text = ev.Author?.Name ?? "Choose event creator...", Font = "robotocondensed-bold.ttf", FontSize = 21,
-                    Align = TextAnchor.MiddleCenter, Color = ev.Author?.Color ?? "0.1 0.1 0.1 0.95"//
+                    GameType = "Deathmatch",
+                    EventMode = GameMode.Battlefield,
+                    Spawnfile = "deathmatchspawns",
+                    Kit = "",
+                    CloseOnStart = true,
+                    TimeToJoin = 60,
+                    TimeLimit = 1800,
+                    MinimumPlayers = 2,
+                    MaximumPlayers = 20,
+                    UseClassSelector = false,
+                    ZoneID = null
                 },
-                RectTransform =
+                new AutoEventSetup
                 {
-                    AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-62.243 95.069",
-                    OffsetMax = "172.248 130.901"
+                    GameType = "TeamDeathmatch",
+                    EventMode = GameMode.Normal,
+                    Spawnfile = "tdm_spawns_a",
+                    Kit = "tdmkit",
+                    CloseOnStart = false,
+                    TimeToJoin = 60,
+                    TimeLimit = 0,
+                    MinimumPlayers = 2,
+                    MaximumPlayers = 20,
+                    UseClassSelector = false,
+                    ZoneID = null
+                },
+                new AutoEventSetup
+                {
+                    GameType = "GunGame",
+                    EventMode = GameMode.Battlefield,
+                    Spawnfile = "ggspawns",
+                    Kit = "ggkit",
+                    CloseOnStart = false,
+                    TimeToJoin = 60,
+                    TimeLimit = 0,
+                    MinimumPlayers = 2,
+                    MaximumPlayers = 20,
+                    UseClassSelector = false,
+                    ZoneID = null
+                },
+                new AutoEventSetup
+                {
+                    GameType = "ChopperSurvival",
+                    EventMode = GameMode.Normal,
+                    Spawnfile = "csspawns",
+                    Kit = "cskit",
+                    CloseOnStart = true,
+                    TimeToJoin = 60,
+                    TimeLimit = 0,
+                    MinimumPlayers = 1,
+                    MaximumPlayers = 20,
+                    UseClassSelector = false,
+                    ZoneID = null
                 }
-            }, Layer, Layer + ".eventcreator");
-            CuiHelper.DestroyUi(player, Layer + ".eventcreator");
-            CuiHelper.AddUi(player, container);
-            
+            };
+            return newautoconfiglist;
+        }
+        #endregion
+
+        #region Messaging
+        private void MSG(BasePlayer player, string langkey, bool title = true)
+        {
+            string message = $"<color={configData.Messaging_MsgColor}>{GetMessage(langkey)}</color>";
+            if (title) message = $"<color={configData.Messaging_MainColor}>{GetMessage("Title")}</color>" + message;
+            SendReply(player, message);
+        }
+        void BroadcastToChat(string msg)
+        {
+            ELog(msg);
+            PrintToChat($"<color={configData.Messaging_MainColor}>{GetMessage("Title")}</color><color={configData.Messaging_MsgColor}>{GetMessage(msg)}</color>");
+        }
+        private string GetMessage(string key) => lang.GetMessage(key, this);
+
+        [HookMethod("BroadcastEvent")]
+        public void BroadcastEvent(string msg)
+        {
+            foreach (EventPlayer eventplayer in EventPlayers)
+                SendReply(eventplayer.player, $"<color={configData.Messaging_MainColor}>" + msg + "</color>");
         }
 
-        private void UI_DrawCreators(BasePlayer player)
+        Dictionary<string, string> Messages = new Dictionary<string, string>
         {
-            var container = new CuiElementContainer();
-            container.Add(new CuiPanel
-            {
-                CursorEnabled = false,
-                Image = { Color = "0.8078431 0.7803922 0.7411765 0" },
-                RectTransform =
-                {
-                    AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-62.242 58.184",
-                    OffsetMax = "172.248 94.016"
-                }
-            }, Layer, Layer + ".eventcreator.div");
-            float minx = -117.245f;
-            float maxx = 117.245f;
-            float miny = -17.91578f;
-            float maxy = 5.91522f;
+            { "multipleNames", "Multiple players found"},
+            { "noPlayerFound", "No players found"},
+            { "MessagesEventMinPlayers", "The Event {0} has reached min players and will start in {1} seconds"},
+            { "MessagesEventMaxPlayers", "The Event {0} has reached max players. You may not join for the moment"},
+            { "MessagesEventStatusClosedStarted", "The Event {0} has already started, it's too late to join."},
+            { "Title", "Event Manager: "},
+            { "MessagesEventStatusClosedEnd", "There is currently no event"},
+            { "MessagesEventStatusOpenStarted", "The Event {0} has started, but is still opened: /event join"},
+            { "MessagesEventStatusOpen", "The Event {0} is currently opened for entries: /event, join"},
+            { "MessagesEventCloseAndEnd", "The Event needs to be closed and ended before using this command."},
+            { "MessagesEventNotAnEvent", "This Game {0} isn't registered, did you reload the game after loading Event - Core?"},
+            { "MessagesEventNotInEvent", "You are not currently in the Event."},
+            { "MessagesEventBegin", "Event: {0} is about to begin!"},
+            { "MessagesEventLeft", "{0} has left the Event! (Total Players: {1})"},
+            { "MessagesEventJoined", "{0} has joined the Event!  (Total Players: {1})"},
+            { "MessagesEventAlreadyJoined", "You are already in the Event."},
+            { "MessagesEventPEnd", "Event: {0} is now over, restoring players and sending them home!"},
+            { "MessagesEventEnd", "All players respawned, {0} has ended!"},
+            { "MessagesEventNoGamePlaying", "An Event game is not underway."},
+            { "MessagesEventCancel", "The Event was cancelled!"},
+            { "MessagesEventClose", "The Event entrance is now closed!"},
+            { "MessagesEventOpen", "The Event is now open for : {0} !  Type /event join to join!"},
+            { "MessagesPermissionsNotAllowed", "You are not allowed to use this command"},
+            { "MessagesEventNotSet", "An Event game must first be chosen."},
+            { "MessagesErrorSpawnfileIsNull", "The spawnfile can't be set to null"},
+            { "MessagesEventNoSpawnFile", "A spawn file must first be loaded."},
+            { "MessagesEventAlreadyOpened", "The Event is already open."},
+            { "MessagesEventAlreadyClosed", "The Event is already closed."},
+            { "MessagesEventAlreadyStarted", "An Event game has already started."},
+            { "ClassSelect", "Choose your class!" },
+            { "ClassNotice", "You can reopen this menu at any time by typing /event class" },
+            { "CanShop", "You are not allowed to shop while in an Event" },
+            { "CanTP", "You are not allowed to teleport while in an Event" },
+            { "NoPlayers", "Not enough players" },
+            { "NoAuto", "No Automatic Events Configured" },
+            { "NoAutoInit", "No Events were successfully initialized, check that your events are correctly configured" },
+            { "TimeLimit", "Time limit reached" },
+            { "EventCancelled", "Event {0} was cancelled because: {1}" },
+            { "EventOpen", "Event {0} in now opened, you can join it by typing /event join" },
+            { "StillOpen", "Event {0} is still open, you can join it by typing /event join" },
+            { "EventClosed", "The Event is currently closed." },
+            { "NotInEvent", "You are not currently in the Event." },
+            { "NullKitname", "You can't have a null kitname" },
+            { "NoKits", "Unable to find the Kits plugin" },
+            { "KitNotExist", "The kit {0} doesn't exist" },
+            { "CancelAuto", "Auto events have been cancelled" }
+        };
+        #endregion
+
+        #region Class Selection
+        private void SelectClass(BasePlayer player)
+        {
+            string panelName = "ClassSelector";
+            CuiHelper.DestroyUi(player, panelName);
+            if (player.IsSleeping() || player.IsReceivingSnapshot() || player.IsDead())
+            {                
+                timer.Once(3, () => SelectClass(player));
+                return;
+            }            
+
+            var Class_Element = UI.CreateElementContainer(panelName, "0.1 0.1 0.1 0.98", "0.05 0.05", "0.95 0.95", true);
+
+            UI.CreatePanel(ref Class_Element, panelName, "0.9 0.9 0.9 0.1", "0.04 0.05", "0.96 0.94");
+            UI.CreateLabel(ref Class_Element, panelName, "0.9 0.9 0.9 1.0", $"<color={configData.Messaging_MainColor}>{EventGameName}</color>", 24, "0.05 0.85", "0.95 0.92");
+            UI.CreateLabel(ref Class_Element, panelName, "0.9 0.9 0.9 1.0", $"<color={configData.Messaging_MainColor}>{GetMessage("ClassSelect")}</color>", 24, "0.05 0.75", "0.95 0.83");
+            UI.CreateLabel(ref Class_Element, panelName, "0.9 0.9 0.9 1.0", $"<color={configData.Messaging_MainColor}>{GetMessage("ClassNotice")}</color>", 18, "0.05 0.05", "0.95 0.12");
+
             int i = 0;
-            foreach (var x in EventList.Where(x => x.Value.Count < 8).Select(x => x.Key))
+            foreach (var entry in classData.ClassKits)
             {
-                container.Add(new CuiButton
-                {
-                    Button = { Color = "0.8078431 0.7803922 0.7411765 0.6588235", Command = $"em_setauthor {x.Name}" },
-                    Text =
-                    {
-                        Text = x.Name, Font = "robotocondensed-regular.ttf", FontSize = 14,
-                        Align = TextAnchor.MiddleCenter, Color = x.Color
-                    },
-                    RectTransform =
-                    {
-                        AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = $"{minx} {miny}",
-                        OffsetMax = $"{maxx} {maxy}"
-                    }
-                }, Layer + ".eventcreator.div", $"creator.{i}");
-
+                CreateClassButton(ref Class_Element, panelName, entry.Key, entry.Value, i);
                 i++;
-                miny -= 25.04f;
-                maxy -= 25.04f;
             }
 
-            CuiHelper.DestroyUi(player, Layer + ".eventcreator.div");
-            CuiHelper.AddUi(player, container);
+            CuiHelper.AddUi(player, Class_Element);
         }
-        
-        private void UI_DrawCreateNewEvent(BasePlayer player)
+        private void CreateClassButton(ref CuiElementContainer container, string panelName, string name, string kit, int number)
         {
-            _creatingEvents.Remove(player.userID);
-            _creatingEvents.Add(player.userID, new NewEventData());
-            var container = new CuiElementContainer();
-
-            container.Add(new CuiPanel
+            Vector2 dimensions = new Vector2(0.25f, 0.07f);
+            Vector2 origin = new Vector2(0.095f, 0.6f);
+            float offsetY = 0;
+            float offsetX = 0;
+            switch (number)
             {
-                CursorEnabled = true,
-                Image = { Color = "0.317 0.317 0.317 0.7490196" },
-                RectTransform =
-                {
-                    AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-353.394 -207.674",
-                    OffsetMax = "353.394 207.674"
-                }
-            }, "Overlay", Layer);
-
-            container.Add(new CuiElement
-            {
-                Name = Layer + ".label",
-                Parent = Layer,
-                Components =
-                {
-                    new CuiTextComponent
+                case 0:
+                case 1:
+                case 2:
+                    offsetX = (0.03f + dimensions.x) * number;
+                    break;
+                case 3:
+                case 4:
+                case 5:
                     {
-                        Text = "NEW EVENT", Font = "robotocondensed-bold.ttf", FontSize = 23,
-                        Align = TextAnchor.MiddleLeft, Color = "0.6470588 0.6235294 0.6 1"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-344 167.364",
-                        OffsetMax = "-188.991 200.636"
+                        offsetX = (0.03f + dimensions.x) * (number - 3);
+                        offsetY = (0.07f + dimensions.y) * 1;
                     }
-                }
-            });
-
-            container.Add(new CuiPanel
-            {
-                CursorEnabled = false,
-                Image = { Color = "0.8078431 0.7803922 0.7411765 0.6588235" },
-                RectTransform =
-                {
-                    AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-344 95.069", OffsetMax = "-93.687 130.9"
-                }
-            }, Layer, Layer + ".name.bg");
-
-            container.Add(new CuiElement
-            {
-                Name = Layer + ".name.bg" + ".name.input",
-                Parent = Layer + ".name.bg",
-                Components =
-                {
-                    new CuiInputFieldComponent
+                    break;
+                case 6:
+                case 7:
+                case 8:
                     {
-                        Color = "1 1 1 1", Font = "robotocondensed-bold.ttf", FontSize = 18, Align = TextAnchor.MiddleCenter,
-                        CharsLimit = 0, IsPassword = false, Text = "Enter event name...", Command = "em_setname "
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-125.155 -17.916",
-                        OffsetMax = "125.155 17.916"
+                        offsetX = (0.03f + dimensions.x) * (number - 6);
+                        offsetY = (0.07f + dimensions.y) * 2;
                     }
-                }
-            });
+                    break;
+            }
+            Vector2 offset = new Vector2(offsetX, -offsetY);
 
-            
-            
-            container.Add(new CuiPanel
-            {
-                CursorEnabled = false,
-                Image = { Color = "0.8078431 0.7803922 0.7411765 0.6588235" },
-                RectTransform =
-                {
-                    AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-344 44.584",
-                    OffsetMax = "-93.687 80.416"
-                }
-            }, Layer, Layer + ".command.bg");
+            Vector2 posMin = origin + offset;
+            Vector2 posMax = posMin + dimensions;
 
-            container.Add(new CuiElement
-            {
-                Name = Layer + ".command.bg" + ".input",
-                Parent = Layer + ".command.bg",
-                Components =
-                {
-                    new CuiInputFieldComponent
-                    {
-                        Color = "1 1 1 1", Font = "robotocondensed-bold.ttf", FontSize = 18, Align = TextAnchor.MiddleCenter,
-                        CharsLimit = 0, IsPassword = false, Text = "Enter command...", Command = "em_setcommand "
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-125.155 -17.916",
-                        OffsetMax = "125.155 17.916"
-                    }
-                }
-            });
-
-            
-
-            
-
-            container.Add(new CuiButton
-            {
-                Button = { Color = "0.3882353 0.3960785 0.3098039 1", Command = "em_createconfirm"},
-                Text =
-                {
-                    Text = "CREATE", Font = "robotocondensed-bold.ttf", FontSize = 22, Align = TextAnchor.MiddleCenter,
-                    Color = "0.8078431 0.8431373 0.5490196 1"
-                },
-                RectTransform =
-                {
-                    AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "237.359 -198.4",
-                    OffsetMax = "346.2 -165.34"
-                }
-            }, Layer, Layer + ".create.btn");
-
-            container.Add(new CuiButton
-            {
-                Button = { Color = "0.4078432 0.3372549 0.3019608 1", Command = "em_cancelcreate" },
-                Text =
-                {
-                    Text = "CANCEL", Font = "robotocondensed-bold.ttf", FontSize = 22, Align = TextAnchor.MiddleCenter,
-                    Color = "0.8156863 0.5568628 0.4745098 1"
-                },
-                RectTransform =
-                {
-                    AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "121.179 -198.4",
-                    OffsetMax = "230.021 -165.34"
-                }
-            }, Layer, Layer + ".delete.btn");
-            
-            CuiHelper.DestroyUi(player, Layer);
-            CuiHelper.AddUi(player, container);
-            
-            UI_UpdateCreator(player);
+            UI.CreateButton(ref container, panelName, "0.2 0.2 0.2 0.7", name, 18, posMin.x + " " + posMin.y, posMax.x + " " + posMax.y, $"Choose_Class {kit}");
         }
 
-        [ConsoleCommand("em.closecreatingevent")]
-        private void cmdCloseCreatingEvent(ConsoleSystem.Arg arg)
+        [ConsoleCommand("Choose_Class")]
+        void cmdChoose_Class(ConsoleSystem.Arg arg)
         {
-            if (arg.Player() == null)
+            var player = arg.connection.player as BasePlayer;
+            if (player == null)
                 return;
-
-            
-            CuiHelper.DestroyUi(arg.Player(), Layer);
-            _creatingEvents.Remove(arg.Player().userID);
+            CuiHelper.DestroyUi(player, "ClassSelector");
+            var className = arg.GetString(0).Replace("'", "");
+            bool noGear = false;
+            if (string.IsNullOrEmpty(player.GetComponent<EventPlayer>().currentClass)) noGear = true;
+            player.GetComponent<EventPlayer>().currentClass = className;
+            if (noGear) GivePlayerKit(player, null);
         }
-        private void ShowMainUI(BasePlayer player, int page = 1, string title = "EVENT MANAGER", bool showRandom = true, string command = SELECT_CCMD)
+        #endregion
+
+        #region Game Timer UI
+        private void StartTimer(int time)
         {
-            var parsedCommand = string.Join(" ", command.Split(':'));
-            var container = new CuiElementContainer();
-
-            container.Add(new CuiElement
+            AutoArenaTimers.Add(timer.Once(time, () => CancelEvent(GetMessage("TimeLimit"))));
+            PlayTimer = time;
+            foreach (var player in EventPlayers)
+                TimerCountdown(player.player);
+        }
+        private void TimerCountdown(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, "PlayTimer");
+            if (EventStarted)
             {
-                Name = SELECT_CUI_NAME,
-                Parent = "Overlay",
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "0 0 0 0.7254902",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                    },
-                    new CuiNeedsCursorComponent(),
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5",
-                        AnchorMax = "0.5 0.5",
-                        OffsetMin = "-485.471 -287.535",
-                        OffsetMax = "485.463 287.535"
-                    }
-               }
-            });
-
-            container.Add(new CuiElement
-            {
-                Name = SELECT_CUI_NAME + "_Bar",
-                Parent = SELECT_CUI_NAME,
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "1 1 1 1"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 0.5",
-                        AnchorMax = "1 0.5",
-                        OffsetMin = "15 226",
-                        OffsetMax = "-15 230"
-                    }
-                }
-            });
-
-            container.Add(new CuiElement
-            {
-                Name = SELECT_CUI_NAME + "_Title",
-                Parent = SELECT_CUI_NAME,
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = title,
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 24,
-                        Align = TextAnchor.MiddleLeft,
-                        Color = "1 1 1 1"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 0.5",
-                        AnchorMax = "1 0.5",
-                        OffsetMin = "15 237.2",
-                        OffsetMax = "15 284.54"
-                    }
-                }
-            });
-
-            if (showRandom)
-            {
-                container.Add(new CuiElement
-                {
-                    Name = SELECT_CUI_NAME + "_RandomStart",
-                    Parent = SELECT_CUI_NAME,
-                    Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.1 0.1 0.1 0.95",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        FadeIn = 0.1f,
-                        Command = $"{SELECT_CCMD} RANDOM START",
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 1",
-                        AnchorMax = "0.5 1",
-                        OffsetMin = "-75 -50",
-                        OffsetMax = "75 -10"
-                    }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = SELECT_CUI_NAME + "_RandomStart_Text",
-                    Parent = SELECT_CUI_NAME + "_RandomStart",
-                    Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "Random Start",
-                        FontSize = 20,
-                        FadeIn = 0.2f,
-                        Font = "robotocondensed-regular.ttf",
-                        Align = TextAnchor.MiddleCenter
-                    }
-                }
-                });
-
+                var timerElement = UI.CreateElementContainer("PlayTimer", "0.3 0.3 0.3 0.6", "0.45 0.91", "0.55 0.948", false);
+                TimeSpan dateDifference = TimeSpan.FromSeconds(PlayTimer);
+                string clock = string.Format("{0:D2}:{1:D2}", dateDifference.Minutes, dateDifference.Seconds);
+                UI.CreateLabel(ref timerElement, "PlayTimer", "", clock, 20, "0 0", "1 1");
+                CuiHelper.AddUi(player, timerElement);
+                PlayTimer--;
+                AutoArenaTimers.Add(timer.In(1, () => TimerCountdown(player)));
             }
+        }
+        private void DestroyUI(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, "ClassSelector");
+            CuiHelper.DestroyUi(player, "PlayTimer");
+        }
+        #endregion
 
-            container.Add(new CuiElement
+        #region Global Functions
+        bool hasAccess(ConsoleSystem.Arg arg)
+        {
+            if (arg.connection?.authLevel < 1)
             {
-                Name = SELECT_CUI_NAME + "_CloseBtn",
-                Parent = SELECT_CUI_NAME,
-                Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.5849056 0.2615521 0.2615521 1",
-                        Close = SELECT_CUI_NAME
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "1 1",
-                        AnchorMax = "1 1",
-                        OffsetMin = "-40 -40",
-                        OffsetMax = "-15 -15"
-                    }
-                }
-            });
-
-            container.Add(new CuiElement
-            {
-                Name = SELECT_CUI_NAME + "_CloseBtn_Text",
-                Parent = SELECT_CUI_NAME + "_CloseBtn",
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "X",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 21,
-                        Align = TextAnchor.MiddleCenter,
-                    }
-                }
-            });
-
-            var authors = EventList.Keys.ToList();
-
-            int startIndex = (page - 1) * 6;
-            int displayCount = Mathf.Min(EventList.Keys.Count - (page - 1) * 6, 6);
-
-            for (var i = startIndex; i < startIndex + displayCount; i++)
-            {
-                var name = SELECT_CUI_NAME + "_author_" + i;
-                container.Add(new CuiElement
-                {
-                    Name = name,
-                    Parent = SELECT_CUI_NAME,
-                    Components =
-                    {
-                        new CuiTextComponent
-                        {
-                            Text = authors[i].Name,
-                            FadeIn = (i % 6 + 1) * 0.2f,
-                            FontSize = 24,
-                            Font = "robotocondensed-regular.ttf",
-                            Color = authors[i].Color,
-                            Align = TextAnchor.UpperCenter
-                        },
-                        new CuiRectTransformComponent
-                        {
-                            AnchorMin = "0 0",
-                            AnchorMax = "0 0.85",
-                            OffsetMin = $"{i % 6 * 160} 0",
-                            OffsetMax = $"{(i % 6 + 1) * 160} 0",
-                        }
-                    }
-                });
-
-                for (var j = 0; j < EventList[authors[i]].Count; j++)
-                {
-                    var eventName = name + "_event" + j;
-                    var ev = EventList[authors[i]][j];
-
-                    container.Add(new CuiElement
-                    {
-                        Name = eventName,
-                        Parent = name,
-                        Components =
-                        {
-                            new CuiButtonComponent
-                            {
-                                Color = ev.Color,
-                                Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                                FadeIn = (i % 6 + 1) * (j + 1) * 0.1f,
-                                Command = $"{parsedCommand} {ev.displayName}",
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = "0.08 1",
-                                AnchorMax = "0.93 1",
-                                OffsetMin = $"0 -{((j + 1) * 55) + 20}",
-                                OffsetMax = $"0 -{(j * 55) + 35}"
-                            }
-                        }
-                    });
-
-                    container.Add(new CuiButton()
-                    {
-                        Button = { Color = "0.46 0.18 0.04 1.00", Command = $"em.delete {i} {j} {page}", Sprite = "assets/icons/close.png"},
-                        Text = { Text = ""},
-                        RectTransform = { AnchorMin = "1 1", AnchorMax = "1 1", OffsetMin = "-5 -5", OffsetMax = "5 5"}
-                    }, eventName, eventName + ".delete");
-
-                    container.Add(new CuiElement
-                    {
-                        Name = eventName + "_Text",
-                        Parent = eventName,
-                        Components =
-                        {
-                            new CuiTextComponent
-                            {
-                                Text = ev.displayName,
-                                FontSize = 16,
-                                FadeIn = (i % 6 + 1) * (j + 1) * 0.1f,
-                                Font = "robotocondensed-regular.ttf",
-                                Align = TextAnchor.MiddleCenter
-                            }
-                        }
-                    });
-                }
-
-                if (i != EventList.Keys.Count - 1 && i % 6 != 5)
-                {
-                    container.Add(new CuiElement
-                    {
-                        Name = name + "_sep",
-                        Parent = name,
-                        Components =
-                        {
-                            new CuiImageComponent
-                            {
-                                Color = "1 1 1 1",
-                                FadeIn = (i % 6 + 1) * 0.3f,
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = "0.99 0.05",
-                                AnchorMax = "1 0.98",
-                            }
-                        }
-                    });
-                }
+                SendReply(arg, GetMessage("MessagesPermissionsNotAllowed"));
+                return false;
             }
+            return true;
+        }
+        static void TPPlayer(BasePlayer player, Vector3 destination)
+        {        
+            if (player.net?.connection != null)
+                player.ClientRPCPlayer(null, player, "StartLoading", null, null, null, null, null);
+            ELog($"Teleporting {player.displayName} to {destination}");
+            StartSleeping(player);
+            player.MovePosition(destination);
+            if (player.net?.connection != null)
+                player.ClientRPCPlayer(null, player, "ForcePositionTo", destination);
+            player.TransformChanged();
+            if (player.net?.connection != null)
+                player.SetPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot, true);
+            player.UpdateNetworkGroup();
+            player.SendNetworkUpdateImmediate(false);
+            if (player.net?.connection == null) return;
+            try { player.ClearEntityQueue(null); } catch { }
+            player.SendFullSnapshot();
+        }
+        static void StartSleeping(BasePlayer player)
+        {
+            if (player.IsSleeping())
+                return;
+            ELog($"Put {player.displayName} to sleep");
+            player.SetPlayerFlag(BasePlayer.PlayerFlags.Sleeping, true);
+            if (!BasePlayer.sleepingPlayerList.Contains(player))
+                BasePlayer.sleepingPlayerList.Add(player);
+            player.CancelInvoke("InventoryUpdate");
+        }
+        #endregion
 
-            if (authors.Count > page * 6)
-            {
-                container.Add(new CuiElement
-                {
-                    Name = SELECT_CUI_NAME + "_NextPageBtn",
-                    Parent = SELECT_CUI_NAME,
-                    Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = $"{SHOW_PAGE_CCMD} {page + 1} {(showRandom ? '1' : '0')} {command.Trim()} {title}"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "1 0",
-                        AnchorMax = "1 0",
-                        OffsetMin = "-40 15",
-                        OffsetMax = "-15 40"
-                    }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = SELECT_CUI_NAME + "_NextPageBtn_Text",
-                    Parent = SELECT_CUI_NAME + "_NextPageBtn",
-                    Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = ">",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 21,
-                        Align = TextAnchor.MiddleCenter,
-                    }
-                }
-                });
-            }
-
-            if (page > 1)
-            {
-                container.Add(new CuiElement
-                {
-                    Name = SELECT_CUI_NAME + "_PrevPageBtn",
-                    Parent = SELECT_CUI_NAME,
-                    Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = $"{SHOW_PAGE_CCMD} {page - 1} {(showRandom ? '1' : '0')} {command} {title}"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 0",
-                        AnchorMax = "0 0",
-                        OffsetMin = "15 15",
-                        OffsetMax = "40 40"
-                    }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = SELECT_CUI_NAME + "_PrevPageBtn_Text",
-                    Parent = SELECT_CUI_NAME + "_PrevPageBtn",
-                    Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "<",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 21,
-                        Align = TextAnchor.MiddleCenter,
-                    }
-                }
-                });
-
-            }
-
-
-            CuiHelper.DestroyUi(player, SELECT_CUI_NAME);
-            CuiHelper.AddUi(player, container);
+        #region Player Management
+        [HookMethod("TeleportAllPlayersToEvent")]
+        public void TeleportAllPlayersToEvent()
+        {
+            ELog("TeleportAllPlayersToEvent");
+            foreach (EventPlayer eventplayer in EventPlayers.ToArray())
+                TeleportPlayerToEvent(eventplayer.player);
         }
 
-        private void ShowSelectUI(BasePlayer player, EventSettings settings, int page = 1)
+        void TeleportPlayerToEvent(BasePlayer player)
         {
-            var container = new CuiElementContainer();
-
-            container.Add(new CuiElement
-            {
-                Name = SELECTED_CUI_NAME,
-                Parent = "Overlay",
-                Components =
+            var eventPlayer = player.GetComponent<EventPlayer>();
+            if (eventPlayer == null || player.net?.connection == null) return;
+            ELog($"Tp2Event {player.displayName}");
+            var targetpos = Spawns.Call("GetRandomSpawn", EventSpawnFile);
+            if (targetpos is string)
+                return;
+            var newpos = Interface.Oxide.CallHook("EventChooseSpawn", player, targetpos);
+            if (newpos is Vector3)
+                targetpos = newpos;
+            if (newpos is bool)
+                if ((bool)newpos == false)
                 {
-                    new CuiImageComponent
-                    {
-                        Color = "0 0 0 0.3254902",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                    },
-                    new CuiNeedsCursorComponent(),
-                    new CuiNeedsKeyboardComponent(),
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 0",
-                        AnchorMax = "1 1"
-                    }
+                    ELog($"Tp2Event {player.displayName} newpos is false");
+                    timer.Once(3, () => TeleportPlayerToEvent(player));
+                        return;
                 }
-            });
+            if (!configData.KillDeserters)
+                ZoneManager?.Call("AddPlayerToZoneKeepinlist", ZoneName, player);
 
-            container.Add(new CuiElement
+           
+            TPPlayer(player, (Vector3)targetpos);
+
+            Interface.Oxide.CallHook("OnEventPlayerSpawn", player);
+        }
+        void SaveAllInventories()
+        {
+            ELog($"SaveAllInventories");
+            foreach (EventPlayer player in EventPlayers)
+                player?.SaveInventory();
+        }
+        void SaveAllPlayerStats()
+        {
+            ELog($"SaveAllStats");
+            foreach (EventPlayer player in EventPlayers)
+                player?.SaveHealth();
+        }
+        void SaveAllHomeLocations()
+        {
+            ELog($"SaveAllHomes");
+            foreach (EventPlayer player in EventPlayers)
+                player?.SaveHome();
+        }
+        void SetAllEventPlayers()
+        {
+            ELog($"SetAllPlayers");
+            foreach (EventPlayer player in EventPlayers)
+                SetEventPlayer(player);
+        }      
+        void RedeemInventory(BasePlayer player)
+        {            
+            EventPlayer eventplayer = player.GetComponent<EventPlayer>();
+            if (eventplayer == null) return;
+            ELog($"Redeem Inventory {player.displayName}");
+            if (player.IsDead() || player.health < 1)
             {
-                Name = SELECTED_CUI_NAME + "_Panel",
-                Parent = SELECTED_CUI_NAME,
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "0 0 0 0.9254902",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5",
-                        AnchorMax = "0.5 0.5",
-                        OffsetMin = "-350 -300",
-                        OffsetMax = "350 300"
-                    }
-                }
-            });
-
-            container.Add(new CuiElement
-            {
-                Name = "EventSelected_Title",
-                Parent = SELECTED_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 1",
-                        AnchorMax = "1 1",
-                        OffsetMin = "15 -66",
-                        OffsetMax = "15 0"
-                    },
-                    new CuiTextComponent
-                    {
-                        Text = settings.displayName.ToUpper(),
-                        Color = "0.9 0.9 0.9 1",
-                        Align = TextAnchor.MiddleLeft,
-                        FontSize = 25,
-                    }
-                }
-            });
-
-
-            container.Add(new CuiElement()
-            {
-                Name = SELECTED_CUI_NAME + "_Panel_CloseBtn",
-                Parent = SELECTED_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.5849056 0.2615521 0.2615521 1",
-                        Close = SELECTED_CUI_NAME,
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "1 1",
-                        AnchorMax = "1 1",
-                        OffsetMin = "-40 -40",
-                        OffsetMax = "-15 -15"
-                    }
-                }
-            });
-
-            container.Add(new CuiElement
-            {
-                Name = SELECTED_CUI_NAME + "_Panel_CloseBtn_Text",
-                Parent = SELECTED_CUI_NAME + "_Panel_CloseBtn",
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "X",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 21,
-                        Align = TextAnchor.MiddleCenter,
-                        Color = "1 1 1 1"
-                    }
-                }
-            });
-
-            container.Add(new CuiElement
-            {
-                Name = SELECTED_CUI_NAME + "_Panel_AddBtn",
-                Parent = SELECTED_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = NEW_ENTRY_CCMD + " " + settings.displayName
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "1 0",
-                        AnchorMax = "1 0",
-                        OffsetMin = "-100 15",
-                        OffsetMax = "-15 45",
-                    }
-                }
-            });
-
-            container.Add(new CuiElement
-            {
-                Name = SELECTED_CUI_NAME + "_Panel_AddBtn_Text",
-                Parent = SELECTED_CUI_NAME + "_Panel_AddBtn",
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Color = "1 1 1 1",
-                        FontSize = 20,
-                        Text = "+ ADD",
-                        Font = "robotocondensed-bold.ttf",
-                        Align = TextAnchor.MiddleCenter,
-                    }
-                }
-            });
-
-            container.Add(new CuiElement
-            {
-                Name = SELECTED_CUI_NAME + "_Panel_Line",
-                Parent = SELECTED_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "1 1 1 1"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 1",
-                        AnchorMax = "1 1",
-                        OffsetMin = "0 -66",
-                        OffsetMax = "0 -62"
-                    }
-                }
-            });
-
-            var entries = new List<EventSettingsEntry>();
-            foreach (var entry in config.Entries.Values)
-            {
-                if (entry.Name == settings.displayName)
-                {
-                    entries.Add(entry);
-                }
+                ELog($"RI {player.displayName} is dead");
+                timer.Once(5, () => RedeemInventory(player));
+                return;
             }
-
-            int startIndex = (page - 1) * 7;
-            int displayCount = Mathf.Min(entries.Count - (page - 1) * 7, 7);
-
-            for (var i = startIndex; i < startIndex + displayCount; i++)
+            eventplayer.player.inventory.Strip();
+            if (eventplayer.savedInventory)
+                eventplayer.RestoreInventory();
+        }
+        void TeleportPlayerHome(BasePlayer player)
+        {            
+            EventPlayer eventplayer = player.GetComponent<EventPlayer>();
+            if (eventplayer == null) return;
+            ELog($"TPPlayerHome {player.displayName}");
+            if (player.IsDead() || player.health < 1)
             {
-                var text = "";
-                if (entries[i].StaticTime)
-                {
-                    text += entries[i].Hour + ":" + entries[i].Minute + " - ";
-
-                    var days = new List<string>();
-                    for (var j = 0; j < 7; j++)
-                    {
-                        if (entries[i].DaysActive[j])
-                        {
-                            days.Add(DayList[j]);
-                        }
-                    }
-                    if (days.Count != 7)
-                    {
-                        text += days.ToSentence();
-                    }
-                    else
-                    {
-                        text += "Everyday";
-                    }
-                }
+                ELog($"TPPH {player.displayName} is dead");
+                return;
+            }
+            if (eventplayer.savedHome)
+                eventplayer.TeleportHome();
+        }
+        void TryErasePlayer(BasePlayer player)
+        {            
+            var eventplayer = player.GetComponent<EventPlayer>();
+            if (eventplayer == null) return;
+            ELog($"TryErase {player.displayName}");
+            if (!(eventplayer.inEvent) && !(eventplayer.savedHome) && !(eventplayer.savedInventory))
+            {
+                ELog($"{player.displayName} !inevent/savedhome/savedinventory");
+                eventplayer.enabled = false;
+                EventPlayers.Remove(eventplayer);
+                UnityEngine.Object.Destroy(eventplayer);
+            }
+        }
+        [HookMethod("GivePlayerKit")]
+        public void GivePlayerKit(BasePlayer player, string GiveKit)
+        {
+            ELog($"give {player.displayName} kit");
+            player.inventory.Strip();
+            if (!AutoEventLaunched)
+            {                
+                if (!UseClassSelection)
+                    Kits.Call("GiveKit", player, GiveKit);
                 else
                 {
-                    text += "Every ";
-                    if (entries[i].Hour > 0)
-                    {
-                        text += entries[i].Hour + " hour";
-                        if (entries[i].Hour > 1)
-                        {
-                            text += "s";
-                        }
-                    }
-
-                    if (entries[i].Hour > 0 && entries[i].Minute > 0)
-                    {
-                        text += " and ";
-                    }
-
-                    if (entries[i].Minute > 0)
-                    {
-                        text += entries[i].Minute + " minute";
-                        if (entries[i].Minute > 1)
-                        {
-                            text += "s";
-                        }
-                    }
-                    text += " - ";
-                    var days = new List<string>();
-                    for (var j = 0; j < 7; j++)
-                    {
-                        if (entries[i].DaysActive[j])
-                        {
-                            days.Add(DayList[j]);
-                        }
-                    }
-
-                    if (days.Count != 7)
-                    {
-                        text += days.ToSentence();
-                    }
-                    else
-                    {
-                        text += "Everyday";
-                    }
+                    if (string.IsNullOrEmpty(player.GetComponent<EventPlayer>().currentClass))
+                        SelectClass(player);
+                    else GiveClassKit(player);
                 }
-
-                if (entries[i].MinPlayers != 0)
-                {
-                    text += ", if the player count is above " + entries[i].MinPlayers.ToString();
-                }
-
-
-                var entryName = SELECTED_CUI_NAME + "_Panel_Entry" + i;
-                container.Add(new CuiElement
-                {
-                    Name = entryName,
-                    Parent = SELECTED_CUI_NAME + "_Panel",
-                    Components =
-                    {
-                        new CuiButtonComponent
-                        {
-                            Color = i % 2 == 0 ? "0.3 0.3 0.3 0.98" : "0.2 0.2 0.2 0.98",
-                            Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                            Command = EDIT_ENTRY_CCMD + " " + entries[i].GUID
-                        },
-                        new CuiRectTransformComponent
-                        {
-                            AnchorMin = "0 1",
-                            AnchorMax = "1 1",
-                            OffsetMax = $"-5 -{((i % 7 + 1) * 60) + 16}",
-                            OffsetMin = $"5 -{((i % 7 + 2) * 60) + 8}",
-                        }
-                    }
-                });
-
-                container.Add(new CuiElement()
-                {
-                    Name = entryName + "_text",
-                    Parent = entryName,
-                    Components =
-                    {
-                        new CuiTextComponent
-                        {
-                            Text = text,
-                            Color = "1 1 1 1",
-                            FontSize = 18,
-                            Align = TextAnchor.MiddleLeft
-                        },
-                        new CuiRectTransformComponent
-                        {
-                            AnchorMin = "0 0",
-                            AnchorMax = "1 1",
-                            OffsetMin = "10 0",
-                            OffsetMax = "-10 0"
-                        }
-                    }
-                });
             }
-
-
-            if (entries.Count > page * 7)
+            else
             {
-                container.Add(new CuiElement
+                if (!configData.z_AutoEvents.z_AutoEventSetup[EventAutoNum].UseClassSelector)
+                    Kits.Call("GiveKit", player, configData.z_AutoEvents.z_AutoEventSetup[EventAutoNum].Kit);
+                else
                 {
-                    Name = SELECTED_CUI_NAME + "_Panel" + "_NextPageBtn",
-                    Parent = SELECTED_CUI_NAME + "_Panel",
-                    Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = $"{SELECT_CCMD} {page + 1}|{settings.displayName}"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "1 0",
-                        AnchorMax = "1 0",
-                        OffsetMin = "-40 65",
-                        OffsetMax = "-15 90"
-                    }
+                    if (string.IsNullOrEmpty(player.GetComponent<EventPlayer>().currentClass))
+                        SelectClass(player);
+                    else GiveClassKit(player);
                 }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = SELECTED_CUI_NAME + "_Panel" + "_NextPageBtn_Text",
-                    Parent = SELECTED_CUI_NAME + "_Panel" + "_NextPageBtn",
-                    Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = ">",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 21,
-                        Align = TextAnchor.MiddleCenter,
-                    }
-                }
-                });
             }
-
-            if (page > 1)
+        }
+        private void GiveClassKit(BasePlayer player)
+        {
+            ELog($"Give class kit {player.displayName}");
+            Kits.Call("GiveKit", player, player.GetComponent<EventPlayer>().currentClass);
+            Interface.Oxide.CallHook("OnPlayerSelectClass", player);
+        }
+        void EjectPlayer(BasePlayer player)
+        {
+            ELog($"Ejecting {player.displayName}");
+            if (player.IsAlive())
             {
-                container.Add(new CuiElement
-                {
-                    Name = SELECTED_CUI_NAME + "_Panel" + "_PrevPageBtn",
-                    Parent = SELECTED_CUI_NAME + "_Panel",
-                    Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = $"{SELECT_CCMD} {page - 1}|{settings.displayName}"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 0",
-                        AnchorMax = "0 0",
-                        OffsetMin = "15 65",
-                        OffsetMax = "40 90"
-                    }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = SELECTED_CUI_NAME + "_Panel" + "_PrevPageBtn_Text",
-                    Parent = SELECTED_CUI_NAME + "_Panel" + "_PrevPageBtn",
-                    Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "<",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 21,
-                        Align = TextAnchor.MiddleCenter,
-                    }
-                }
-                });
-
+                ELog($"Eject Alive {player.displayName}");
+                player.SetPlayerFlag(BasePlayer.PlayerFlags.Wounded, false);
+                player.CancelInvoke("WoundingEnd");
+                player.metabolism.bleeding.value = 0f;
             }
+            if (!configData.KillDeserters)
+                if (!string.IsNullOrEmpty(ZoneName))
+                    ZoneManager?.Call("RemovePlayerFromZoneKeepinlist", ZoneName, player);
 
-            CuiHelper.DestroyUi(player, SELECTED_CUI_NAME);
-            CuiHelper.AddUi(player, container);
+            player.GetComponent<EventPlayer>().inEvent = false;
+            Interface.Oxide.CallHook("DisableBypass", player.userID);
+        }    
+        void RestorePlayerHealth(BasePlayer player)
+        {
+            ELog($"Restoring health {player.displayName}");
+            EventPlayer eventplayer = player.GetComponent<EventPlayer>();
+            if (eventplayer)
+            {
+                ELog($"RH {player.displayName} is event player");
+                player.health = eventplayer.health;
+                player.metabolism.calories.value = eventplayer.calories;
+                player.metabolism.hydration.value = eventplayer.hydration;
+                player.metabolism.bleeding.value = 0;
+                player.metabolism.SendChangesToClient();
+            }
+        }
+        #endregion
+
+        #region Event Management
+        [HookMethod("OpenEvent")]
+        public object OpenEvent()
+        {
+            if (EventOpen)
+                return $"{EventGameName} is already open";
+            ELog($"Opening Event {EventGameName}");
+
+            var success = Interface.Oxide.CallHook("CanEventOpen");
+            if (success is string)
+                return (string)success;
+            
+            EventOpen = true;
+            EventPlayers = new List<EventPlayer>();
+
+            var name = EventGameName;
+            if (EventMode == GameMode.Battlefield)
+                name = "Battlefield - ";
+            BroadcastToChat(string.Format(GetMessage("MessagesEventOpen"), name));
+            Interface.Oxide.CallHook("OnEventOpenPost");
+                     
+            ELog($"Game type: {EventMode}");
+            ELog($"AutoEvent: {AutoEventLaunched}");
+            ELog($"{EventGameName} Successfully opened");
+
+            return true;
+        }
+        void OnEventOpenPost() => OnEventOpenPostAutoEvent();
+        void OnEventOpenPostAutoEvent()
+        {
+            if (!AutoEventLaunched) return;
+            ELog($"Start auto event timers");
+            DestroyTimers();
+            var autocfg = configData.z_AutoEvents;
+            if (autocfg.AutoCancel_Timer != 0)
+                AutoArenaTimers.Add(timer.Once(autocfg.AutoCancel_Timer, () => CancelEvent(GetMessage("NoPlayers"))));
+            AutoArenaTimers.Add(timer.Repeat(configData.AnnounceEvent_Interval, 0, AnnounceEvent));
+        }
+        object CanEventOpen()
+        {
+            if (EventGameName == null) return GetMessage("MessagesEventNotSet");
+            else if (EventSpawnFile == null) return GetMessage("MessagesEventNoSpawnFile");
+            else if (EventOpen) return GetMessage("MessagesEventAlreadyOpened");
+
+            object success = Spawns.Call("GetSpawnsCount", EventSpawnFile);
+            if (success is string)
+                return (string)success;
+            return null;
         }
 
-        void EditEntryUI(BasePlayer player, EventSettingsEntry entry, int page = 1)
+        [HookMethod("CloseEvent")]
+        public object CloseEvent()
         {
-            var elements = new CuiElementContainer();
-
-            elements.Add(new CuiElement
+            if (!EventOpen) return GetMessage("MessagesEventAlreadyClosed");
+            EventOpen = false;
+            Interface.Oxide.CallHook("OnEventClosePost");
+            if (EventStarted)
+                BroadcastToChat(GetMessage("MessagesEventClose"));
+            else
+                BroadcastToChat(GetMessage("MessagesEventCancel"));
+            return true;
+        }
+        object AutoEventNext()
+        {
+            ELog($"Next auto event");
+            if (configData.z_AutoEvents.z_AutoEventSetup.Count == 0)
             {
-                Name = EDITENTRY_CUI_NAME,
-                Parent = "Overlay",
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "0 0 0 0.8"
-                    }
-                }
-            });
-
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel",
-                Parent = EDITENTRY_CUI_NAME,
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "0.1 0.1 0.1 0.9",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5",
-                        AnchorMax = "0.5 0.5",
-                        OffsetMin = entry.Name != "RANDOM START" ? "-300 -200" : "-300 -300",
-                        OffsetMax = entry.Name != "RANDOM START" ? "300 200" : "300 300",
-                    }
-                }
-            });
-
-
-            elements.Add(new CuiElement()
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_CloseBtn",
-                Parent = EDITENTRY_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.5849056 0.2615521 0.2615521 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = DELETE_ENTRY_CCMD + " " + entry.GUID
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "1 0",
-                        AnchorMax = "1 0",
-                        OffsetMin = "-270 15",
-                        OffsetMax = "-150 50"
-                    }
-                }
-            });
-
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_CloseBtn_Text",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_CloseBtn",
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "DELETE",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 17,
-                        Align = TextAnchor.MiddleCenter,
-                        Color = "1 1 1 1"
-                    }
-                }
-            });
-
-            elements.Add(new CuiElement()
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_SaveBtn",
-                Parent = EDITENTRY_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = SAVE_ENTRY_CCMD + " " + entry.GUID,
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "1 0",
-                        AnchorMax = "1 0",
-                        OffsetMin = "-135 15",
-                        OffsetMax = "-15 50"
-                    }
-                }
-            });
-
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_SaveBtn_Text",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_SaveBtn",
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "SAVE",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 17,
-                        Align = TextAnchor.MiddleCenter,
-                        Color = "1 1 1 1"
-                    }
-                }
-            });
-
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_Title",
-                Parent = EDITENTRY_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 1",
-                        AnchorMax = "1 1",
-                        OffsetMin = "30 -66",
-                        OffsetMax = "30 0"
-                    },
-                    new CuiTextComponent
-                    {
-                        Text = "EDIT START TIME - " + entry.Name,
-                        Color = "0.9 0.9 0.9 1",
-                        Align = TextAnchor.MiddleLeft,
-                        FontSize = 25,
-                    }
-                }
-            });
-
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_StaticTimeChkBx",
-                Parent = EDITENTRY_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "1 1 1 1",
-                        Command = SET_ENTRY_CCMD + " " + entry.GUID + " static"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 1",
-                        AnchorMax = "0 1",
-                        OffsetMin = "36 -96",
-                        OffsetMax = "58 -74",
-                    }
-                }
-            });
-
-            if (entry.StaticTime)
-            {
-                elements.Add(new CuiElement
-                {
-                    Name = EDITENTRY_CUI_NAME + "_Panel_StaticTimeChkBxTicked",
-                    Parent = EDITENTRY_CUI_NAME + "_Panel_StaticTimeChkBx",
-                    Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        OffsetMin = "3 3",
-                        OffsetMax = "-3 -3",
-                    }
-                }
-                });
-
+                ELog($"No events setup");
+                AutoEventLaunched = false;
+                return GetMessage("NoAuto");
             }
-
-            elements.Add(new CuiElement
+            bool successful = false;
+            for (int i = 0; i < configData.z_AutoEvents.z_AutoEventSetup.Count; i++)
             {
-                Name = EDITENTRY_CUI_NAME + "_Panel_StaticTimeTitle",
-                Parent = EDITENTRY_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "STATIC TIME?",
-                        FontSize = 20,
-                        Color = "0.9 0.9 0.9 1",
-                        Align = TextAnchor.UpperCenter
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 1",
-                        AnchorMax = "0 1",
-                        OffsetMin = "52 -105",
-                        OffsetMax = "220 -75"
-                    }
-                }
-            });
+                EventAutoNum++;
+                if (EventAutoNum >= configData.z_AutoEvents.z_AutoEventSetup.Count) EventAutoNum = 0;
 
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_Time",
-                Parent = EDITENTRY_CUI_NAME + "_Panel",
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "0.1 0.1 0.1 0"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 1",
-                        AnchorMax = "0 1",
-                        OffsetMin = "30 -235",
-                        OffsetMax = "564 -115",
-                    }
-                }
-            });
+                var autocfg = configData.z_AutoEvents.z_AutoEventSetup[EventAutoNum];
 
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_Time_Title",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_Time",
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = entry.StaticTime ? "TIME" : "EVERY",
-                        Align = TextAnchor.UpperLeft,
-                        Color = "0.9 0.9 0.9 1",
-                        FontSize = 22
-                    }
-                }
-            });
+                object success = SelectEvent(autocfg.GameType);
+                if (success is string) { continue; }
 
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_TimeHour",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_Time",
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "0.8 0.8 0.8 0.8",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5",
-                        AnchorMax = "0.5 0.5",
-                        OffsetMin = "-264 -25",
-                        OffsetMax = "-214 25"
-                    }
-                }
-            });
+                success = SelectSpawnfile(autocfg.Spawnfile);
+                if (success is string) { continue; }
 
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_TimeHourField",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_TimeHour",
-                Components =
-                {
-                    new CuiInputFieldComponent
-                    {
-                        NeedsKeyboard = true,
-                        Autofocus = true,
-                        LineType = UnityEngine.UI.InputField.LineType.SingleLine,
-                        CharsLimit = 2,
-                        IsPassword = false,
-                        Align = TextAnchor.MiddleCenter,
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 30,
-                        Color = "0 0 0 1",
-                        Text = entry.Hour.ToString(),
-                        Command = SET_ENTRY_CCMD + " " + entry.GUID + " hour "
-                    }
-                }
-            });
+                success = SelectMinplayers(autocfg.MinimumPlayers);
+                if (success is string) { continue; }
 
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_TimeColon",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_Time",
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = ":",
-                        FontSize = 40,
-                        Align = TextAnchor.MiddleCenter,
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5",
-                        AnchorMax = "0.5 0.5",
-                        OffsetMin = "-213 -25",
-                        OffsetMax = "-195 25"
-                    }
-                }
-            });
+                success = SelectMaxplayers(autocfg.MaximumPlayers);
+                if (success is string) { continue; }
 
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_TimeMinute",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_Time",
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "0.8 0.8 0.8 0.8",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5",
-                        AnchorMax = "0.5 0.5",
-                        OffsetMin = "-195 -25",
-                        OffsetMax = "-145 25"
-                    }
-                }
-            });
+                success = Interface.Oxide.CallHook("CanEventOpen");
+                if (success is string) { continue; }
 
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_TimeMinuteField",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_TimeMinute",
-                Components =
-                {
-                    new CuiInputFieldComponent
-                    {
-                        NeedsKeyboard = true,
-                        Autofocus = true,
-                        LineType = UnityEngine.UI.InputField.LineType.SingleLine,
-                        CharsLimit = 2,
-                        IsPassword = false,
-                        Align = TextAnchor.MiddleCenter,
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 30,
-                        Color = "0 0 0 1",
-                        Text = entry.Minute.ToString(),
-                        Command = SET_ENTRY_CCMD + " " + entry.GUID + " minute "
-                    }
-                }
-            });
+                if (!string.IsNullOrEmpty(autocfg.ZoneID))
+                    ZoneName = autocfg.ZoneID;
 
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_MinPlayers_Title",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_Time",
-                Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "MIN PLAYER COUNT",
-                        Align = TextAnchor.UpperLeft,
-                        Color = "0.9 0.9 0.9 1",
-                        FontSize = 22
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.6 0.7",
-                        AnchorMax = "1 1",
-                    }
-                }
-            });
-
-
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_MinPlayers",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_Time",
-                Components =
-                {
-                    new CuiImageComponent
-                    {
-                        Color = "0.8 0.8 0.8 0.8",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0.5 0.5",
-                        AnchorMax = "0.5 0.5",
-                        OffsetMin = "54 -25",
-                        OffsetMax = "154 25"
-                    }
-                }
-            });
-
-            elements.Add(new CuiElement
-            {
-                Name = EDITENTRY_CUI_NAME + "_Panel_MinPlayersField",
-                Parent = EDITENTRY_CUI_NAME + "_Panel_MinPlayers",
-                Components =
-                {
-                    new CuiInputFieldComponent
-                    {
-                        NeedsKeyboard = true,
-                        Autofocus = true,
-                        LineType = UnityEngine.UI.InputField.LineType.SingleLine,
-                        CharsLimit = 4,
-                        IsPassword = false,
-                        Align = TextAnchor.MiddleCenter,
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 30,
-                        Color = "0 0 0 1",
-                        Text = entry.MinPlayers.ToString(),
-                        Command = SET_ENTRY_CCMD + " " + entry.GUID + " minplayers "
-                    }
-                }
-            });
-
-            for (var i = 0; i < DayList.Count; i++)
-            {
-                var boxName = EDITENTRY_CUI_NAME + "_PanelChkBxDay" + i;
-
-                elements.Add(new CuiElement
-                {
-                    Name = boxName,
-                    Parent = EDITENTRY_CUI_NAME + "_Panel",
-                    Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "1 1 1 1",
-                        Command = SET_ENTRY_CCMD + " " + entry.GUID + " day "  + i
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 1",
-                        AnchorMax = "0 1",
-                        OffsetMin = $"{(i % 4 * 140) + 35} {(i >= 4 ? -265 : -315)}",
-                        OffsetMax = $"{(((i % 4) + 1) * 140) - 80} {(i >= 4 ? -240 : -290)}",
-                    }
-                }
-                });
-
-                if (entry.DaysActive[i])
-                {
-                    elements.Add(new CuiElement
-                    {
-                        Name = boxName + "Ticked",
-                        Parent = boxName,
-                        Components =
-                        {
-                        new CuiImageComponent
-                        {
-                            Color = "0.35 0.58 0.04 1",
-                        },
-                        new CuiRectTransformComponent
-                        {
-                            OffsetMin = "3 3",
-                            OffsetMax = "-3 -3",
-                        }
-                        }
-                    });
-                }
-
-                elements.Add(new CuiElement
-                {
-                    Name = boxName + "_Text",
-                    Parent = EDITENTRY_CUI_NAME + "_Panel",
-                    Components =
-                    {
-                        new CuiTextComponent
-                        {
-                            Text = DayList[i].ToUpper(),
-                            Align = TextAnchor.MiddleLeft,
-                            FontSize = 17,
-                            Color = "0.9 0.9 0.9 1",
-                        },
-                        new CuiRectTransformComponent
-                        {
-                            AnchorMin = "0 1",
-                            AnchorMax = "0 1",
-                            OffsetMin = $"{(i % 4 * 140) + 70} {(i >= 4 ? -265 : -315)}",
-                            OffsetMax = $"{((i % 4) + 1) * 155} {(i >= 4 ? -240 : -290)}",
-                        }
-                    }
-                });
+                successful = true;
+                break;
             }
-
-            if (entry.Name == "RANDOM START")
+            if (!successful)
             {
-                elements.Add(new CuiElement
+                ELog($"No events init");
+                return GetMessage("NoAutoInit");
+            }
+            ELog($"Auto init success");
+            AutoArenaTimers.Add(timer.Once(configData.z_AutoEvents.GameInterval, () => OpenEvent()));
+            return null;
+        }
+        void OnEventStartPost()
+        {
+            ELog($"Event starting");
+            DestroyTimers();
+            if (AutoEventLaunched)
+                OnEventStartPostAutoEvent();
+            else if (EventMode == GameMode.Battlefield)
+                StartTimer(configData.Battlefield_Timer);
+            if (configData.AnnounceDuring_Event)
+                AutoArenaTimers.Add(timer.Repeat(configData.AnnounceEvent_Interval, 0, () => AnnounceDuringEvent()));
+        }
+        void OnEventStartPostAutoEvent()
+        {           
+            if (configData.z_AutoEvents.z_AutoEventSetup[EventAutoNum].TimeLimit != 0)
+                StartTimer(configData.z_AutoEvents.z_AutoEventSetup[EventAutoNum].TimeLimit);
+        }
+        void DestroyTimers()
+        {
+            ELog($"Destroying timers");
+            foreach (Timer eventtimer in AutoArenaTimers)
+                eventtimer.Destroy();
+            AutoArenaTimers.Clear();
+        }
+        void CancelEvent(string reason)
+        {
+            ELog($"Cancelling event");
+            var message = GetMessage("EventCancelled");
+            object success = Interface.Oxide.CallHook("OnEventCancel");
+            if (success != null)
+            {
+                if (success is string)
+                    message = (string)success;
+                else
+                    return;
+            }
+            BroadcastToChat(string.Format(message, EventGameName, reason));
+            DestroyTimers();
+            if (EventStarted)
+                EndEvent();
+            else if (AutoEventLaunched)
+                AutoEventNext();
+        }
+        void AnnounceEvent()
+        {
+            var message = GetMessage("EventOpen");
+            object success = Interface.Oxide.CallHook("OnEventAnnounce");
+            if (success is string)
+            {
+                message = (string)success;
+            }
+            BroadcastToChat(string.Format(message, EventGameName));
+        }
+        void AnnounceDuringEvent()
+        {
+            if (configData.AnnounceDuring_Event)
+            {
+                if (EventOpen && EventStarted)
                 {
-                    Name = EDITENTRY_CUI_NAME + "_Panel_AddEventsBtn",
-                    Parent = EDITENTRY_CUI_NAME + "_Panel",
-                    Components =
+                    var message = GetMessage("StillOpen");
+                    foreach (BasePlayer player in BasePlayer.activePlayerList)
                     {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = $"{SHOW_PAGE_CCMD} 1 0 {SET_ENTRY_CCMD + ":" + entry.GUID + ":add"} SELECT EVENT FROM LIST",
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 1",
-                        AnchorMax = "0 1",
-                        OffsetMin = "35 -380",
-                        OffsetMax = "200 -340"
+                        if (!player.GetComponent<EventPlayer>())
+                            SendReply(player, string.Format(message, EventGameName));
                     }
-                    }
-                });
-
-                elements.Add(new CuiElement
-                {
-                    Name = EDITENTRY_CUI_NAME + "_Panel_AddEventsBtn_Text",
-                    Parent = EDITENTRY_CUI_NAME + "_Panel_AddEventsBtn",
-                    Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "ADD EVENT",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 20,
-                        Align = TextAnchor.MiddleCenter,
-                        Color = "1 1 1 1"
-                    }
-                }
-                });
-
-
-                if (entry.RandomStartEvents.Count > page * 12)
-                {
-                    elements.Add(new CuiElement
-                    {
-                        Name = EDITENTRY_CUI_NAME + "_Panel_NextPageBtn",
-                        Parent = EDITENTRY_CUI_NAME + "_Panel",
-                        Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = $"{EDIT_ENTRY_CCMD} {entry.GUID} {page + 1}"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "1 0",
-                        AnchorMax = "1 0",
-                        OffsetMin = "-40 60",
-                        OffsetMax = "-15 85"
-                    }
-                }
-                    });
-
-                    elements.Add(new CuiElement
-                    {
-                        Name = EDITENTRY_CUI_NAME + "_Panel_NextPageBtn_Text",
-                        Parent = EDITENTRY_CUI_NAME + "_Panel_NextPageBtn",
-                        Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = ">",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 21,
-                        Align = TextAnchor.MiddleCenter,
-                    }
-                }
-                    });
-                }
-
-                if (page > 1)
-                {
-                    elements.Add(new CuiElement
-                    {
-                        Name = EDITENTRY_CUI_NAME + "_Panel_PrevPageBtn",
-                        Parent = EDITENTRY_CUI_NAME + "_Panel",
-                        Components =
-                {
-                    new CuiButtonComponent
-                    {
-                        Color = "0.35 0.58 0.04 1",
-                        Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat",
-                        Command = $"{EDIT_ENTRY_CCMD} {entry.GUID} {page - 1}"
-                    },
-                    new CuiRectTransformComponent
-                    {
-                        AnchorMin = "0 0",
-                        AnchorMax = "0 0",
-                        OffsetMin = "15 60",
-                        OffsetMax = "40 85"
-                    }
-                }
-                    });
-
-                    elements.Add(new CuiElement
-                    {
-                        Name = EDITENTRY_CUI_NAME + "_Panel_PrevPageBtn_Text",
-                        Parent = EDITENTRY_CUI_NAME + "_Panel_PrevPageBtn",
-                        Components =
-                {
-                    new CuiTextComponent
-                    {
-                        Text = "<",
-                        Font = "robotocondensed-bold.ttf",
-                        FontSize = 21,
-                        Align = TextAnchor.MiddleCenter,
-                    }
-                }
-                    });
-
-                }
-                int startIndex = (page - 1) * 12;
-                int displayCount = Mathf.Min(entry.RandomStartEvents.Count - (page - 1) * 12, 12);
-
-
-                for (int i = startIndex; i < startIndex + displayCount; i++)
-                {
-                    elements.Add(new CuiElement
-                    {
-                        Name = EDITENTRY_CUI_NAME + "_Panel_RandomStartEvText" + i,
-                        Parent = EDITENTRY_CUI_NAME + "_Panel",
-                        Components =
-                        {
-                            new CuiTextComponent
-                            {
-                                Color = "0.7 0.7 0.7 1",
-                                Align = TextAnchor.MiddleLeft,
-                                FadeIn = 0.1f * (i % 12 + 1),
-                                Font = "robotocondensed-bold.ttf",
-                                FontSize = 19,
-                                Text = entry.RandomStartEvents[i],
-                                VerticalOverflow = VerticalWrapMode.Truncate
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = "0 1",
-                                AnchorMax = "0 1",
-                                OffsetMin = $"{i % 12 / 4 * 190 + 20} {-405 - (i % 4 + 1) * 25 - (i % 4 * 5)}",
-                                OffsetMax = $"{i % 12 / 4 * 190 + 160 + 20} {-380 - i % 4 * 25 - (i % 4 * 5)}"
-                            }
-                        }
-                    });
-
-                    elements.Add(new CuiElement
-                    {
-                        Name = EDITENTRY_CUI_NAME + "_Panel_RandomStartEvDelBtn" + i,
-                        Parent = EDITENTRY_CUI_NAME + "_Panel",
-                        Components =
-                        {
-                            new CuiButtonComponent
-                            {
-                                Color = "0.5849056 0.2615521 0.2615521 1",
-                                Command = SET_ENTRY_CCMD + " " + entry.GUID + " del " + i
-                            },
-                            new CuiRectTransformComponent
-                            {
-                                AnchorMin = "0 1",
-                                AnchorMax = "0 1",
-                                OffsetMin = $"{i % 12 / 4 * 190 + 160 + 20} {-395 - (i % 4 + 1) * 20 - (i % 4 * 10)}",
-                                OffsetMax = $"{i % 12 / 4 * 190 + 160 + 20 + 20} {-395 - i % 4 * 20 - (i % 4 * 10)}"
-                            }
-                        }
-                    });
-                    elements.Add(new CuiElement
-                    {
-                        Name = EDITENTRY_CUI_NAME + "_Panel_RandomStartEvDelBtn" + i + "_Text",
-                        Parent = EDITENTRY_CUI_NAME + "_Panel_RandomStartEvDelBtn" + i,
-                        Components =
-                        {
-                            new CuiTextComponent
-                            {
-                                Text = "X",
-                                Font = "robotocondensed-bold.ttf",
-                                FontSize = 17,
-                                Align = TextAnchor.MiddleCenter,
-                            }
-                        }
-                    });
                 }
             }
+        }
+        object LaunchEvent()
+        {
+            ELog($"Launching auto events");
+            AutoEventLaunched = true;
+            if (!EventStarted)
+            {
+                if (!EventOpen)
+                {
+                    object success = AutoEventNext();
+                    if (success is string)                    
+                        return (string)success;
+                    
+                    success = OpenEvent();
+                    if (success is string)                    
+                        return (string)success;                    
+                }
+                else OnEventOpenPostAutoEvent();
+            }
+            else OnEventStartPostAutoEvent();
+            ELog($"Launch successful");
+            return null;
+        }
 
-            CuiHelper.DestroyUi(player, EDITENTRY_CUI_NAME);
-            CuiHelper.AddUi(player, elements);
+        [HookMethod("EndEvent")]
+        public object EndEvent()
+        {
+            if (EventEnded) return GetMessage("MessagesEventNoGamePlaying");
+            ELog($"Ending event");
+            foreach (var player in EventPlayers)
+                Interface.Oxide.CallHook("DestroyUI", player.player);
+
+            BroadcastToChat(string.Format(GetMessage("MessagesEventPEnd"), EventGameName));
+            EventOpen = false;
+            EventStarted = false;
+            EventPending = false;
+            EventEnded = true;
+            EnableGod();
+            BroadcastToChat(string.Format(GetMessage("MessagesEventEnd"), EventGameName));
+            Interface.Oxide.CallHook("OnEventEndPre");
+            ProcessPlayers();
+            return true;
+        }       
+        void ProcessPlayers()
+        {
+            ELog($"Processing players");
+            for (int i = 0; i < EventPlayers.Count; i++)
+                RestorePlayer(EventPlayers[i]);
+
+            timer.Once(5, () =>
+            {
+                if (EventPlayers.Count > 0)
+                {
+                    ELog($"EventPlayers.Count > 0, count is {EventPlayers.Count}");
+                    ProcessPlayers();
+                    return;
+                }
+                ELog($"EventPlayers.Count is 0");
+                DestroyGame();
+                Interface.Oxide.CallHook("OnEventEndPost");
+            });
+
+            
+        }
+        void RestorePlayer(EventPlayer p)
+        {            
+            if (p == null) return;
+            ELog($"Restoring {p.player.displayName}");
+            if (p.player.IsDead() || !p.player.IsAlive())
+            {
+                ELog($"RP {p.player.displayName} is dead");
+                var pos = Spawns.Call("GetRandomSpawn", EventSpawnFile);
+                if (pos is Vector3) p.player.RespawnAt((Vector3)pos, new Quaternion());
+                else p.player.Respawn();
+                return;
+            }
+            if (p.player.IsWounded() || p.player.health < 2)
+            {
+                ELog($"RP {p.player.displayName} is wounded");
+                p.player.SetPlayerFlag(BasePlayer.PlayerFlags.Wounded, false);
+                RestorePlayerHealth(p.player);
+                return;
+            }
+            if (p.player.IsSleeping())
+            {
+                ELog($"RP {p.player.displayName} is sleeping");
+                p.player.EndSleeping();
+                return;
+            }
+            ELog($"Starting restoration of {p.player.displayName}");
+            p.RestoreInventory();
+            p.TeleportHome();
+            RestorePlayerHealth(p.player);
+            Godmode.Remove(p.player.userID);
+            if (!p.savedHome && !p.savedInventory)
+            {
+                ELog($"{p.player.displayName} has no saved home or inv, try erase");
+                EjectPlayer(p.player);
+                TryErasePlayer(p.player);
+            }            
+        }
+        
+        void EnableGod()
+        {
+            Godmode = new List<ulong>();
+            foreach (EventPlayer player in EventPlayers)
+            {
+                ELog($"Godmode added {player.player.displayName}");
+                Godmode.Add(player.player.userID);
+                player.player.metabolism.bleeding.value = 0;
+                player.player.metabolism.SendChangesToClient();
+            }
+        }
+        void DisableGod()
+        {      
+            Godmode.Clear();
+        }
+        void DestroyGame()
+        {
+            ELog($"Destroying game");
+            DestroyTimers();
+            EventPlayers.Clear();
+            ZoneName = "";
+            var objects = UnityEngine.Object.FindObjectsOfType<EventPlayer>();
+            if (objects != null)
+                foreach (var gameObj in objects)
+                    UnityEngine.Object.Destroy(gameObj);
+            ELog($"{objects.Count()} eventplayer components left over");
+        }
+        object CanEventStart()
+        {
+            if (EventGameName == null) return GetMessage("MessagesEventNotSet");
+            if (EventSpawnFile == null) return GetMessage("MessagesEventNoSpawnFile");
+            return EventStarted ? GetMessage("MessagesEventAlreadyStarted") : null;
+        }
+
+        [HookMethod("StartEvent")]
+        public object StartEvent()
+        {
+            object success = Interface.Oxide.CallHook("CanEventStart");
+            if (success is string)
+                return (string)success;
+            ELog($"StartEvent");
+            Interface.Oxide.CallHook("OnEventStartPre");
+            if (!AutoEventLaunched)
+                ZoneName = (string)Interface.Oxide.CallHook("OnRequestZoneName");
+            BroadcastToChat(string.Format(GetMessage("MessagesEventBegin"), EventGameName));
+            EventStarted = true;
+            EventEnded = false;
+            DestroyTimers();
+            SaveAllInventories();
+            SaveAllHomeLocations();
+            SaveAllPlayerStats();
+            SetAllEventPlayers();
+            TeleportAllPlayersToEvent();
+            Interface.Oxide.CallHook("OnEventStartPost");
+            ELog($"Event Starting");
+            return true;
+        }        
+       
+        void SetEventPlayer(EventPlayer player)
+        {
+            ELog($"event player setup {player.player.displayName}");
+            Interface.Oxide.CallHook("EnableBypass", player.player.userID);
+            player.inEvent = true;
+            player.enabled = true;
+            player.SaveHome();
+            player.SaveInventory();
+            player.SaveHealth();
+        }
+        object JoinEvent(BasePlayer player)
+        {
+            if (player.GetComponent<EventPlayer>())
+                if (EventPlayers.Contains(player.GetComponent<EventPlayer>()))
+                    return GetMessage("MessagesEventAlreadyJoined");
+            ELog($"{player.displayName} is joining the event");
+            object success = Interface.Oxide.CallHook("CanEventJoin", player);
+            if (success is string)
+                return (string)success;
+            var eventPlayer = player.GetComponent<EventPlayer>() ?? player.gameObject.AddComponent<EventPlayer>();
+            EventPlayers.Add(eventPlayer);
+            if (EventStarted)
+            {
+                ELog($"Event has already started, TPing {player.displayName}");
+                if (EventMode == GameMode.Battlefield || (AutoEventLaunched && configData.z_AutoEvents.z_AutoEventSetup[EventAutoNum].TimeLimit != 0))
+                    TimerCountdown(player);
+                SetEventPlayer(eventPlayer);
+                BroadcastToChat(string.Format(GetMessage("MessagesEventJoined"), player.displayName, EventPlayers.Count));
+                Interface.Oxide.CallHook("OnEventJoinPost", player);
+                TeleportPlayerToEvent(player);
+                return true;
+            }            
+
+            BroadcastToChat(string.Format(GetMessage("MessagesEventJoined"), player.displayName, EventPlayers.Count));
+            Interface.Oxide.CallHook("OnEventJoinPost", player);
+            return true;
+        }
+        object CanEventJoin(BasePlayer player)
+        {
+            if (!EventOpen)
+                return GetMessage("EventClosed");
+
+            if (EventMaxPlayers != 0 && EventPlayers.Count >= EventMaxPlayers)
+                return string.Format(GetMessage("MessagesEventMaxPlayers"), EventGameName);
+                       
+            return null;
+        }
+        object OnEventJoinPost(BasePlayer player)
+        {
+            if (!AutoEventLaunched) return null;
+            var autocfg = configData.z_AutoEvents.z_AutoEventSetup[EventAutoNum];
+            if (EventPlayers.Count >= autocfg.MinimumPlayers && !EventStarted && EventEnded && !EventPending)
+            {                
+                float timerStart = autocfg.TimeToJoin;
+                BroadcastToChat(string.Format(GetMessage("MessagesEventMinPlayers"), EventGameName, timerStart));
+
+                EventPending = true;
+                DestroyTimers();
+                AutoArenaTimers.Add(timer.Once(timerStart, () => StartEvent()));
+            }
+            return null;
+        }
+        void OnEventEndPost()
+        {
+            if (AutoEventLaunched)
+                AutoEventNext();
+        }
+        [HookMethod("LeaveEvent")]
+        public object LeaveEvent(BasePlayer player)
+        {
+            var eventPlayer = player.GetComponent<EventPlayer>();
+            if (eventPlayer == null && !EventPlayers.Contains(eventPlayer))
+                return GetMessage("NotInEvent");
+            ELog($"{player.displayName} is leaving the event");
+            Interface.Oxide.CallHook("OnEventLeavePre");
+            Interface.Oxide.CallHook("DisableBypass", player.userID);
+            eventPlayer.inEvent = false;
+
+            if (!EventEnded || !EventStarted)
+                BroadcastToChat(string.Format(GetMessage("MessagesEventLeft"), player.displayName, (EventPlayers.Count - 1)));
+
+            if (!configData.KillDeserters)
+                if (!string.IsNullOrEmpty(ZoneName))
+                    ZoneManager?.Call("RemovePlayerFromZoneKeepinlist", ZoneName, player);
+
+            if (EventStarted)
+            {
+                player.inventory.Strip();
+                RedeemInventory(player);
+                TeleportPlayerHome(player);
+                RestorePlayerHealth(player);
+                EjectPlayer(player);
+                TryErasePlayer(player);
+                Interface.Oxide.CallHook("OnEventLeavePost", player);
+            }
+            else
+            {
+                EventPlayers.Remove(eventPlayer);
+                UnityEngine.Object.Destroy(eventPlayer);
+            }
+            return true;
+        }
+        [HookMethod("SelectEvent")]
+        public object SelectEvent(string name)
+        {
+            if (!(EventGames.Contains(name))) return string.Format(GetMessage("MessagesEventNotAnEvent"), name);
+            if (EventStarted || EventOpen) return GetMessage("MessagesEventCloseAndEnd");
+            EventGameName = name;
+            Interface.Oxide.CallHook("OnSelectEventGamePost", name);
+            return true;
+        }
+
+        [HookMethod("SelectSpawnfile")]
+        public object SelectSpawnfile(string name)
+        {
+            if (name == null) return GetMessage("MessagesErrorSpawnfileIsNull");
+
+            var eventset = CheckEventSet();
+            if (eventset is string)
+                return (string)eventset;
+
+            object success = Interface.Oxide.CallHook("OnSelectSpawnFile", name);
+            if (success == null)
+                return string.Format(GetMessage("MessagesEventNotAnEvent"), EventGameName);            
+
+            EventSpawnFile = name;
+            success = Spawns.Call("GetSpawnsCount", EventSpawnFile);
+
+            if (success is string)
+            {
+                EventSpawnFile = null;
+                return (string)success;
+            }
+
+            return true;
+        }
+        object SelectKit(string kitname)
+        {
+            if (kitname == null) return GetMessage("NullKitname");
+            var eventset = CheckEventSet();
+            if (eventset is string)
+                return (string)eventset;
+
+            object success = Kits.Call("isKit", kitname);
+            if (!(success is bool))
+                return GetMessage("NoKits");
+            if (!(bool)success)
+                return string.Format(GetMessage("KitNotExist"), kitname);
+            success = Interface.Oxide.CallHook("OnSelectKit", kitname);
+            if (success == null)
+                return $"{EventGameName} doesn't let you choose a kit";
+            return true;
+        }       
+        object SelectMaxplayers(int num)
+        {
+            var eventset = CheckEventSet();
+            if (eventset is string)
+                return (string)eventset;
+
+            Interface.Oxide.CallHook("OnPostSelectMaxPlayers", num);
+            return true;
+        }
+        object SelectMinplayers(int num)
+        {
+            var eventset = CheckEventSet();
+            if (eventset is string)
+                return (string)eventset;
+
+            Interface.Oxide.CallHook("OnPostSelectMinPlayers", num);
+            return true;
+        }
+        object SelectNewZone(MonoBehaviour monoplayer, string radius)
+        {
+            var eventset = CheckEventSet();
+            if (eventset is string)
+                return (string)eventset;
+
+            if (EventStarted || EventOpen) return GetMessage("MessagesEventCloseAndEnd");
+            Interface.Oxide.CallHook("OnSelectEventZone", monoplayer, radius);
+            return true;
+        }
+        private object CheckEventSet()
+        {
+            if (string.IsNullOrEmpty(EventGameName)) return GetMessage("MessagesEventNotSet");
+            if (!(EventGames.Contains(EventGameName))) return string.Format(GetMessage("MessagesEventNotAnEvent"), EventGameName);
+            return null;
+        }
+
+        [HookMethod("RegisterEventGame")]
+        public object RegisterEventGame(string name)
+        {
+            if (!(EventGames.Contains(name)))
+                EventGames.Add(name);
+            Puts(string.Format("Registered event game: {0}", name));
+            Interface.Oxide.CallHook("OnSelectEventGamePost", EventGameName);
+
+            if (EventGameName == name)
+            {
+                object success = SelectEvent(EventGameName);
+                if (success is string)
+                    Puts((string)success);
+            }            
+            return true;
+        }
+        void OnExitZone(string zoneId, BasePlayer player)
+        {
+            if (EventStarted)
+                if (player.GetComponent<EventPlayer>())
+                    if (zoneId.Equals(ZoneName))
+                        if (configData.KillDeserters)
+                        {
+                            ELog($"{player.displayName} is attempting to leave the zone");
+                            player.GetComponent<EventPlayer>().OOB = true;
+                            if (!KillTimers.ContainsKey(player.userID))
+                            {                                         
+                                MSG(player, $"<color={configData.Messaging_MsgColor}>You have</color> <color={configData.Messaging_MainColor}>10</color><color={configData.Messaging_MsgColor}> seconds to return to the arena</color>");
+                                ELog($"{player.displayName} has left the zone, adding kill timer");
+                                int time = 10;
+                                KillTimers.Add(player.userID, timer.Repeat(1, time, () =>
+                                {
+                                    if (player.GetComponent<EventPlayer>().OOB)
+                                    {
+                                        time--;
+                                        MSG(player, $"<color={configData.Messaging_MainColor}>{time}</color><color={configData.Messaging_MsgColor}> seconds</color>", false);
+
+                                        if (time == 0)
+                                        {
+                                            Effect.server.Run("assets/prefabs/tools/c4/effects/c4_explosion.prefab", (player.transform.position));
+                                            player.Hurt(200f, Rust.DamageType.Explosion, null, true);
+                                            BroadcastEvent($"<color={configData.Messaging_MainColor}>{player.displayName}</color><color={configData.Messaging_MsgColor}> tried to run away...</color>");
+                                        }
+                                    }
+                                }));
+                            }
+                        }
+        }
+        void OnEnterZone(string zoneID, BasePlayer player)
+        {
+            if (EventStarted)
+                if (player.GetComponent<EventPlayer>())
+                    if (zoneID.Equals(ZoneName))
+                    {
+                        player.GetComponent<EventPlayer>().OOB = false;
+                        if (KillTimers.ContainsKey(player.userID))
+                        {
+                            ELog($"{player.displayName} has entered the zone, destroying kill timer");
+                            KillTimers[player.userID].Destroy();
+                            KillTimers.Remove(player.userID);
+                        }
+                    }
         }
         #endregion
 
         #region Commands
-
-        [ConsoleCommand("em.delete")]
-        private void cmdDeleteEvent(ConsoleSystem.Arg arg)
+        [ChatCommand("event")]
+        void cmdEvent(BasePlayer player, string command, string[] args)
         {
-            if (arg.Player() == null || arg.Args.IsNullOrEmpty())
-                return;
-            
-            if (arg.Args.Length < 2)
-                return;
-            // EventList[authors[i]][j]
-            if (!int.TryParse(arg.Args[0], out var authorIndex))
-                return;
-            if (!int.TryParse(arg.Args[1], out var eventIndex))
-                return;
-            if (!int.TryParse(arg.Args[2], out var page))
-                return;
-
-            EventList.ElementAtOrDefault(authorIndex).Value.RemoveAt(eventIndex);
-            ShowMainUI(arg.Player(), page);
-            SaveData();
-        }
-        [ConsoleCommand("newevent")]
-        private void ccmdNewEvent(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() != null)
-                cmdNewEvent(arg.Player());
-        }
-
-        [ChatCommand("newevent")]
-        private void cmdNewEvent(BasePlayer player)
-        {
-            if (!permission.UserHasPermission(player.UserIDString, USE_PERMISSION))
+            if (args == null || args.Length == 0)
             {
-                player.ChatMessage("You don't have permission for use this command.");
-                return;
-            }
-            
-            UI_DrawCreateNewEvent(player);
-        }
-        
-        [ChatCommand("em")]
-        private void cmdChatem(BasePlayer player, string command, string[] args)
-        {
-            if (!permission.UserHasPermission(player.UserIDString, USE_PERMISSION))
-            {
-                player.ChatMessage("You don't have permission for use this command.");
-                return;
-            }
-            ShowMainUI(player);
-        }
+                string message = string.Empty;
+                if (!EventOpen && !EventStarted) message = GetMessage("MessagesEventStatusClosedEnd");
+                else if (EventOpen && !EventStarted) message = GetMessage("MessagesEventStatusOpen");
+                else if (EventOpen && EventStarted) message = GetMessage("MessagesEventStatusOpenStarted");
+                else message = GetMessage("MessagesEventStatusClosedStarted");
+                MSG(player, string.Format(message, EventGameName));
 
-
-        [ConsoleCommand(SHOW_PAGE_CCMD)]
-        void showPageCCmd(ConsoleSystem.Arg arg)
-        {
-            var player = arg.Player();
-            if (player == null || !permission.UserHasPermission(player.UserIDString, USE_PERMISSION))
-            {
-                player.ChatMessage("You don't have permission for use this command.");
-                return;
-            }
-
-            var title = "EVENT MANAGER";
-            var showRandom = true;
-            var command = SELECT_CCMD;
-
-            if (arg.Args.Length > 1)
-                showRandom = arg.Args[1] == "1" ? true : false;
-
-            if (arg.Args.Length > 2)
-                command = arg.Args[2];
-
-            if (arg.Args.Length > 3)
-                title = string.Join(" ", arg.Args.Skip(3).ToArray());
-
-            ShowMainUI(player, Convert.ToInt32(arg.Args[0]), title, showRandom, command);
-        }
-
-        [ConsoleCommand(EDIT_ENTRY_CCMD)]
-        void ccmdEMEdit(ConsoleSystem.Arg arg)
-        {
-            var player = arg.Player();
-            if (player == null || !permission.UserHasPermission(player.UserIDString, USE_PERMISSION))
-            {
-                player.ChatMessage("You don't have permission for use this command.");
-                return;
-            }
-
-            var page = 1;
-            if (arg.Args.Length > 1)
-                page = Convert.ToInt32(arg.Args[1]);
-
-            EditEntryUI(player, config.Entries[arg.Args[0]], page);
-        }
-
-        [ConsoleCommand(NEW_ENTRY_CCMD)]
-        void ccmdEMNew(ConsoleSystem.Arg arg)
-        {
-            var player = arg.Player();
-            // if (player == null || !permission.UserHasPermission(player.UserIDString, USE_PERMISSION))
-            // {
-            //     player.ChatMessage("You don't have permission for use this command.");
-            //     return;
-            // }
-
-            var guid = EventSettingsEntry.NewEntry(string.Join(" ", arg.Args));
-            EditEntryUI(player, config.Entries[guid]);
-        }
-
-        [ConsoleCommand(DELETE_ENTRY_CCMD)]
-        void ccmdDeleteEntry(ConsoleSystem.Arg arg)
-        {
-            var player = arg.Player();
-            if (player == null || !permission.UserHasPermission(player.UserIDString, USE_PERMISSION))
-            {
-                player.ChatMessage("You don't have permission for use this command.");
-                return;
-            }
-
-            var ev = GetEventByName(config.Entries[arg.Args[0]].Name);
-
-            config.Entries.Remove(arg.Args[0]);
-            CuiHelper.DestroyUi(player, EDITENTRY_CUI_NAME);
-            SaveConfig();
-            ShowSelectUI(player, ev);
-        }
-
-        [ConsoleCommand(SAVE_ENTRY_CCMD)]
-        void ccmdSaveEntry(ConsoleSystem.Arg arg)
-        {
-            var player = arg.Player();
-            if (player == null || !permission.UserHasPermission(player.UserIDString, USE_PERMISSION))
-            {
-                player.ChatMessage("You don't have permission for use this command.");
-                return;
-            }
-
-            CuiHelper.DestroyUi(player, EDITENTRY_CUI_NAME);
-            SaveConfig();
-
-            ShowSelectUI(player, GetEventByName(config.Entries[arg.Args[0]].Name));
-        }
-
-        [ConsoleCommand(SET_ENTRY_CCMD)]
-        void ccmdEditEntry(ConsoleSystem.Arg arg)
-        {
-            var player = arg.Player();
-            if (player == null || !permission.UserHasPermission(player.UserIDString, USE_PERMISSION))
-            {
-                player.ChatMessage("You don't have permission for use this command.");
-                return;
-            }
-
-            try
-            {
-                var entry = config.Entries[arg.Args[0]];
-
-                switch (arg.Args[1].ToLower())
+                if (EventOpen)
                 {
-                    case "static":
-                        entry.StaticTime = !entry.StaticTime;
-                        break;
-                    case "day":
-                        var day = Convert.ToInt32(arg.Args[2]);
-                        entry.DaysActive[day] = !entry.DaysActive[day];
-                        break;
-                    case "hour":
-                        var hour = Mathf.Clamp(Convert.ToInt32(arg.Args[2]), 0, 60);
-                        entry.Hour = hour;
-                        return;
-                    case "minute":
-                        var minute = Mathf.Clamp(Convert.ToInt32(arg.Args[2]), 0, 60);
-                        entry.Minute = minute;
-                        return;
-                    case "minplayers":
-                        var minplayers = Mathf.Clamp(Convert.ToInt32(arg.Args[2]), 0, 10000);
-                        entry.MinPlayers = minplayers;
-                        return;
-                    case "del":
-                        var delIndex = Convert.ToInt32(arg.Args[2]);
-                        entry.RandomStartEvents.RemoveAt(delIndex);
-                        break;
-                    case "add":
-                        var addName = string.Join(" ", arg.Args.Skip(2));
-                        entry.RandomStartEvents.Add(addName);
-                        CuiHelper.DestroyUi(player, SELECT_CUI_NAME);
-                        break;
+                    SendReply(player, "/event join - Join a event");
+                    SendReply(player, "/event leave - Leave a event");
+                    if (UseClassSelection)
+                        SendReply(player, "/event class - Opens the class selector");
                 }
-
-                EditEntryUI(player, entry);
-            }
-            catch (Exception)
-            {
+                if (player.IsAdmin())
+                {
+                    SendReply(player, "/event open - Open a event");
+                    SendReply(player, "/event cancel - Cancel a event");
+                    SendReply(player, "/event cs - Activate/de-activate class selection");
+                    SendReply(player, "/event cs add <classname> <kitname> - Add a new kit to class selection");
+                    SendReply(player, "/event cs remove <classname> - Remove a kit from class selection");
+                    SendReply(player, "/event start - Start a event");
+                    SendReply(player, "/event close - Close a event to new entries");
+                    SendReply(player, "/event end - End a event");
+                    SendReply(player, "/event launch - Launch auto events");
+                    SendReply(player, "/event game \"Game Name\" - Change event game");
+                    SendReply(player, "/event gamemode <normal/battlefield> - Switch game modes");
+                    SendReply(player, "/event minplayers XX - Set minimum required players (auto event)");
+                    SendReply(player, "/event maxplayers XX - Set maximum players (auto event)");
+                    SendReply(player, "/event spawnfile \"filename\" - Change the event spawnfile");
+                    SendReply(player, "/event kit \"kitname\" - Change the event kit");
+                }
                 return;
+            }
+            switch (args[0].ToLower())
+            {
+                case "join":
+                    object join = JoinEvent(player);
+                    if (join is string)
+                    {
+                        SendReply(player, (string)join);
+                        return;
+                    }
+                    return;
+                case "leave":
+                    object leave = LeaveEvent(player);
+                    if (leave is string)
+                    {
+                        SendReply(player, (string)leave);
+                        return;
+                    }
+                    return;
+                case "class":
+                    if (UseClassSelection)
+                        if (EventStarted)
+                            if (player.GetComponent<EventPlayer>())
+                                SelectClass(player);                    
+                    return;
+            }
+            if (!player.IsAdmin()) return;
+            switch (args[0].ToLower())
+            {
+                case "cancel":
+                    AutoEventLaunched = false;
+                    if (EventOpen) CancelEvent(GetMessage("CancelAuto"));
+                    DestroyTimers();
+                    SendReply(player, GetMessage("CancelAuto"));
+                    return;
+                case "open":
+                    object open = OpenEvent();
+                    if (open is string)
+                    {
+                        SendReply(player, (string)open);
+                        return;
+                    }
+                    SendReply(player, string.Format("Event \"{0}\" is now opened.", EventGameName));
+                    return;
+                case "debug":
+                    if (Debug) { Debug = false; SendReply(player, "Debug deactivated"); }
+                    else { Debug = true;  SendReply(player, "Debug activated"); }
+                    return;
+                case "start":
+                    object start = StartEvent();
+                    if (start is string)
+                    {
+                        SendReply(player, (string)start);
+                        return;
+                    }
+                    SendReply(player, string.Format("Event \"{0}\" is now started.", EventGameName));
+                    return;
+                case "close":
+                    object close = CloseEvent();
+                    if (close is string)
+                    {
+                        SendReply(player, (string)close);
+                        return;
+                    }
+                    SendReply(player, string.Format("Event \"{0}\" is now closed for entries.", EventGameName));
+                    return;
+                case "cs":
+                    if (args.Length >= 2)
+                    {
+                        switch (args[1].ToLower())
+                        {
+                            case "add":
+                                if (classData.ClassKits.Count >= 9)
+                                {
+                                    SendReply(player, "You have already set the maximum number of classes");
+                                    return;
+                                }
+                                if (args.Length == 4)
+                                {
+                                    object isKit = Kits.Call("isKit", args[3]);
+                                    if (!(isKit is bool))
+                                    {
+                                        SendReply(player, "Unable to find the kits plugin");
+                                        return;
+                                    }
+                                    if (!(bool)isKit)
+                                    {
+                                        SendReply(player, string.Format("The kit {0} doesn't exist", args[3]));
+                                        return;
+                                    }
+                                    classData.ClassKits.Add(args[2], args[3]);
+                                    SaveData();
+                                    SendReply(player, $"You have successfully added a new class kit {args[2]}, using kit {args[3]}");
+                                }
+                                return;
+                            case "remove":
+                                if (args.Length == 3)
+                                {
+                                    if (classData.ClassKits.ContainsKey(args[2]))
+                                    {
+                                        classData.ClassKits.Remove(args[2]);
+                                        SaveData();
+                                        SendReply(player, $"You have successfully removed the class {args[2]}");
+                                        return;
+                                    }
+                                    SendReply(player, string.Format("The class {0} doesn't exist", args[2]));
+                                }
+                                return;
+                        }
+                    }
+                    if (UseClassSelection)
+                    {
+                        UseClassSelection = false;
+                        SendReply(player, "You have de-activated class selection");
+                        return;
+                    }
+                    if (classData.ClassKits.Count < 1)
+                    {
+                        SendReply(player, "You must set classes before activating the class selector");
+                        return;
+                    }
+                    UseClassSelection = true;
+                    SendReply(player, "You have activated class selection");
+                    return;
+                case "end":
+                    object end = EndEvent();
+                    if (end is string)
+                    {
+                        SendReply(player, (string)end);
+                        return;
+                    }
+                    SendReply(player, string.Format("Event \"{0}\" has ended.", EventGameName));
+                    return;
+                case "game":
+                    if (args.Length > 1)
+                    {
+                        object game = SelectEvent(args[1]);
+                        if (game is string)
+                        {
+                            SendReply(player, (string)game);
+                            return;
+                        }
+                        configData.Default_Gamemode = EventGameName;
+                        SaveConfig();
+                        SendReply(player, string.Format("{0} is now the next Event game.", args[1]));
+                    }
+                    return;
+                case "gamemode":
+                    if (args.Length > 1)
+                    {
+                        switch (args[1].ToLower())
+                        {
+                            case "normal":
+                                EventMode = GameMode.Normal;
+                                break;
+                            case "battlefield":
+                                EventMode = GameMode.Battlefield;
+                                break;
+                            default:
+                                break;                      
+                        }
+                        SendReply(player, string.Format("Event game mode is now set to {0}", EventMode.ToString()));
+                    }
+                    return;
+                case "minplayers":
+                    if (args.Length > 1)
+                    {
+                        int min;
+                        if (!int.TryParse(args[1], out min))
+                        {
+                            MSG(player, "You must enter a number", false);
+                            return;
+                        }
+                        object minplayers = SelectMinplayers(min);
+                        if (minplayers is string)
+                        {
+                            MSG(player, (string)minplayers);
+                            return;
+                        }
+                        SendReply(player, string.Format("Minimum Players for {0} is now {1} (this is only useful for auto events).", args[1], EventSpawnFile));
+                    }
+                    return;
+                case "maxplayers":
+                    if (args.Length > 1)
+                    {
+                        int max;
+                        if (!int.TryParse(args[1], out max))
+                        {
+                            MSG(player, "You must enter a number", false);
+                            return;
+                        }
+                        object maxplayers = SelectMaxplayers(max);
+                        if (maxplayers is string)
+                        {
+                            SendReply(player, (string)maxplayers);
+                            return;
+                        }
+                        SendReply(player, string.Format("Maximum Players for {0} is now {1}.", args[1], EventSpawnFile));
+                    }
+                    return;
+                case "spawnfile":
+                    if (args.Length > 1)
+                    {
+                        object spawnfile = SelectSpawnfile(args[1]);
+                        if (spawnfile is string)
+                        {
+                            SendReply(player, (string)spawnfile);
+                            return;
+                        }
+                        configData.Default_Spawnfile = args[1];
+                        SaveConfig();
+                        SendReply(player, string.Format("Spawnfile for {0} is now {1} .", EventGameName, EventSpawnFile));
+                    }
+                        return;
+                case "kit":
+                    if (args.Length > 1)
+                    {
+                        object success = SelectKit(args[1]);
+                        if (success is string)
+                        {
+                            SendReply(player, (string)success);
+                            return;
+                        }
+                        SendReply(player, string.Format("The new Kit for {0} is now {1}", EventGameName, args[1]));
+                    }
+                    return;
+                case "launch":
+                    object launch = LaunchEvent();
+                    if (launch is string)
+                    {
+                        SendReply(player, (string)launch);
+                        return;
+                    }
+                    SendReply(player, string.Format("Event \"{0}\" is now launched.", EventGameName));
+                    return;
             }
         }
 
-        [ConsoleCommand(SELECT_CCMD)]
-        private void cmdConsoleUI_EM_SELECT(ConsoleSystem.Arg arg)
+        [ConsoleCommand("event")]
+        void ccmdEvent(ConsoleSystem.Arg arg)
         {
-            var player = arg.Player();
-            if (player == null || !permission.UserHasPermission(player.UserIDString, USE_PERMISSION))
+            if (!hasAccess(arg)) return;
+            if (arg.Args == null || arg.Args.Length == 0)
             {
-                player.ChatMessage("You don't have permission for use this command.");
+                SendReply(arg, "event open - Open a event");
+                SendReply(arg, "event cancel - Cancel a event");
+                SendReply(arg, "event start - Start a event");
+                SendReply(arg, "event close - Close a event to new entries");
+                SendReply(arg, "event end - End a event");
+                SendReply(arg, "event launch - Launch auto events");
+                SendReply(arg, "event game \"Game Name\" - Change event game");
+                SendReply(arg, "event minplayers XX - Set minimum required players (auto event)");
+                SendReply(arg, "event maxplayers XX - Set maximum players (auto event)");
+                SendReply(arg, "event spawnfile \"filename\" - Change the event spawnfile");
+                SendReply(arg, "event kit \"kitname\" - Change the event kit");
+                SendReply(arg, "event cs - Activate/de-activate class selection");
+                SendReply(arg, "event cs add <classname> <kitname> - Add a new kit to class selection");
+                SendReply(arg, "event cs remove <classname> - Remove a kit from class selection");
                 return;
             }
-
-            var eventName = string.Join(" ", arg.Args);
-            var page = 1;
-
-            if(eventName.Contains("|"))
+            switch (arg.Args[0].ToLower())
             {
-                page = Convert.ToInt32(eventName.Substring(0, eventName.IndexOf('|')));
-                eventName = eventName.Substring(eventName.IndexOf('|') + 1);
+                case "cancel":
+                    AutoEventLaunched = false;
+                    if (EventOpen) CancelEvent("Auto events have been cancelled");
+                    DestroyTimers();
+                    SendReply(arg, string.Format("Auto events have been cancelled", EventGameName));
+                    return;
+                case "open":
+                    object open = OpenEvent();
+                    if (open is string)
+                    {
+                        SendReply(arg, (string)open);
+                        return;
+                    }
+                    SendReply(arg, string.Format("Event \"{0}\" is now opened.", EventGameName));
+                    return;
+                case "start":
+                    object start = StartEvent();
+                    if (start is string)
+                    {
+                        SendReply(arg, (string)start);
+                        return;
+                    }
+                    SendReply(arg, string.Format("Event \"{0}\" is now started.", EventGameName));
+                    return;
+                case "close":
+                    object close = CloseEvent();
+                    if (close is string)
+                    {
+                        SendReply(arg, (string)close);
+                        return;
+                    }
+                    SendReply(arg, string.Format("Event \"{0}\" is now closed for entries.", EventGameName));
+                    return;
+                case "debug":
+                    if (Debug) { Debug = false; SendReply(arg, "Debug deactivated"); }
+                    else { Debug = true; SendReply(arg, "Debug activated"); }
+                    return;
+                case "cs":
+                    if (arg.Args.Length > 1)
+                    {
+                        switch (arg.Args[1].ToLower())
+                        {
+                            case "add":
+                                if (classData.ClassKits.Count >= 9)
+                                {
+                                    SendReply(arg, "You have already set the maximum number of classes");
+                                    return;
+                                }
+                                if (arg.Args.Length == 4)
+                                {
+                                    object isKit = Kits.Call("isKit", arg.Args[3]);
+                                    if (!(isKit is bool))
+                                    {
+                                        SendReply(arg, "Unable to find the kits plugin");
+                                        return;
+                                    }
+                                    if (!(bool)isKit)
+                                    {
+                                        SendReply(arg, string.Format("The kit {0} doesn't exist", arg.Args[3]));
+                                        return;
+                                    }
+                                    classData.ClassKits.Add(arg.Args[2], arg.Args[3]);
+                                    SaveData();
+                                    SendReply(arg, $"You have successfully added a new class kit {arg.Args[2]}, using kit {arg.Args[3]}");
+                                }
+                                return;
+                            case "remove":
+                                if (arg.Args.Length == 3)
+                                {
+                                    if (classData.ClassKits.ContainsKey(arg.Args[2]))
+                                    {
+                                        classData.ClassKits.Remove(arg.Args[2]);
+                                        SaveData();
+                                        SendReply(arg, $"You have successfully removed the class {arg.Args[2]}");
+                                        return;
+                                    }
+                                    SendReply(arg, string.Format("The class {0} doesn't exist", arg.Args[2]));
+                                }
+                                return;
+                        }
+                    }
+                    if (UseClassSelection)
+                    {
+                        UseClassSelection = false;
+                        SendReply(arg, "You have de-activated class selection");
+                        return;
+                    }
+                    if (classData.ClassKits.Count < 1)
+                    {
+                        SendReply(arg, "You must set classes before activating the class selector");
+                        return;
+                    }
+                    UseClassSelection = true;
+                    SendReply(arg, "You have activated class selection");
+                    return;
+                case "end":
+                    object end = EndEvent();
+                    if (end is string)
+                    {
+                        SendReply(arg, (string)end);
+                        return;
+                    }
+                    SendReply(arg, string.Format("Event \"{0}\" has ended.", EventGameName));
+                    return;
+                case "game":
+                    object game = SelectEvent(arg.Args[1]);
+                    if (game is string)
+                    {
+                        SendReply(arg, (string)game);
+                        return;
+                    }
+                    configData.Default_Gamemode = EventGameName;
+                    SaveConfig();
+                    SendReply(arg, string.Format("{0} is now the next Event game.", arg.Args[1]));
+                    return;
+                case "gamemode":
+                    if (arg.Args.Length > 1)
+                    {
+                        switch (arg.Args[1].ToLower())
+                        {
+                            case "normal":
+                                EventMode = GameMode.Normal;
+                                break;
+                            case "battlefield":
+                                EventMode = GameMode.Battlefield;
+                                break;
+                            default:
+                                break;
+                        }
+                        SendReply(arg, string.Format("Event game mode is now set to {0}", EventMode.ToString()));
+                    }
+                    return;
+                case "minplayers":
+                    int min;
+                    if (!int.TryParse(arg.Args[1], out min))
+                    {
+                        SendReply(arg, "You must enter a number");
+                        return;
+                    }
+                    object minplayers = SelectMinplayers(min);
+                    if (minplayers is string)
+                    {
+                        SendReply(arg, (string)minplayers);
+                        return;
+                    }
+                    SendReply(arg, string.Format("Minimum Players for {0} is now {1} (this is only useful for auto events).", arg.Args[1], EventSpawnFile));
+                    return;
+                case "maxplayers":
+                    int max;
+                    if (!int.TryParse(arg.Args[1], out max))
+                    {
+                        SendReply(arg, "You must enter a number");
+                        return;
+                    }
+                    object maxplayers = SelectMaxplayers(max);
+                    if (maxplayers is string)
+                    {
+                        SendReply(arg, (string)maxplayers);
+                        return;
+                    }
+                    SendReply(arg, string.Format("Maximum Players for {0} is now {1}.", arg.Args[1], EventSpawnFile));
+                    return;
+                case "spawnfile":
+                    object spawnfile = SelectSpawnfile(arg.Args[1]);
+                    if (spawnfile is string)
+                    {
+                        SendReply(arg, (string)spawnfile);
+                        return;
+                    }
+                    configData.Default_Spawnfile = arg.Args[1];
+                    SaveConfig();
+                    SendReply(arg, string.Format("Spawnfile for {0} is now {1} .", EventGameName, EventSpawnFile));
+                    return;
+                case "kit":
+                    object success = SelectKit(arg.Args[1]);
+                    if (success is string)
+                    {
+                        SendReply(arg, (string)success);
+                        return;
+                    }
+                    SendReply(arg, string.Format("The new Kit for {0} is now {1}", EventGameName, arg.Args[1]));
+                    return;  
+                case "launch":
+                    object launch = LaunchEvent();
+                    if (launch is string)
+                    {
+                        SendReply(arg, (string)launch);
+                        return;
+                    }
+                    SendReply(arg, string.Format("Event \"{0}\" is now launched.", EventGameName));
+                    return;
             }
-
-            ShowSelectUI(player, GetEventByName(eventName), page);
         }
         #endregion
 
-        private void CallStartedHook(string eventname)
+        #region Tokens
+        [HookMethod("AddTokens")]
+        public void AddTokens(string userid, int amount)
         {
-            Interface.Oxide.CallHook("OnEventStarted", eventname);
+            string tokentype = "";
+            if (configData.UseEconomicsAsTokens)
+            {
+                if (Economics)
+                {
+                    Economics?.Call("Deposit", userid, amount);
+                    tokentype = "Coins";
+                }
+            }
+            else
+            {
+                ServerRewards?.Call("AddPoints", userid, amount);
+                tokentype = "RP";
+            }
+            BasePlayer player = BasePlayer.FindByID(ulong.Parse(userid));
+            if (player != null && !string.IsNullOrEmpty(tokentype))
+            {
+                ELog($"Adding {amount} {tokentype} to {player.displayName}");
+                SendReply(player, $"<color={configData.Messaging_MainColor}>{Title}:</color><color={configData.Messaging_MsgColor}> You have been awarded </color><color={configData.Messaging_MainColor}>{amount} {tokentype}</color>");
+            }
+        }    
+       
+        #endregion
+
+        #region Data
+
+        void SaveData()
+        {
+            Class_Data.WriteObject(classData);
+            Puts("Saved class data");
+        }        
+        void LoadData()
+        {
+            try
+            {
+                classData = Class_Data.ReadObject<ClassData>();
+            }
+            catch
+            {
+                Puts("Couldn't load class data, creating new datafile");
+                classData = new ClassData();
+            }            
         }
+        #endregion
+
+        static void ELog(string message)
+        {
+            if (Debug)            
+                ConVar.Server.Log("oxide/logs/EventManager.txt", message);
+        }
+
+        //[ConsoleCommand("event.openauto")]
+        // void ccmdEventOpenAuto(ConsoleSystem.Arg arg)
+        //{
+        // if (!hasAccess(arg)) return;
+        // object success = OpenEvent();
+        // if (success is string)
+        // {
+        //     SendReply(arg, (string)success);
+        //     return;
+        // }
+        // OpenAutoEventLaunched = true;
+        // EventAutoNum = 0;
+        // DestroyTimers();
+        // var evencfg = EventAutoConfig[EventAutoNum.ToString()] as Dictionary<string, object>;
+        // if (evencfg["timelimit"] != null && evencfg["timelimit"].ToString() != "0")
+        //    AutoArenaTimers.Add(timer.Once(Convert.ToSingle(evencfg["timelimit"]), () => CancelEvent("Not enough players")));
+        //SelectMinplayers((string)evencfg["minplayers"]);
+        // SendReply(arg, string.Format("Event \"{0}\" is now opened.", EventGameName));
+        //}
     }
 }
