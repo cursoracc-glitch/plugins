@@ -1,8 +1,9 @@
 namespace Oxide.Plugins
 {
-    [Info("GiveServerMsg", "", "0.1", ResourceId = 2336)]
+    [Info("GiveServerMsg", "EcoSmile", "1.0.0", ResourceId = 2336)]
+    [Description("Hide server give message")]
 
-    public class GiveServerMsg : RustPlugin
+    class GiveServerMsg : RustPlugin
     {
         object OnServerMessage(string m, string n) => m.Contains("gave") && n == "SERVER" ? (object)true : null;
     }

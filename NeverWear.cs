@@ -1,10 +1,13 @@
 ﻿using System.Collections.Generic;
+using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
     [Info("NeverWear", "k1lly0u", "0.1.4", ResourceId = 1816)]
     class NeverWear : RustPlugin
     {
+        [PluginReference]
+        Plugin MachiningTools;
         void Loaded() => RegisterPermissions();
         void OnServerInitialized() => LoadVariables();
         private void RegisterPermissions()
@@ -19,10 +22,17 @@ namespace Oxide.Plugins
             if (permission.UserHasPermission(player.UserIDString, perm)) return true;
             return false;
         }
+        private bool IsMachining(Item item)
+        {
+            var check = MachiningTools?.Call("IsMachiningToolItem", item);
+            if (check != null && (bool)check) return true;
+            return false;
+        }
         void OnLoseCondition(Item item, ref float amount)
         {
             if (item != null)
             {
+                if (IsMachining(item)) return;
                 BasePlayer player;
                 if (item.GetOwnerPlayer() == null)
                 {
