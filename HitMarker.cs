@@ -215,7 +215,7 @@ namespace Oxide.Plugins
 			var rn = rnd.Next(0, 10000);
 			
             CuiHelper.AddUi( attacker,
-                HandleArgs( ActionGUI, rn, GetDamageText("down"), 0.4919792+deltaX, 0.4531481+deltaY, 0.675+deltaX, 0.5587038+deltaY ) );
+                HandleArgs( ActionGUI, rn, GetDamageText("wound"), 0.4919792+deltaX, 0.4531481+deltaY, 0.675+deltaX, 0.5587038+deltaY ) );
             destTimers[ attacker ] = timer.Once(damageTimeout, () =>
             {
                 CuiHelper.DestroyUi( attacker, "hitmarkerAction" +rn.ToString() );
@@ -237,7 +237,7 @@ namespace Oxide.Plugins
 			var rn = rnd.Next(0, 10000);
 			
             CuiHelper.AddUi( attacker,
-                HandleArgs( ActionGUI, rn, GetDamageText("suckdick"), 0.4919792+deltaX, 0.4531481+deltaY, 0.675+deltaX, 0.5587038+deltaY ) );
+                HandleArgs( ActionGUI, rn, GetDamageText("kill"), 0.4919792+deltaX, 0.4531481+deltaY, 0.675+deltaX, 0.5587038+deltaY ) );
             destTimers[ attacker ] = timer.Once(damageTimeout, () =>
             {
                 CuiHelper.DestroyUi( attacker, "hitmarkerAction" +rn.ToString() );
@@ -278,8 +278,8 @@ namespace Oxide.Plugins
 		{
 			switch (action)
 			{
-				case "down": return "<color=#FF7979><size=22>УПАЛ!</size></color>";							  
-				case "suck dick":  return "<color=red><size=22>УБИТ!</size></color>";							  
+				case "wound": return "<color=#FF7979><size=22>УПАЛ!</size></color>";							  
+				case "kill":  return "<color=red><size=22>УБИТ!</size></color>";							  
 			}
 			
 			return "<color=white><size=22>ПОПАЛ!</size></color>";

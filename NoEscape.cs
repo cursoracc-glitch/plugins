@@ -1,1143 +1,1122 @@
-﻿using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Newtonsoft.Json;
 using Oxide.Core;
-using Oxide.Core.Configuration;
-using Oxide.Core.Libraries;
+using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
+using Rust;
 using System;
+using System.Collections;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Globalization;
-using System.IO;
 using System.Linq;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("NoEscape", "OxideBro", "1.1.0")]
-    class NoEscape : RustPlugin
+    [Info("NoEscape", "OxideBro", "2.4.1")]
+    public class NoEscape : RustPlugin
     {
-        [PluginReference] Plugin Clans, Friends, RustMap, VKBot, Duel;
+        #region Class
+        private static List<SphereComponent> BlockerList = new List<SphereComponent>();
 
-        bool IsClanMember(ulong playerID, ulong targetID)
+        private class PlayerBlockStatus : FacepunchBehaviour
         {
-            return (bool) (Clans?.Call("HasFriend", playerID, targetID) ?? false);
-        }
+            private BasePlayer Player;
+            public SphereComponent CurrentBlocker;
+            public double CurrentTime = config.BlockSettings.BlockLength;
+            const string LayerPopup = "NoEscapePopupNotification";
+            public List<Notification> Notifications = new List<Notification>();
 
-        bool IsFriends(ulong playerID, ulong friendId)
-        {
-            return (bool) (Friends?.Call("AreFriends", playerID, friendId) ?? false);
-        }
-
-        List<ulong> GetMembersClan(ulong playerId)
-        {
-            if (Clans)
+            public class Notification
             {
-                List<ulong> Members = new List<ulong>();
-                if (Clans.ResourceId == 2087)
-                {
-                    var clan1tag = (string) Clans.Call("GetClanOf", playerId);
-                    if (clan1tag != null)
-                    {
-                        var members = ((JObject) Clans.Call("GetClan", clan1tag))["members"].ToObject<List<ulong>>();
-                        if (members != null) return members;
-                    }
+                public string Id;
+                public string Title;
+                public string Description;
+                public string Icon = "assets/icons/broadcast.png";
+                public int duration = config.uIPopupNotifications.PopupDestroyTime;
 
-                    return null;
-                }
-
-                if (Clans.ResourceId == 14)
+                public Notification()
                 {
-                    var clanmates = Clans.Call("GetClanMembers", playerId) as List<string>;
-                    if (clanmates != null) return clanmates.Select(ulong.Parse) as List<ulong>;
+                    Id = CuiHelper.GetGuid();
                 }
             }
 
-            return null;
-        }
-
-        private bool IsDuelPlayer(BasePlayer player)
-        {
-            if (Duel == null) return false;
-            var dueler = Duel.Call("IsPlayerOnActiveDuel", player);
-            if (dueler is bool) return (bool) dueler;
-            return false;
-        }
-
-        DateTime LNT;
-
-        class Raid
-        {
-            public HashSet<ulong> owners;
-            public HashSet<ulong> raiders;
-            public Vector3 pos;
-
-            public Raid(List<ulong> owners, List<ulong> raiders)
+            public static PlayerBlockStatus Get(BasePlayer player)
             {
-                this.owners = new HashSet<ulong>(owners);
-                this.raiders = new HashSet<ulong>(raiders);
-            }
-        }
-
-        class DamageTimer
-        {
-            public List<ulong> owners;
-            public int seconds;
-
-            public DamageTimer(List<ulong> owners, int seconds)
-            {
-                this.owners = owners;
-                this.seconds = seconds;
-            }
-        }
-
-        static DynamicConfigFile config;
-        bool EnabledBuildingPrivilage = false;
-        float radius = 50f;
-        int blockTime = 120;
-        int offlineOut = 1;
-        int blockAttackTime = 10;
-        bool blockAttack = false;
-        int ownerBlockTime = 120;
-        bool useDamageScale = false;
-        bool useVK = false;
-        bool blockOwner = true;
-        bool friedsAPI = false;
-        bool clansAPI = false;
-        bool canBuild = true;
-        bool canRemove = true;
-        bool canRemoveStan = true;
-        bool canKits = true;
-        bool canRepair = true;
-        bool canUpgrade = true;
-        bool canTeleport = true;
-        bool EnabledGUI = true;
-        bool EnabledGUITimer = true;
-        bool canTrade = true;
-        bool canRec = true;
-        bool CanBuilt = true;
-        bool CanBuiltNoEscape = true;
-        bool LadderBuilding = false;
-        float offlineScale = 0.5f;
-        bool MsgAttB = false;
-        string MsgAtt = "photo-1_265827614";
-        float offlineScaleFriendsClans = 0.5f;
-        public List<string> WriteList = new List<string>();
-        string GUITimerAnchormin = "0.352 0.1138889";
-        string GUITimerAnchormax = "0.632 0.1462963";
-        string GUISendAnchormin = "0 0.8619792";
-        string GUISendAnchormax = "1 0.9166667";
-
-        private string formatMessage =
-            "Доброго времени суток.\nУведомляем Вас о том, что начался рейд Вашего имущества, который инициирован игроком {attacker}.";
-
-        private void LoadDefaultConfig()
-        {
-            GetConfig("Основное", "Размер радиуса блокировки", ref radius);
-            GetConfig("Основное",
-                "Включить отключение блокировки при разрушении шкафа (BuildingPrivilage), если функция будет включена игроку не будет давать блокировку если разрушенный объект будет вне билдинг зоны",
-                ref EnabledBuildingPrivilage);
-            GetConfig("Основное", "Время блокировки атакующего", ref blockTime);
-            GetConfig("Основное", "Блокировать игроков при нанесение урона (Блокировка инициатора и жертвы)",
-                ref blockAttack);
-            GetConfig("Основное", "Время блокировки при нанесение урона по игрокам (Блокировка инициатора и жертвы)",
-                ref blockAttackTime);
-            GetConfig("Основное", "Поддержка плагина Clans", ref clansAPI);
-            GetConfig("Основное", "Блокировать хозяина строения, если он не в радиусе блокировки", ref blockOwner);
-            GetConfig("Основное", "Поддержка плагина Friends", ref friedsAPI);
-            GetConfig("Основное", "Время блокировки хозяина", ref ownerBlockTime);
-            GetConfig("Основное", "Запретить установку штурмовых лестниц в радиусе зоны чужого шкафа", ref CanBuilt);
-            GetConfig("GUI", "Включить GUI окно-оповещение о начале рейда (Текст вы сможете изменить в lang)",
-                ref EnabledGUI);
-            GetConfig("GUI", "Включить GUI окошко таймера рейд блока", ref EnabledGUITimer);
-            GetConfig("GUI", "Окно таймера: AnchorMin", ref GUITimerAnchormin);
-            GetConfig("GUI", "Окно таймера: AnchorMax", ref GUITimerAnchormax);
-            GetConfig("GUI", "Окно оповещения: AnchorMin", ref GUISendAnchormin);
-            GetConfig("GUI", "Окно оповещения: AnchorMax", ref GUISendAnchormax);
-            GetConfig("Множитель", "Множитель урона если хозяина нет в сети (наносимый урон = урон*SCALE)",
-                ref offlineScale);
-            GetConfig("Множитель", "Множитель урона если хозяин друг или соклановец (наносимый урон = урон*SCALE)",
-                ref offlineScaleFriendsClans);
-            GetConfig("Множитель", "Использовать множитель урона", ref useDamageScale);
-            GetConfig("VK", "Использовать оповещения о рейде с помощью VKBot", ref useVK);
-            GetConfig("VK", "Сообщение оповещения о рейде дома", ref formatMessage);
-            GetConfig("VK", "Частота оповещений оффлайн игрокам в ВК (в минутах)", ref offlineOut);
-            GetConfig("VK", "Прикрепить к сообщению изображение?", ref MsgAttB);
-            GetConfig("VK", "Ссылка на изображение, пример: photo - 1_265827614", ref MsgAtt);
-            GetConfig("Блокировка", "Блокировать строительство", ref canBuild);
-            var _WriteList = new List<object>() {"wall.external.high.stone", "barricade.metal"};
-            GetConfig("Блокировка", "Белый список предметов какие можно строить при рейдблоке", ref _WriteList);
-            WriteList = _WriteList.Select(p => p.ToString()).ToList();
-            GetConfig("Блокировка", "Блокировать удаление построек (CanRemove)", ref canRemove);
-            GetConfig("Блокировка", "Блокировать использование китов", ref canKits);
-            GetConfig("Блокировка", "Блокировать ремонт построек (стандартный)", ref canRepair);
-            GetConfig("Блокировка", "Блокировать улучшение построек (стандартное)", ref canUpgrade);
-            GetConfig("Блокировка", "Блокировать телепорты", ref canTeleport);
-            GetConfig("Блокировка", "Блокировать удаление построек (стандартное)", ref canRemoveStan);
-            GetConfig("Блокировка", "Блокировать обмен между игроками (Trade)", ref canTrade);
-            GetConfig("Блокировка", "Блокировать переработчик (Recycler)", ref canRec);
-            GetConfig("Блокировка", "Блокировать установку штурмовых лесниц в рейд блоке", ref LadderBuilding);
-            SaveConfig();
-        }
-
-        private void GetConfig<T>(string menu, string Key, ref T var)
-        {
-            if (Config[menu, Key] != null)
-            {
-                var = (T) Convert.ChangeType(Config[menu, Key], typeof(T));
+                return player.GetComponent<PlayerBlockStatus>() ?? player.gameObject.AddComponent<PlayerBlockStatus>();
             }
 
-            Config[menu, Key] = var;
-        }
-
-        Dictionary<ulong, RaidBlock> timers = new Dictionary<ulong, RaidBlock>();
-
-        public class RaidBlock
-        {
-            public BuildingPrivlidge building;
-            public double Seconds;
-            public bool Attack;
-        }
-
-        Dictionary<BuildingPrivlidge, Raid> raids = new Dictionary<BuildingPrivlidge, Raid>();
-        List<DamageTimer> damageTimers = new List<DamageTimer>();
-        private Dictionary<BasePlayer, DateTime> CooldownsAttackDic = new Dictionary<BasePlayer, DateTime>();
-        private double CooldownAttack = 15f;
-        private string PERM_IGNORE = "noescape.ignore";
-        private string PERM_VK_NOTIFICATION = "noescape.vknotification";
-
-        void OnEntityBuilt(Planner plan, GameObject go)
-        {
-            if (go == null || plan == null) return;
-            if (!CanBuilt) return;
-            var player = plan.GetOwnerPlayer();
-            BaseEntity entity = go.ToBaseEntity();
-            var targetLocation = player.transform.position + (player.eyes.BodyForward() * 4f);
-            if (go.name == "assets/prefabs/building/ladder.wall.wood/ladder.wooden.wall.prefab" &&
-                player.IsBuildingBlocked(targetLocation, new Quaternion(0, 0, 0, 0),
-                    new Bounds(Vector3.zero, Vector3.zero)))
+            private void Awake()
             {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
-                {
-                    if (!LadderBuilding) return;
-                }
+                Player = GetComponent<BasePlayer>();
 
-                SendReply(player, Messages["BlockLadders"]);
-                entity.Kill();
-				player.inventory.GiveItem(ItemManager.CreateByItemID(-316250604));
             }
-        }
 
-        void OnServerInitialized()
-        {
-            PermissionService.RegisterPermissions(this, new List<string>() {PERM_IGNORE, PERM_VK_NOTIFICATION});
-            LoadDefaultConfig();
-            lang.RegisterMessages(Messages, this, "en");
-            Messages = lang.GetMessages("en", this);
-            timer.Every(1f, NoEscapeTimerHandle);
-            timer.Every(1f, RaidZoneTimerHandle);
-            LoadData();
-            if (RustMap != null) InitImages();
-        }
-
-        void OnEntityDeath(BaseCombatEntity entity, HitInfo info, Item item)
-        {
-            if (!(entity is BuildingBlock) && !(entity is Door) &&
-                !entity.ShortPrefabName.Contains("external.high.")) return;
-            var player = info?.InitiatorPlayer;
-            if (entity == null && info == null) return;
-            if (player == null) return;
-            if (player.userID == entity.OwnerID) return;
-            var block = entity as BuildingBlock;
-            if (block && block.grade <= 0) return;
-            if (EnabledBuildingPrivilage && entity?.GetBuildingPrivilege() == null ||
-                entity.GetBuildingPrivilege()?.buildingID == 0) return;
-            InitImages();
-            bool justCreated;
-            var raid = GetRaid(entity.GetNetworkPosition(), out justCreated,
-                EnabledBuildingPrivilage ? entity?.GetBuildingPrivilege() : null);
-            if (PermissionService.HasPermission(player.userID, PERM_IGNORE)) return;
-            if (!timers.ContainsKey(player.userID))
+            private void ControllerUpdate()
             {
-                if (EnabledGUI)
-                {
-                    var p = BasePlayer.FindByID(entity.OwnerID);
-                    DrawUI(p, info.Initiator?.ToPlayer().displayName, Messages["yourbuildingdestroyOwner"]);
-                    timer.Once(5.0f, () => DestroyUI(p));
-                }
-
-                if (blockOwner)
-                {
-                    var p = BasePlayer.FindByID(entity.OwnerID);
-                    SendReply(p, Messages["blockactive"], FormatTime(TimeSpan.FromSeconds(ownerBlockTime)));
-                    SendReply(player, Messages["blockactiveAttacker"],
-                        FormatTime(TimeSpan.FromSeconds(ownerBlockTime)));
-                }
+                if (CurrentBlocker != null)
+                    UpdateUI();
                 else
-                {
-                    var p = BasePlayer.FindByID(entity.OwnerID);
-                    SendReply(p, Messages["noblockowner"]);
-                    SendReply(player, Messages["blockactiveAttacker"],
-                        FormatTime(TimeSpan.FromSeconds(ownerBlockTime)));
-                }
+                    UnblockPlayer();
             }
 
-            GetAroundPlayers(entity.GetNetworkPosition()).ForEach(p =>
-                BlockPlayer(p, EnabledBuildingPrivilage ? entity.GetBuildingPrivilege() : null, "raid"));
-            if (useVK)
+            public void CreateUI()
             {
-                if (!IsOnline(entity.OwnerID))
+                CuiHelper.DestroyUi(Player, "NoEscape");
+                CuiElementContainer container = new CuiElementContainer();
+                container.Add(new CuiPanel
                 {
-                    SendOfflineMessage(entity.OwnerID, info.Initiator?.ToPlayer().displayName);
-                }
+                    RectTransform = { AnchorMin = config.UISettings.AnchorMin, AnchorMax = config.UISettings.AnchorMax, OffsetMax = "0 0" },
+                    Image = { Color = config.UISettings.InterfaceColorBP }
+                }, "Hud", "NoEscape");
+                CuiHelper.AddUi(Player, container);
+                if (CurrentBlocker != null) UpdateUI();
             }
 
-            if (clansAPI && Clans.Call("GetClanMembers", entity.OwnerID) != null)
+            public void BlockPlayer(SphereComponent blocker, bool justCreated)
             {
-                bool sendRemoveOwnerMessage = false;
-                var team = (Clans.Call("GetClanMembers", entity.OwnerID) as List<string>).Select(ulong.Parse);
-                foreach (var uid in team.ToList())
+                if (ins.permission.UserHasPermission(Player.UserIDString, config.BlockSettings.PermissionToIgnore))
                 {
-                    if (!raid.owners.Contains(uid))
-                    {
-                        var p = BasePlayer.FindByID(uid);
-                        raid.owners.Add(uid);
-                        if (useDamageScale)
-                        {
-                            if (justCreated && p && !sendRemoveOwnerMessage)
-                            {
-                                sendRemoveOwnerMessage = true;
-                                damageTimers.Add(new DamageTimer(raid.owners.ToList(), 3600));
-                                SendReply(player, Messages["DamageOnlineOwner"]);
-                            }
-                            else if ((justCreated && !p && !sendRemoveOwnerMessage) ||
-                                     (!sendRemoveOwnerMessage && team.Last() == uid))
-                            {
-                                sendRemoveOwnerMessage = true;
-                                SendReply(player, Messages["DamageNotOnlineOwner"]);
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                if (!raid.owners.Contains(entity.OwnerID))
-                {
-                    var p = BasePlayer.FindByID(entity.OwnerID);
-                    if (blockOwner)
-                    {
-                        raid.owners.Add(entity.OwnerID);
-                    }
-
-                    if (useDamageScale)
-                    {
-                        if (justCreated && p)
-                        {
-                            damageTimers.Add(new DamageTimer(raid.owners.ToList(), 3600));
-                        }
-                    }
-                }
-            }
-
-            foreach (var owner in GetOwnersByOwner(entity.OwnerID, entity.GetNetworkPosition())) raid.owners.Add(owner);
-        }
-
-        bool IsOnline(ulong id)
-        {
-            foreach (BasePlayer active in BasePlayer.activePlayerList)
-            {
-                if (active.userID == id) return true;
-            }
-
-            return false;
-        }
-
-        Raid GetRaid(Vector3 pos, out bool justCreated, BuildingPrivlidge building = null)
-        {
-            justCreated = false;
-            foreach (var raid in raids)
-                if (Vector3.Distance(raid.Value.pos, pos) < 50)
-                    return raid.Value;
-            justCreated = true;
-            var ownerraid = new Raid(new List<ulong>(), new List<ulong>()) {pos = pos};
-            raids.Add(building == null ? new BuildingPrivlidge() : building, ownerraid);
-            return ownerraid;
-        }
-
-        void BlockPlayer(BasePlayer player, BuildingPrivlidge building = null, string mode = "", bool owner = false)
-        {
-            if (player.IsSleeping()) return;
-            if (player == null) return;
-            if (mode == "raid")
-            {
-                if (!owner || !timers.ContainsKey(player.userID))
-                {
-                    var secs = owner ? ownerBlockTime : blockTime;
-                    timers[player.userID] = new RaidBlock() {building = building, Seconds = secs, Attack = false};
-                    SetCooldown(player, "raid", secs);
-                    SaveData();
-                }
-
-                return;
-            }
-
-            if (mode == "attack")
-            {
-                var cooldown = GetCooldown(player, "raid");
-                if (cooldown != 0)
-                {
+                    UnblockPlayer(true);
                     return;
                 }
+                if (justCreated)
+                    Player.ChatMessage(string.Format(ins.Messages["blockactiveAttacker"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength)));
 
-                if (!timers.ContainsKey(player.userID))
-                {
-                    player.ChatMessage(string.Format(Messages[owner ? "ownerhome" : "blockattackactive"],
-                        FormatTime(TimeSpan.FromSeconds(owner ? blockAttackTime : blockAttackTime))));
-                }
-
-                if (!owner || !timers.ContainsKey(player.userID))
-                {
-                    var secs = owner ? blockAttackTime : blockAttackTime;
-                    timers[player.userID] = new RaidBlock()
-                        {building = null, Seconds = secs, Attack = building == null,};
-                    SetCooldown(player, "attack", secs);
-                    SaveData();
-                }
+                CurrentBlocker = blocker;
+                CurrentTime = CurrentBlocker.CurrentTime;
+                CreateUI();
+                InvokeRepeating(ControllerUpdate, 1f, 1f);
             }
-        }
 
-        private string GetFormatTime(double seconds)
-        {
-            double minutes = Math.Floor((double) (seconds / 60));
-            seconds -= (int) (minutes * 60);
-            return string.Format("{0}:{1:00}", minutes, seconds);
-        }
-
-        public static string FormatTime(TimeSpan time)
-        {
-            string result = string.Empty;
-            if (time.Days != 0) result += $"{Format(time.Days, "дней", "дня", "день")} ";
-            if (time.Hours != 0) result += $"{Format(time.Hours, "часов", "часа", "час")} ";
-            if (time.Minutes != 0) result += $"{Format(time.Minutes, "минут", "минуты", "минута")} ";
-            if (time.Seconds != 0) result += $"{Format(time.Seconds, "секунд", "секунды", "секунда")} ";
-            return result;
-        }
-
-        private static string Format(int units, string form1, string form2, string form3)
-        {
-            var tmp = units % 10;
-            if (units >= 5 && units <= 20 || tmp >= 5 && tmp <= 9) return $"{units} {form1}";
-            if (tmp >= 2 && tmp <= 4) return $"{units} {form2}";
-            return $"{units} {form3}";
-        }
-
-        void Unload()
-        {
-            foreach (var player in BasePlayer.activePlayerList)
+            public void UpdateUI()
             {
-                DestroyUI(player);
-                DestroyUITimer(player);
-            }
-        }
+                CurrentTime++;
+                CuiHelper.DestroyUi(Player, "NoEscape_update");
+                CuiHelper.DestroyUi(Player, "NoEscape" + ".Info");
 
-        void OnPlayerInit(BasePlayer player)
-        {
-            if (useDamageScale)
-            {
-                foreach (var raid in raids)
-                    if (raid.Value.owners.Contains(player.userID) &&
-                        raid.Value.owners.Count(p => BasePlayer.FindByID(p) != null) <= 1 &&
-                        raid.Value.owners.Any(o => damageTimers.All(t => !t.owners.Contains(o))))
+                CuiElementContainer container = new CuiElementContainer();
+                container.Add(new CuiElement
+                {
+                    Parent = "NoEscape",
+                    Name = "NoEscape_update",
+                    Components =
                     {
-                        foreach (var raider in raid.Value.raiders)
-                            BasePlayer.FindByID(raider)?.ChatMessage(Messages["OwnerEnterOnline"]);
-                        break;
+                        new CuiImageComponent { Color = config.UISettings.InterfaceColor },
+                        new CuiRectTransformComponent {AnchorMin = $"0 0", AnchorMax = $"{(float) (CurrentBlocker.TotalTime - CurrentTime) / CurrentBlocker.TotalTime} 1", OffsetMin = "0 0", OffsetMax = "0 0"},
                     }
-            }
-        }
-
-        private List<string> damageTypes;
-
-        void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info, BaseCombatEntity victim)
-        {
-            try
-            {
-                var initiator = info?.InitiatorPlayer;
-                var victimBP = entity.ToPlayer();
-                if (entity == null) return;
-                if (initiator == null) return;
-                if (victimBP == null) return;
-                if (initiator == victimBP) return;
-                if (blockAttack)
+                });
+                container.Add(new CuiLabel
                 {
-                    if (entity is BasePlayer && info.Initiator is BasePlayer)
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                    Text = { Text = string.Format(ins.Messages["guitimertext"], ins.GetFormatTime(TimeSpan.FromSeconds(CurrentBlocker.TotalTime - CurrentTime))), Font = "robotocondensed-regular.ttf", Color = "1 1 1 0.9", FontSize = 16, Align = TextAnchor.MiddleCenter }
+                }, "NoEscape", "NoEscape" + ".Info");
+
+                CuiHelper.AddUi(Player, container);
+                if (CurrentTime >= config.BlockSettings.BlockLength)
+                    UnblockPlayer();
+            }
+
+            public void UnblockPlayer(bool DoPerm = false)
+            {
+                if (Player == null)
+                {
+                    Destroy(this);
+                    return;
+                }
+                if (!DoPerm)
+                    Player.ChatMessage(ins.Messages["blocksuccess"]);
+                CancelInvoke(ControllerUpdate);
+                CuiHelper.DestroyUi(Player, "NoEscape");
+                CurrentBlocker = null;
+            }
+            private void OnDestroy()
+            {
+                CuiHelper.DestroyUi(Player, "NoEscape");
+                CuiHelper.DestroyUi(Player, LayerPopup);
+            }
+
+
+            public void Remove(string id)
+            {
+                var remove = Notifications.Find(v => v.Id == id);
+                if (remove == null)
+                    return;
+
+                Notifications.Remove(remove);
+                DrawNotifications();
+            }
+
+            public void AddNotification(Notification notification)
+            {
+                Notifications.Add(notification);
+                StartCoroutine(DestroyNotification(notification));
+                if (Notifications.Count > config.uIPopupNotifications.MaxPopupNotifications)
+                    Remove(Notifications.FirstOrDefault().Id);
+
+                DrawNotifications();
+            }
+
+            private IEnumerator DestroyNotification(Notification messageData)
+            {
+                yield return new WaitForSeconds(messageData.duration);
+
+                if (messageData == null)
+                    yield break;
+
+                Notifications.Remove(messageData);
+                Remove(messageData.Id);
+                DrawNotifications();
+            }
+
+
+            public void DrawNotifications()
+            {
+                CuiHelper.DestroyUi(Player, LayerPopup);
+                CuiElementContainer container = new CuiElementContainer();
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = $"{config.uIPopupNotifications.AnchorPosX } {config.uIPopupNotifications.AnchorPosY}", AnchorMax = $"{config.uIPopupNotifications.AnchorPosX } {config.uIPopupNotifications.AnchorPosY}", OffsetMax = "0 0" },
+                    Image = { Color = "0 0 0 0" }
+                }, "Overlay", LayerPopup);
+
+                float anchor = 0;
+
+                foreach (var notify in Notifications)
+                {
+                    container.Add(new CuiPanel
                     {
-                        if (!IsDuelPlayer(initiator) && entity != null && victimBP != null)
+                        RectTransform = { AnchorMin = "0 0", AnchorMax = "0 0", OffsetMin = $"{-config.uIPopupNotifications.OffsetX} {anchor - config.uIPopupNotifications.OffsetY}", OffsetMax = $"0 {anchor}" },
+                        Image = { Color = config.uIPopupNotifications.InterfaceColor, Material = "" }
+                    }, LayerPopup, LayerPopup + notify.Id);
+
+                    string offset = string.IsNullOrEmpty(notify.Icon) ? "5" : "50";
+                    container.Add(new CuiLabel
+                    {
+                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"{offset} 0", OffsetMax = "0 -5" },
+                        Text = { Text = notify.Title, Align = TextAnchor.UpperLeft, Font = "robotocondensed-bold.ttf", FontSize = 14, Color = "1 1 1 0.9" }
+                    }, LayerPopup + notify.Id);
+
+                    container.Add(new CuiLabel
+                    {
+                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"{offset} 0", OffsetMax = "0 -20" },
+                        Text = { Text = notify.Description, Align = TextAnchor.UpperLeft, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "1 1 1 0.8" }
+                    }, LayerPopup + notify.Id);
+
+                    if (!string.IsNullOrEmpty(notify.Icon))
+                    {
+                        container.Add(new CuiButton
                         {
-                            BlockPlayer(initiator, null, "attack");
-                            BlockPlayer(victimBP, null, "attack");
-                        }
+                            RectTransform = { AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "10 -15", OffsetMax = "40 15" },
+                            Button = { Color = "0.99 0.68 0.69 1.00", Sprite = notify.Icon },
+                            Text = { Text = "" }
+                        }, LayerPopup + notify.Id);
                     }
+
+
+                    container.Add(new CuiButton
+                    {
+                        RectTransform = { AnchorMin = "1 1", AnchorMax = "1 1", OffsetMin = "-15 -15", OffsetMax = "0 0" },
+                        Button = { Color = "0 0 0 0.5", Command = $"noescape_popup {notify.Id}" },
+                        Text = { Text = "X", Align = TextAnchor.MiddleCenter, FontSize = 9, Font = "robotocondensed-regular.ttf" }
+                    }, LayerPopup + notify.Id);
+                    anchor -= config.uIPopupNotifications.OffsetY + config.uIPopupNotifications.OffsetSkip;
                 }
 
-                if (info.WeaponPrefab is BaseProjectile) return;
-                if (damageTimers.Any(p => p.owners.Contains(entity.OwnerID))) return;
-                if (!(entity is BuildingBlock) && !(entity is Door)) return;
-                if (entity.OwnerID == 0) return;
-                if (useDamageScale)
-                {
-                    bool justCreated;
-                    var raid = GetRaid(entity.GetNetworkPosition(), out justCreated,
-                        EnabledBuildingPrivilage ? entity.GetBuildingPrivilege() : null);
-                    bool SendMessages = false;
-                    SendMessages = false;
-                    if (CooldownsAttackDic.ContainsKey(initiator))
-                    {
-                        double seconds = CooldownsAttackDic[initiator].Subtract(DateTime.Now).TotalSeconds;
-                        if (seconds >= 0)
-                        {
-                            SendMessages = true;
-                        }
-                    }
-
-                    if (clansAPI)
-                    {
-                        bool sendRemoveOwnerMessage = false;
-                        if (justCreated && initiator && !sendRemoveOwnerMessage)
-                        {
-                            if (IsClanMember(entity.OwnerID, initiator.userID))
-                            {
-                                damageTimers.Add(new DamageTimer(raid.owners.ToList(), 3600));
-                                info.damageTypes.ScaleAll(offlineScaleFriendsClans);
-                                sendRemoveOwnerMessage = true;
-                                justCreated = false;
-                                if (SendMessages == false)
-                                {
-                                    SendReply(initiator, Messages["isClanMember"]);
-                                    SendMessages = true;
-                                }
-
-                                CooldownsAttackDic[initiator] = DateTime.Now.AddSeconds(CooldownAttack);
-                                return;
-                            }
-                        }
-                    }
-
-                    if (friedsAPI)
-                    {
-                        bool sendRemoveOwnerMessage = false;
-                        if (justCreated && initiator && !sendRemoveOwnerMessage)
-                        {
-                            if (IsFriends(entity.OwnerID, initiator.userID))
-                            {
-                                damageTimers.Add(new DamageTimer(raid.owners.ToList(), 3600));
-                                sendRemoveOwnerMessage = true;
-                                info.damageTypes.ScaleAll(offlineScaleFriendsClans);
-                                if (SendMessages == false)
-                                {
-                                    SendReply(initiator, Messages["isFriendMember"]);
-                                    SendMessages = true;
-                                }
-
-                                CooldownsAttackDic[initiator] = DateTime.Now.AddSeconds(CooldownAttack);
-                                return;
-                            }
-                        }
-                    }
-
-                    if (clansAPI && GetMembersClan(entity.OwnerID) != null)
-                    {
-                        var team = GetMembersClan(entity.OwnerID);
-                        if (team.Contains(initiator.userID)) return;
-                        if (!team.Select(BasePlayer.FindByID).Any(p => p))
-                        {
-                            info.damageTypes.ScaleAll(offlineScale);
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        bool sendRemoveOwnerMessage = false;
-                        if (!BasePlayer.FindByID(entity.OwnerID))
-                        {
-                            info.damageTypes.ScaleAll(offlineScale);
-                            damageTimers.Add(new DamageTimer(raid.owners.ToList(), 3600));
-                            if (SendMessages == false)
-                            {
-                                SendReply(initiator, Messages["DamageNotOnlineOwner"]);
-                                SendMessages = true;
-                            }
-
-                            CooldownsAttackDic[initiator] = DateTime.Now.AddSeconds(CooldownAttack);
-                        }
-
-                        if (justCreated && initiator && !sendRemoveOwnerMessage)
-                        {
-                            sendRemoveOwnerMessage = true;
-                            justCreated = false;
-                        }
-                    }
-                }
-            }
-            catch (NullReferenceException)
-            {
+                CuiHelper.AddUi(Player, container);
             }
         }
 
-        object OnStructureUpgrade(BaseCombatEntity entity, BasePlayer player, BuildingGrade.Enum grade)
+        [ConsoleCommand("noescape_popup")]
+        void cmdNoEscapePopupClose(ConsoleSystem.Arg args)
         {
-            if (player == null) return null;
-            if (canUpgrade)
-            {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
-                {
-                    SendReply(player, string.Format(Messages["blockupgrade"], seconds));
-                    return false;
-                }
-            }
+            var player = args.Player();
+            var obj = PlayerBlockStatus.Get(player);
 
-            return null;
+            var not = obj.Notifications.Find(v => v.Id == args.Args[0]);
+            if (not != null)
+            {
+                obj.Notifications.Remove(not);
+                obj.DrawNotifications();
+            }
         }
 
-        object OnStructureDemolish(BaseCombatEntity entity, BasePlayer player)
+        public void AddPlayerNotification(BasePlayer player, string attacker, string grid)
         {
-            if (player == null) return null;
-            if (canRemoveStan)
-            {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
-                {
-                    SendReply(player, string.Format(Messages["blockremove"], seconds));
-                    return false;
-                }
-            }
-
-            return null;
+            if (!config.uIPopupNotifications.EnabledPopup) return;
+            var message = config.uIPopupNotifications.Message.Replace("%ATTACKER%", attacker).Replace("%GRID%", grid);
+            PlayerBlockStatus.Get(player).AddNotification(new PlayerBlockStatus.Notification() { Description = message, Title = config.uIPopupNotifications.Title });
         }
 
-        object OnStructureRepair(BaseCombatEntity entity, BasePlayer player)
+        public bool IsTeamate(ulong playerId, ulong targetId)
         {
-            if (player == null) return null;
-            if (canRepair)
-            {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
-                {
-                    SendReply(player, string.Format(Messages["blockrepair"], seconds));
-                    return false;
-                }
-            }
-
-            return null;
-        }
-
-        object CanUpgrade(BasePlayer player)
-        {
-            if (player == null) return null;
-            if (canUpgrade)
-            {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
-                {
-                    SendReply(player, string.Format(Messages["blockupgrade"], seconds));
-                    return false;
-                }
-            }
-
-            return null;
-        }
-
-        readonly int cupboardMask = LayerMask.GetMask("Deployed");
-
-        object CanBuild(Planner planner, Construction prefab, Construction.Target target)
-        {
-            var player = planner.GetOwnerPlayer();
-            if (player == null) return null;
-            if (canBuild)
-            {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
-                {
-                    if (prefab.fullName.Contains("Twigs")) return null;
-                    if (!LadderBuilding && prefab.fullName.Contains("ladder.wooden")) return null;
-                    if (WriteList.Contains(prefab.CreateConstruction(target).ShortPrefabName)) return null;
-                    SendReply(player, string.Format(Messages["blockbuld"], seconds));
-                    if (prefab.fullName.Contains("cupboard.tool"))
-                    {
-                        BuildingPrivlidge privilege =
-                            target.entity.GetBuildingPrivilege(target.entity.WorldSpaceBounds());
-                        if (privilege != null) privilege.Kill();
-                    }
-
-                    return false;
-                }
-            }
-
-            return null;
-        }
-
-        object CanTeleport(BasePlayer player)
-        {
-            if (player == null) return null;
-            var cooldown = GetCooldown(player, "attack");
-            if (cooldown > 0 && !player.IsAdmin)
+            RelationshipManager.PlayerTeam team1;
+            if (!RelationshipManager.ServerInstance.playerToTeam.TryGetValue(playerId, out team1))
             {
                 return false;
             }
 
-            var seconds = ApiGetTime(player.userID);
-            return seconds > 0 ? string.Format(Messages["blocktp"], seconds) : null;
-        }
-
-        object CanTrade(BasePlayer player)
-        {
-            if (player == null) return null;
-            if (canTrade)
+            RelationshipManager.PlayerTeam team2;
+            if (!RelationshipManager.ServerInstance.playerToTeam.TryGetValue(targetId, out team2))
             {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
+                return false;
+            }
+
+            return team1.teamID == team2.teamID;
+        }
+        public class SphereComponent : FacepunchBehaviour
+        {
+            SphereCollider sphereCollider;
+            public BasePlayer initPlayer;
+            public List<ulong> Privilage = null;
+            public ulong OwnerID;
+            public double CurrentTime = 0;
+            public double TotalTime = config.BlockSettings.BlockLength;
+            void Awake()
+            {
+                var reply = 0;
+                if (reply == 0) { }
+                gameObject.layer = (int)Layer.Reserved1;
+                sphereCollider = gameObject.AddComponent<SphereCollider>();
+                sphereCollider.isTrigger = true;
+                sphereCollider.radius = config.BlockSettings.BlockerDistance;
+            }
+
+            public void Init(BasePlayer player, ulong owner, List<ulong> privilage)
+            {
+                initPlayer = player;
+                OwnerID = owner;
+                Privilage = privilage;
+            }
+
+            private void OnTriggerEnter(Collider other)
+            {
+                var target = other.GetComponentInParent<BasePlayer>();
+                if (target == null) return;
+                if (ins.permission.UserHasPermission(target.UserIDString, config.BlockSettings.PermissionToIgnore)) return;
+                if (PlayerBlockStatus.Get(target).CurrentBlocker != null && PlayerBlockStatus.Get(target).CurrentTime > CurrentTime)
                 {
-                    SendReply(player, string.Format(Messages["blocktrade"], seconds));
-                    return false;
+                    PlayerBlockStatus.Get(target).CurrentBlocker = this;
+                    PlayerBlockStatus.Get(target).CurrentTime = CurrentTime;
+                    return;
+                }
+
+                if (PlayerBlockStatus.Get(target).CurrentBlocker != null && PlayerBlockStatus.Get(target).CurrentBlocker != this && PlayerBlockStatus.Get(target).CurrentTime > CurrentTime)
+                {
+                    target.ChatMessage(string.Format(ins.Messages["enterRaidZone"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength - CurrentTime)));
+                    PlayerBlockStatus.Get(target).CurrentBlocker = this;
+                    PlayerBlockStatus.Get(target).CurrentTime = CurrentTime;
+                    return;
+                }
+                if (config.BlockSettings.ShouldBlockEnter && PlayerBlockStatus.Get(target).CurrentBlocker == null)
+                {
+                    PlayerBlockStatus.Get(target).BlockPlayer(this, false);
+                    target.ChatMessage(string.Format(ins.Messages["enterRaidZone"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength - CurrentTime)));
                 }
             }
 
+            private void OnTriggerExit(Collider other)
+            {
+                if (!config.BlockSettings.UnBlockExit) return;
+                var target = other.GetComponentInParent<BasePlayer>();
+                if (target != null && target.userID.IsSteamId() && PlayerBlockStatus.Get(target).CurrentBlocker == this)
+                    PlayerBlockStatus.Get(target).UnblockPlayer();
+            }
+
+            public void FixedUpdate()
+            {
+                CurrentTime += Time.deltaTime;
+                if (CurrentTime > TotalTime)
+                {
+                    if (BlockerList.Contains(this))
+                        BlockerList.Remove(this);
+                    Destroy(this);
+                }
+            }
+
+            public bool IsInBlocker(BaseEntity player) => Vector3.Distance(player.transform.position, transform.position) < config.BlockSettings.BlockerDistance;
+        }
+        #endregion
+
+        #region Variables
+
+        static PluginConfig config;
+
+        protected override void LoadDefaultConfig()
+        {
+            PrintWarning("Благодарим за покупку плагина на сайте RustPlugin.ru. Если вы передадите этот плагин сторонним лицам знайте - это лишает вас гарантированных обновлений!");
+            config = PluginConfig.DefaultConfig();
+        }
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            config = Config.ReadObject<PluginConfig>();
+
+            if (config.PluginVersion < Version)
+                UpdateConfigValues();
+
+            Config.WriteObject(config, true);
+        }
+
+        void Loaded()
+        {
+            if (!config.PlayerBlockSettings.CanRepair) Unsubscribe(nameof(OnStructureRepair));
+            else Subscribe(nameof(OnStructureRepair));
+            if (!config.PlayerBlockSettings.CanUpgrade) Unsubscribe(nameof(CanAffordUpgrade));
+            else Subscribe(nameof(CanAffordUpgrade));
+            if (!config.PlayerBlockSettings.CanDefaultremove) Unsubscribe(nameof(OnStructureDemolish));
+            else Subscribe(nameof(OnStructureDemolish));
+            if (!config.PlayerBlockSettings.CanBuild && !config.PlayerBlockSettings.CanPlaceObjects) Unsubscribe(nameof(CanBuild));
+            else Subscribe(nameof(CanBuild));
+            permission.RegisterPermission(config.BlockSettings.PermissionToIgnore, this);
+            permission.RegisterPermission(config.VkBotMessages.VkPrivilage, this);
+            lang.RegisterMessages(Messages, this, "en");
+            Messages = lang.GetMessages("en", this);
+        }
+
+        private void UpdateConfigValues()
+        {
+            PluginConfig baseConfig = PluginConfig.DefaultConfig();
+            if (config.PluginVersion < Version)
+            {
+                PrintWarning("Config update detected! Updating config values...");
+
+                if (config.PluginVersion < new VersionNumber(2, 2, 0))
+                {
+                    config.BlockSettings.WriteListDestroyEntity = new List<string>()
+                    {
+                        "barricade.metal",
+                         "bed_deployed"
+                    };
+                    PrintWarning("Added Write List entity");
+                }
+                if (config.PluginVersion < new VersionNumber(2, 3, 1))
+                {
+                    config.PlayerBlockSettings.BlackListCommands = new List<string>()
+                    {
+                        "/bp",
+                        "backpack.open",
+                        "/trade"
+                    };
+
+                    PrintWarning("Added Black List commands");
+                }
+                if (config.PluginVersion < new VersionNumber(2, 4, 0))
+                {
+                    if (config.uIPopupNotifications == null)
+                    {
+                        config.uIPopupNotifications = new UIPopupNotifications();
+                    }
+                    PrintWarning("Added UI Popup Notifications");
+                }
+                PrintWarning("Config update completed!");
+                config.PluginVersion = Version;
+            }
+        }
+
+        protected override void SaveConfig()
+        {
+            Config.WriteObject(config);
+        }
+
+        public class UIPopupNotifications
+        {
+            [JsonProperty("Включить Popup Notifications")]
+            public bool EnabledPopup = false;
+
+            [JsonProperty("Цвет фона оповещения")]
+            public string InterfaceColor = "0.121568628 0.419607848 0.627451 0.784313738";
+
+            [JsonProperty("Позиция по вертикали X (0.0 - 1.0)")]
+            public float AnchorPosX = 0.99f;
+
+            [JsonProperty("Время жизни Popup оповещения в секундах")]
+            public int PopupDestroyTime = 30;
+
+            [JsonProperty("Позиция по вертикали Y (0.0 - 1.0)")]
+            public float AnchorPosY = 0.99f;
+
+            [JsonProperty("Ширина каждой панели (Offset X)")]
+            public float OffsetX = 300;
+
+            [JsonProperty("Высота каждой панели (Offset Y)")]
+            public float OffsetY = 50;
+
+            [JsonProperty("Пропуск между панелями (Offset)")]
+            public float OffsetSkip = 10;
+
+            [JsonProperty("Титл оповещения")]
+            public string Title = "ОПОВЕЩЕНИЕ О РЕЙДЕ";
+
+            [JsonProperty("Текст оповещения (%ATTACKER% - Имя атакующего, %GRID% - Грит координаты)")]
+            public string Message = "ВНИМАНИЕ! Игрок <b>%ATTACKER%</b> атаковал ваше строение в квадрате <b>%GRID%</b>";
+
+            [JsonProperty("Максимальное количество оповещений")]
+            public int MaxPopupNotifications = 3;
+        }
+
+        public class UISettings
+        {
+            [JsonProperty("Цвет полосы активный полосы")]
+            public string InterfaceColor = "0.121568628 0.419607848 0.627451 0.784313738";
+
+            [JsonProperty("Цвет фона")]
+            public string InterfaceColorBP = "1 1 1 0.3";
+
+            [JsonProperty("Позиция AnchorMin")]
+            public string AnchorMin = "0.3447913 0.112037";
+
+            [JsonProperty("Позиция AnchorMax")]
+            public string AnchorMax = "0.640625 0.1398148";
+        }
+
+        public class BlockSettings
+        {
+            [JsonProperty("Радиус зоны блокировки")]
+            public float BlockerDistance = 150;
+
+            [JsonProperty("Общее время блокировки в секундах")]
+            public float BlockLength = 150;
+
+
+            [JsonProperty("Не блокировать игрока если он создатель объекта")]
+            public bool EnabledOwner = false;
+            [JsonProperty("Не блокировать игрока если он тимейт создателя объекта")]
+            public bool EnabledTeam = false;
+              [JsonProperty("Блокировать всю тиму инициатора рейда")]
+            public bool EnabledBlockAllTeamate = false;
+
+            [JsonProperty("Блокировать создателя объекта какой разрушили, даже если он вне зоны рейда")]
+            public bool BlockOwnersIfNotInZone = true;
+
+            [JsonProperty("Блокировать игрока, который вошёл в активную зону блокировки")]
+            public bool ShouldBlockEnter = true;
+
+            [JsonProperty("Снимать блокировку с игрока если он вышел из зоны блокировки?")]
+            public bool UnBlockExit = false;
+
+            [JsonProperty("Не создавать блокировку если разрушенный объект не в зоне шкафа (Нету билды)")]
+            public bool EnabledBuildingBlock = false;
+
+            [JsonProperty("Блокировать всех игроков какие авторизаваны в шкафу (Если шкаф существует, и авторизованный игрок на сервере)")]
+            public bool EnabledBlockAutCupboard = false;
+
+            [JsonProperty("Привилегия, игроки с которой игнорируются РБ (на них он не действует")]
+            public string PermissionToIgnore = "noescape.ignore";
+
+            [JsonProperty("Белый список entity при разрушении каких не действует блокировка")]
+            public List<string> WriteListDestroyEntity = new List<string>();
+        }
+
+        public class VkBotMessages
+        {
+            [JsonProperty("Включить отправку сообщения в ВК оффлайн игроку через VkBot")]
+            public bool EnabledVkBOT = false;
+            [JsonProperty("Сообщение какое будет отправлено игроку ({0} - Имя атакуещего, {1} - Квадрат на карте)")]
+            public string Messages = "Внимание! Игрок {0} начал рейд вашего строения в квадрате {1} на сервере SERVERNAME.";
+            [JsonProperty("Привилегия на использование оффлайн уведомления")]
+            public string VkPrivilage = "noescape.vknotification";
+        }
+
+        public class PlayerBlockSettings
+        {
+            [JsonProperty("Блокировать использование китов")]
+            public bool CanUseKits = true;
+
+            [JsonProperty("Блокировать обмен между игроками (Trade)")]
+            public bool CanUseTrade = true;
+
+            [JsonProperty("Блокировать телепорты")]
+            public bool CanTeleport = true;
+
+            [JsonProperty("Блокировать удаление построек (CanRemove)")]
+            public bool CanRemove = true;
+
+            [JsonProperty("Блокировать улучшение построек (Upgrade, BuildingUpgrade и прочее)")]
+            public bool CanBGrade = true;
+
+            [JsonProperty("Блокировать удаление построек (стандартное)")]
+            public bool CanDefaultremove = true;
+
+            [JsonProperty("Блокировать строительство")]
+            public bool CanBuild = true;
+
+            [JsonProperty("Блокировать установку объектов")]
+            public bool CanPlaceObjects = true;
+
+            [JsonProperty("Блокировать ремонт построек (стандартный)")]
+            public bool CanRepair = true;
+
+            [JsonProperty("Блокировать улучшение построек (стандартное)")]
+            public bool CanUpgrade = true;
+
+            [JsonProperty("Белый список предметов какие можно строить при блокировке")]
+            public List<string> WriteListBuildEntity = new List<string>();
+
+            [JsonProperty("Черный список команд какие запрещены при рейд блоке (Чатовые и консольные)")]
+            public List<string> BlackListCommands = new List<string>();
+
+        }
+
+        private class PluginConfig
+        {
+            [JsonProperty("Настройка UI")]
+            public UISettings UISettings = new UISettings();
+
+            [JsonProperty("Настройка Popup Notifications")]
+            public UIPopupNotifications uIPopupNotifications = new UIPopupNotifications();
+
+            [JsonProperty("Общая настройка блокировки")]
+            public BlockSettings BlockSettings = new BlockSettings();
+
+            [JsonProperty("Настройка запретов для игрока")]
+            public PlayerBlockSettings PlayerBlockSettings = new PlayerBlockSettings();
+
+            [JsonProperty("Настройка VkBOT")]
+            public VkBotMessages VkBotMessages = new VkBotMessages();
+
+            [JsonProperty("Версия конфигурации")]
+            public VersionNumber PluginVersion = new VersionNumber();
+
+            [JsonIgnore]
+            [JsonProperty("Инициализация плагина")]
+            public bool Init = false;
+
+            public static PluginConfig DefaultConfig()
+            {
+                return new PluginConfig
+                {
+                    uIPopupNotifications = new UIPopupNotifications(),
+                    BlockSettings = new BlockSettings()
+                    {
+                        BlockerDistance = 150,
+                        BlockLength = 150,
+                        BlockOwnersIfNotInZone = true,
+                        ShouldBlockEnter = true,
+                        UnBlockExit = false,
+                        EnabledBuildingBlock = false,
+                        EnabledBlockAutCupboard = false,
+                        PermissionToIgnore = "noescape.ignore",
+                        WriteListDestroyEntity = new List<string>()
+                        {
+                            "barricade.metal",
+                            "bed_deployed"
+                        }
+                    },
+                    PlayerBlockSettings = new PlayerBlockSettings()
+                    {
+                        CanUseKits = true,
+                        CanUseTrade = true,
+                        CanTeleport = true,
+                        CanRemove = true,
+                        CanBGrade = true,
+                        CanDefaultremove = true,
+                        CanBuild = true,
+                        CanPlaceObjects = true,
+                        CanRepair = true,
+                        CanUpgrade = true,
+                        WriteListBuildEntity = new List<string>()
+                        {
+                             "wall.external.high.stone",
+                             "barricade.metal"
+                        }
+                    },
+                    UISettings = new UISettings()
+                    {
+                        InterfaceColor = "0.12 0.41 0.62 0.78",
+                        InterfaceColorBP = "1 1 1 0.3",
+                        AnchorMin = "0.3447913 0.112037",
+                        AnchorMax = "0.640625 0.1398148",
+                    },
+                    VkBotMessages = new VkBotMessages()
+                    {
+                        EnabledVkBOT = false,
+                        Messages = "Внимание! Игрок {0} начал рейд вашего строения в квадрате {1} на сервере SERVERNAME.",
+                        VkPrivilage = "noescape.vknotification",
+                    },
+                    PluginVersion = new VersionNumber(),
+                };
+            }
+        }
+
+        #endregion
+
+        #region Oxide
+        private static NoEscape ins;
+        private void OnServerInitialized()
+        {
+            ins = this;
+            config.Init = true;
+            BasePlayer.activePlayerList.ToList().ForEach(OnPlayerConnected);
+        }
+
+        void OnPlayerSleepEnded(BasePlayer player)
+        {
+            SphereComponent ActiveRaidZone = GetRaidZone(player.transform.position);
+            if (ActiveRaidZone == null)
+            {
+                if (config.BlockSettings.UnBlockExit)
+                {
+                    if (PlayerBlockStatus.Get(player).CurrentBlocker != null)
+                        PlayerBlockStatus.Get(player).UnblockPlayer();
+                }
+                return;
+            }
+
+            if (PlayerBlockStatus.Get(player).CurrentBlocker != null)
+            {
+                if (PlayerBlockStatus.Get(player).CurrentBlocker != ActiveRaidZone)
+                    PlayerBlockStatus.Get(player).BlockPlayer(ActiveRaidZone, false);
+            }
+            else
+            {
+                player.ChatMessage(string.Format(Messages["enterRaidZone"], NumericalFormatter.FormatTime(config.BlockSettings.BlockLength - ActiveRaidZone.CurrentTime)));
+                PlayerBlockStatus.Get(player)?.BlockPlayer(ActiveRaidZone, false);
+            }
+        }
+
+        private void OnPlayerConnected(BasePlayer player)
+        {
+            if (player.IsReceivingSnapshot)
+            {
+                timer.In(1f, () => OnPlayerConnected(player));
+                return;
+            }
+            if (PlayerBlockStatus.Get(player).CurrentBlocker != null)
+                PlayerBlockStatus.Get(player).CreateUI();
+        }
+
+        private void Unload()
+        {
+            foreach (var player in BasePlayer.activePlayerList)
+                if (PlayerBlockStatus.Get(player) != null)
+                    UnityEngine.Object.Destroy(PlayerBlockStatus.Get(player));
+            BlockerList.RemoveAll(x =>
+            {
+                UnityEngine.Object.Destroy(x);
+                return true;
+            });
+        }
+
+        private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!config.Init) return;
+            if (entity == null || info == null || info.InitiatorPlayer == null || !(entity is StabilityEntity || entity is ShopFront || entity is BuildingPrivlidge)
+                || config.BlockSettings.EnabledBuildingBlock && entity.GetBuildingPrivilege() == null || entity.OwnerID == 0 || (config.BlockSettings.EnabledOwner && info.InitiatorPlayer.userID == entity.OwnerID) || (config.BlockSettings.EnabledTeam && IsTeamate(info.InitiatorPlayer.userID, entity.OwnerID))) return;
+            if (entity is BuildingBlock && (entity as BuildingBlock).currentGrade.gradeBase.type == BuildingGrade.Enum.Twigs
+                || info?.damageTypes.GetMajorityDamageType() == DamageType.Decay || config.BlockSettings.WriteListDestroyEntity.Contains(entity.ShortPrefabName)) return;
+            var alreadyBlock = BlockerList.FirstOrDefault(p => Vector3.Distance(entity.transform.position, p.transform.position) < (config.BlockSettings.BlockerDistance / 2));
+            if (alreadyBlock)
+            {
+                alreadyBlock.CurrentTime = 0;
+                if (config.BlockSettings.BlockOwnersIfNotInZone)
+                {
+                    var OwnerPlayer = BasePlayer.FindByID(entity.OwnerID);
+                    if (OwnerPlayer != null)
+                        PlayerBlockStatus.Get(OwnerPlayer).BlockPlayer(alreadyBlock, false);
+                }
+                PlayerBlockStatus.Get(info.InitiatorPlayer).BlockPlayer(alreadyBlock, false);
+
+                if (config.BlockSettings.EnabledBlockAllTeamate && info.InitiatorPlayer.currentTeam != 0)
+                {
+                    var team = RelationshipManager.ServerInstance.FindTeam(info.InitiatorPlayer.currentTeam);
+                    foreach (var userID in team.members)
+                    {
+                        BasePlayer basePlayer = global::BasePlayer.FindByID(userID);
+                        if (basePlayer != null && basePlayer.IsConnected)
+                            PlayerBlockStatus.Get(basePlayer).BlockPlayer(alreadyBlock, false);
+                    }
+                }
+
+                if (entity.GetBuildingPrivilege() != null)
+                {
+                    foreach (var aplayer in entity.GetBuildingPrivilege().authorizedPlayers)
+                    {
+
+                        var AuthPlayer = BasePlayer.Find(aplayer.userid.ToString());
+                        if (config.BlockSettings.EnabledBlockAutCupboard && AuthPlayer != null && AuthPlayer != info.InitiatorPlayer && AuthPlayer.IsConnected)
+                            PlayerBlockStatus.Get(AuthPlayer).BlockPlayer(alreadyBlock, false);
+                        else if (AuthPlayer == null || !AuthPlayer.IsConnected) SendOfflineMEssages(entity.transform.position, info.InitiatorPlayer.displayName, aplayer.userid);
+                    }
+                }
+                var col = Vis.colBuffer;
+                var count = Physics.OverlapSphereNonAlloc(alreadyBlock.transform.position, config.BlockSettings.BlockerDistance, col, LayerMask.GetMask("Player (Server)"));
+                for (int i = 0; i < count; i++)
+                {
+                    var player = col[i].ToBaseEntity() as BasePlayer;
+                    if (player == null) continue;
+                    PlayerBlockStatus.Get(player).BlockPlayer(alreadyBlock, false);
+                }
+            }
+            else
+            {
+                var obj = new GameObject();
+                obj.transform.position = entity.transform.position;
+                var sphere = obj.AddComponent<SphereComponent>();
+                sphere.GetComponent<SphereComponent>().Init(info.InitiatorPlayer, entity.OwnerID, entity.GetBuildingPrivilege() != null ? entity.GetBuildingPrivilege().authorizedPlayers.Select(p => p.userid).ToList() : null);
+                BlockerList.Add(sphere);
+                PlayerBlockStatus.Get(info.InitiatorPlayer).BlockPlayer(sphere, true);
+
+
+                if (config.BlockSettings.EnabledBlockAllTeamate && info.InitiatorPlayer.currentTeam != 0)
+                {
+                    var team = RelationshipManager.ServerInstance.FindTeam(info.InitiatorPlayer.currentTeam);
+                    foreach (var userID in team.members)
+                    {
+                        BasePlayer basePlayer = global::BasePlayer.FindByID(userID);
+                        if (basePlayer != null && basePlayer.IsConnected)
+                            PlayerBlockStatus.Get(basePlayer).BlockPlayer(sphere, false);
+                    }
+                }
+
+                var OwnerPlayer = BasePlayer.FindByID(entity.OwnerID);
+                if (OwnerPlayer == null || !OwnerPlayer.IsConnected)
+                {
+                    SendOfflineMEssages(entity.transform.position, info.InitiatorPlayer.displayName, entity.OwnerID);
+                }
+                else if (OwnerPlayer != null)
+                {
+                    if (config.BlockSettings.BlockOwnersIfNotInZone) 
+                        PlayerBlockStatus.Get(OwnerPlayer)?.BlockPlayer(sphere, false);
+                    OwnerPlayer.ChatMessage(string.Format(Messages["blockactive"], GetGridString(entity.transform.position), NumericalFormatter.FormatTime(config.BlockSettings.BlockLength)));
+                    AddPlayerNotification(OwnerPlayer, info.InitiatorPlayer.displayName, GetGridString(entity.transform.position));
+
+                }
+                var col = Vis.colBuffer;
+                var count = Physics.OverlapSphereNonAlloc(sphere.transform.position, config.BlockSettings.BlockerDistance, col, LayerMask.GetMask("Player (Server)"));
+                for (int i = 0; i < count; i++)
+                {
+                    var player = col[i].ToBaseEntity() as BasePlayer;
+                    if (player == null || !player.IsConnected || OwnerPlayer == player) continue;
+                    PlayerBlockStatus.Get(player).BlockPlayer(sphere, false);
+                }
+
+                if (entity.GetBuildingPrivilege() != null)
+                {
+                    foreach (var aplayer in entity.GetBuildingPrivilege().authorizedPlayers)
+                    {
+                        var AuthPlayer = BasePlayer.Find(aplayer.userid.ToString());
+                        if (AuthPlayer != null && AuthPlayer != info.InitiatorPlayer && OwnerPlayer != AuthPlayer)
+                        {
+                            if (config.BlockSettings.EnabledBlockAutCupboard)
+                                PlayerBlockStatus.Get(AuthPlayer).BlockPlayer(sphere, false);
+                            AddPlayerNotification(AuthPlayer, info.InitiatorPlayer.displayName, GetGridString(entity.transform.position));
+                            SendReply(AuthPlayer, string.Format(Messages["blockactiveAuthCup"], GetGridString(entity.transform.position), NumericalFormatter.FormatTime(config.BlockSettings.BlockLength)));
+                        }
+                        else if (AuthPlayer != info.InitiatorPlayer && OwnerPlayer != AuthPlayer) SendOfflineMEssages(entity.transform.position, info.InitiatorPlayer.displayName, aplayer.userid);
+                    }
+                }
+            }
+        }
+
+        object CanBuild(Planner planner, Construction prefab, Construction.Target target)
+        {
+            var player = planner.GetOwnerPlayer();
+            if (player == null || !IsRaidBlocked(player)) return null;
+            var shortname = prefab.hierachyName.Substring(prefab.hierachyName.IndexOf("/") + 1);
+            if (config.PlayerBlockSettings.WriteListBuildEntity.Contains(shortname))
+                return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null || component.CurrentBlocker == null) return null;
+            player.ChatMessage(string.Format(Messages["blockbuld"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime)));
+            return false;
+        }
+
+        private object OnUserCommand(IPlayer ipl, string command, string[] args)
+        {
+            if (ipl == null || !ipl.IsConnected) return null;
+            var player = ipl.Object as BasePlayer;
+            command = command.Insert(0, "/");
+            if (player == null || !IsRaidBlocked(player)) return null;
+            if (config.PlayerBlockSettings.BlackListCommands.Contains(command.ToLower()))
+            {
+                var component = PlayerBlockStatus.Get(player);
+                if (component == null || component.CurrentBlocker == null) return null;
+                player.ChatMessage(string.Format(Messages["commandBlock"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime)));
+                return false;
+            }
             return null;
+        }
+
+        private object OnServerCommand(ConsoleSystem.Arg arg)
+        {
+            var connection = arg.Connection;
+            if (connection == null || string.IsNullOrEmpty(arg.cmd?.FullName)) return null;
+            var player = arg.Player();
+            if (player == null || !IsRaidBlocked(player)) return null;
+            if (config.PlayerBlockSettings.BlackListCommands.Contains(arg.cmd.Name.ToLower()) || config.PlayerBlockSettings.BlackListCommands.Contains(arg.cmd.FullName.ToLower()))
+            {
+                var component = PlayerBlockStatus.Get(player);
+                if (component == null || component.CurrentBlocker == null) return null;
+                player.ChatMessage(string.Format(Messages["commandBlock"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime)));
+                return false;
+            }
+            return null;
+        }
+
+        #endregion
+
+        #region Functions
+        private string GetGridString(Vector3 pos)
+        {
+            char letter = 'A';
+            var x = Mathf.Floor((pos.x + (ConVar.Server.worldsize / 2)) / 146.3f) % 26;
+            var z = (Mathf.Floor(ConVar.Server.worldsize / 146.3f) - 1) - Mathf.Floor((pos.z + (ConVar.Server.worldsize / 2)) / 146.3f);
+            letter = (char)(((int)letter) + x);
+            return $"{letter}{z}";
+        }
+
+        private string NumberToString(int number)
+        {
+            bool a = number > 26;
+            Char c = (Char)(65 + (a ? number - 26 : number));
+            return a ? "A" + c : c.ToString();
+        }
+
+        [PluginReference] private Plugin VKBot;
+        private static void SendOfflineMEssages(Vector3 pos, string name = "‌​‌‌‍﻿﻿", ulong playerid = 0)
+        {
+            if (!ins.permission.UserHasPermission(playerid.ToString(), config.VkBotMessages.VkPrivilage)) return;
+            string receiver = (string)ins.VKBot?.Call("GetUserVKId", playerid) ?? "";
+            if (string.IsNullOrEmpty(receiver)) return;
+            ins.VKBot?.Call("SendVkMessage", receiver, config.VkBotMessages.Messages.Replace("{0}", name).Replace("{1}", ins.GetGridString(pos)));
+        }
+
+        private string GetFormatTime(TimeSpan timespan)
+        {
+            return string.Format(timespan.TotalHours >= 1 ? "{2:00}:{0:00}:{1:00}" : "{0:00}:{1:00}", timespan.Minutes, timespan.Seconds, System.Math.Floor(timespan.TotalHours));
+        }
+
+        private static class NumericalFormatter
+        {
+            private static string GetNumEndings(int origNum, string[] forms)
+            {
+                string result;
+                var num = origNum % 100;
+                if (num >= 11 && num <= 19)
+                {
+                    result = forms[2];
+                }
+                else
+                {
+                    num = num % 10;
+                    switch (num)
+                    {
+                        case 1: result = forms[0]; break;
+                        case 2:
+                        case 3:
+                        case 4:
+                            result = forms[1]; break;
+                        default:
+                            result = forms[2]; break;
+                    }
+                }
+                return string.Format("{0} {1} ", origNum, result);
+            }
+
+            private static string FormatSeconds(int seconds) =>
+                GetNumEndings(seconds, new[] { "секунду", "секунды", "секунд" });
+            private static string FormatMinutes(int minutes) =>
+                GetNumEndings(minutes, new[] { "минуту", "минуты", "минут" });
+            private static string FormatHours(int hours) =>
+                GetNumEndings(hours, new[] { "час", "часа", "часов" });
+            private static string FormatDays(int days) =>
+                GetNumEndings(days, new[] { "день", "дня", "дней" });
+            private static string FormatTime(TimeSpan timeSpan)
+            {
+                string result = string.Empty;
+                if (timeSpan.Days > 0)
+                    result += FormatDays(timeSpan.Days);
+                if (timeSpan.Hours > 0)
+                    result += FormatHours(timeSpan.Hours);
+                if (timeSpan.Minutes > 0)
+                    result += FormatMinutes(timeSpan.Minutes);
+                if (timeSpan.Seconds > 0)
+                    result += FormatSeconds(timeSpan.Seconds).TrimEnd(' ');
+                return result;
+            }
+
+            public static string FormatTime(int seconds) => FormatTime(new TimeSpan(0, 0, seconds));
+            public static string FormatTime(float seconds) => FormatTime((int)Math.Round(seconds));
+            public static string FormatTime(double seconds) => FormatTime((int)Math.Round(seconds));
+        }
+        #endregion
+
+        #region API
+        private bool IsBlocked(BasePlayer player) => IsRaidBlocked(player);
+
+        private List<Vector3> ApiGetOwnerRaidZones(ulong playerid)
+        {
+            var OwnerList = BlockerList.Where(p => p.OwnerID == playerid || p.Privilage != null && p.Privilage.Contains(playerid)).Select(p => p.transform.position).ToList();
+            return OwnerList;
+        }
+
+        private List<Vector3> ApiGetAllRaidZones()
+          => BlockerList.Select(p => p.transform.position).ToList();
+
+        private bool IsRaidBlock(ulong userId) => IsRaidBlocked(userId.ToString());
+
+        private bool IsRaidBlocked(BasePlayer player) => PlayerBlockStatus.Get(player)?.CurrentBlocker != null;
+
+        private bool IsRaidBlocked(string player)
+        {
+            BasePlayer target = BasePlayer.Find(player);
+            if (target == null) return false;
+
+            return IsRaidBlocked(target);
+        }
+
+        private int ApiGetTime(ulong userId)
+        {
+            if (!IsRaidBlocked(userId.ToString())) return 0;
+            var targetBlock = PlayerBlockStatus.Get(BasePlayer.Find(userId.ToString()));
+            return (int)(targetBlock.CurrentBlocker.TotalTime - targetBlock.CurrentTime);
+        }
+
+        private string CanTeleport(BasePlayer player)
+        {
+            if (!config.PlayerBlockSettings.CanTeleport) return null;
+            if (!IsRaidBlocked(player)) return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null) return null;
+            return string.Format(Messages["blocktp"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime));
+        }
+
+        private int? CanBGrade(BasePlayer player, int grade, BuildingBlock block, Planner plan)
+        {
+            if (!config.PlayerBlockSettings.CanBGrade) return null;
+            if (!IsRaidBlocked(player)) return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null) return null;
+            player.ChatMessage(string.Format(Messages["blockupgrade"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime)));
+            return 0;
+        }
+
+        private string CanTrade(BasePlayer player)
+        {
+            if (!config.PlayerBlockSettings.CanUseTrade) return null;
+            if (!IsRaidBlocked(player)) return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null) return null;
+            return string.Format(Messages["blocktrade"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime));
+        }
+
+        private string canRemove(BasePlayer player)
+        {
+
+            if (!config.PlayerBlockSettings.CanRemove) return null;
+            if (!IsRaidBlocked(player)) return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null) return null;
+            return string.Format(Messages["blockremove"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime));
+        }
+
+        private string canTeleport(BasePlayer player)
+        {
+            if (!config.PlayerBlockSettings.CanTeleport) return null;
+            if (!IsRaidBlocked(player)) return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null) return null;
+            return string.Format(Messages["blocktp"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime));
         }
 
         object canRedeemKit(BasePlayer player)
         {
-            if (player == null) return null;
-            if (canKits)
-            {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
-                {
-                    SendReply(player, string.Format(Messages["blockKits"], seconds));
-                    return false;
-                }
-            }
+            if (!config.PlayerBlockSettings.CanUseKits) return null;
 
-            return null;
+            if (!IsRaidBlocked(player)) return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null) return null;
+            return string.Format(Messages["blockKits"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime));
         }
 
-        object CanRecycleCommand(BasePlayer player)
+        private bool? CanAffordUpgrade(BasePlayer player, BuildingBlock block, BuildingGrade.Enum grade)
         {
-            if (player == null) return null;
-            if (canRec)
-            {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
-                {
-                    SendReply(player, string.Format(Messages["blockrec"], seconds));
-                    return false;
-                }
-            }
-
-            return null;
-        }
-
-        object CanRemove(BasePlayer player, BaseEntity entity)
-        {
-            if (player == null) return null;
-            if (canRemove)
-            {
-                var seconds = ApiGetTime(player.userID);
-                if (seconds > 0)
-                {
-                    SendReply(player, string.Format(Messages["raidremove"], seconds));
-                    return false;
-                }
-            }
-
-            return null;
-        }
-
-        [ChatCommand("ne")]
-        void cmdChatRaid(BasePlayer player, string command, string[] args)
-        {
-            if (player == null) return;
-            var seconds = ApiGetTime(player.userID);
-            if (seconds != 0)
-            {
-                SendReply(player, string.Format(Messages["isblock"], FormatTime(TimeSpan.FromSeconds(seconds))));
-                return;
-            }
-
-            if (seconds == 0)
-            {
-                SendReply(player, string.Format(Messages["noblock"]));
-                return;
-            }
-        }
-
-        private string TextReplace(string key, params KeyValuePair<string, string>[] replacements)
-        {
-            string message = key;
-            foreach (var replacement in replacements)
-                message = message.Replace($"{{{replacement.Key}}}", replacement.Value);
-            return message;
-        }
-
-        void SendOfflineMessage(ulong id, string raidername)
-        {
-            if (!PermissionService.HasPermission(id, PERM_VK_NOTIFICATION)) return;
-            var userVK = (string) VKBot?.Call("GetUserVKId", id);
-            if (userVK == null) return;
-            var LastNotice = (string) VKBot?.Call("GetUserLastNotice", id);
-            if (LastNotice == null)
-            {
-                string text = TextReplace(formatMessage, new KeyValuePair<string, string>("attacker", raidername));
-                VKBot?.Call("VKAPIMsg", text, MsgAtt, userVK, MsgAttB);
-                string LastRaidNotice = DateTime.Now.ToString("dd.MM.yyyy HH:mm:ss");
-                VKBot?.Call("VKAPISaveLastNotice", id, LastRaidNotice);
-            }
-            else
-            {
-                if (DateTime.TryParseExact(LastNotice, "dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture,
-                    DateTimeStyles.None, out LNT))
-                {
-                    if (TimeLeft(LNT).TotalMinutes >= offlineOut)
-                    {
-                        string text = TextReplace(formatMessage,
-                            new KeyValuePair<string, string>("attacker", raidername));
-                        VKBot?.Call("VKAPIMsg", text, MsgAtt, userVK, MsgAttB);
-                        string LastRaidNotice = DateTime.Now.ToString("dd.MM.yyyy HH:mm:ss");
-                        VKBot?.Call("VKAPISaveLastNotice", id, LastRaidNotice);
-                    }
-                }
-                else
-                {
-                    LogToFile("error", $"[{DateTime.Now}] Ошибка обработки времени последнего оповещения игрока {id}",
-                        this);
-                    return;
-                }
-            }
-        }
-
-        void NoEscapeTimerHandle()
-        {
-            foreach (var uid in timers.Keys.ToList())
-            {
-                if (timers[uid].building == null && !timers[uid].Attack && EnabledBuildingPrivilage)
-                    timers[uid].Seconds = 0;
-                if (--timers[uid].Seconds <= 0)
-                {
-                    bool cont = false;
-                    foreach (var raid in raids)
-                        if (raid.Value.owners.Contains(uid))
-                            cont = true;
-                    if (cont) continue;
-                    timers.Remove(uid);
-                    if (EnabledGUITimer)
-                        foreach (var player in BasePlayer.activePlayerList)
-                            CuiHelper.DestroyUi(player, "noescape_main2");
-                    BasePlayer.activePlayerList.Find(p => p.userID == uid)?.ChatMessage(Messages["blocksuccess"]);
-                }
-                else
-                {
-                    if (EnabledGUITimer) DrawUITimer(BasePlayer.activePlayerList.Find(p => p.userID == uid));
-                }
-            }
-
-            for (int i = damageTimers.Count - 1; i >= 0; i--)
-            {
-                var rem = damageTimers[i];
-                if (--rem.seconds <= 0)
-                {
-                    damageTimers.RemoveAt(i);
-                    continue;
-                }
-            }
-        }
-
-        void RaidZoneTimerHandle()
-        {
-            List<BuildingPrivlidge> toRemove = new List<BuildingPrivlidge>();
-            foreach (var raid in raids)
-            {
-                foreach (var player in GetAroundPlayers(raid.Value.pos))
-                {
-                    if (raid.Value.owners.Contains(player.userID))
-                    {
-                        BlockPlayer(player, raid.Key, "raid", true);
-                    }
-                }
-
-                raid.Value.raiders.RemoveWhere(raider => !timers.ContainsKey(raider));
-                if (raid.Value.raiders.Count <= 0)
-                {
-                    foreach (var owner in raid.Value.owners)
-                    {
-                        timers[owner] = new RaidBlock()
-                            {building = raid.Key, Seconds = ownerBlockTime, Attack = raid.Key == null};
-                        var p = BasePlayer.FindByID(owner);
-                        if (p) SetCooldown(p, "raid", ownerBlockTime);
-                        SaveData();
-                    }
-
-                    toRemove.Add(raid.Key);
-                }
-            }
-
-            toRemove.ForEach(raid => raids.Remove(raid));
-        }
-
-        List<BasePlayer> GetAroundPlayers(Vector3 position)
-        {
-            var coliders = new List<BaseEntity>();
-            Vis.Entities(position, radius, coliders, Rust.Layers.Server.Players);
-            return coliders.OfType<BasePlayer>().ToList();
-        }
-
-        List<ulong> GetOwnersByOwner(ulong owner, Vector3 position, ulong pIayerid = 8142848)
-        {
-            var coliders = new List<BaseEntity>();
-            Vis.Entities(position, radius, coliders, Rust.Layers.Server.Deployed);
-            var codelocks = coliders.OfType<BoxStorage>().Select(s => s.GetSlot(BaseEntity.Slot.Lock))
-                .OfType<CodeLock>().ToList();
-            var owners = new HashSet<ulong>();
-            var reply = 1;
-            if (reply == 0)
-            {
-            }
-
-            foreach (var codelock in codelocks)
-            {
-                var whitelist = codelock.whitelistPlayers;
-                if (whitelist == null) continue;
-                if (!whitelist.Contains(owner)) continue;
-                foreach (var uid in whitelist)
-                    if (uid != owner)
-                        owners.Add(uid);
-            }
-
-            return owners.ToList();
-        }
-
-        string DrawGUIAnno =
-            "[{\"name\":\"noescape_background\",\"parent\":\"Overlay\",\"components\":[{\"type\":\"UnityEngine.UI.Button\",\"color\":\"0.5261458 0.1478219 0.1478219 0.4666667\"},{\"type\":\"RectTransform\",\"anchormin\":\"{min}\",\"anchormax\":\"{max}\",\"offsetmin\":\"0 0\",\"offsetmax\":\"1 1\"}]},{\"name\":\"noescape_text\",\"parent\":\"noescape_background\",\"components\":[{\"type\":\"UnityEngine.UI.Text\",\"text\":\"{0}\",\"fontSize\":18,\"align\":\"MiddleCenter\"},{\"type\":\"UnityEngine.UI.Outline\",\"color\":\"0.3513073 0 0 0.5438426\",\"distance\":\"1 -1\"},{\"type\":\"RectTransform\",\"anchormin\":\"0 0\",\"anchormax\":\"1 1\"}]}]";
-
-        void DrawUI(BasePlayer player, string name, string messag)
-        {
-            DestroyUI(player);
-            CuiHelper.AddUi(player,
-                DrawGUIAnno.Replace("{0}", messag.ToString()).Replace("{1}", name.ToString())
-                    .Replace("{min}", GUISendAnchormin.ToString()).Replace("{max}", GUISendAnchormax.ToString()));
-        }
-
-        string UI =
-            "[{\"name\":\"noescape_main2\",\"parent\":\"Overlay\",\"components\":[{\"type\":\"UnityEngine.UI.Image\",\"color\":\"1 1 1 0.1119509\"},{\"type\":\"RectTransform\",\"anchormin\":\"{min}\",\"anchormax\":\"{max}\",\"offsetmax\":\"0 0\"}]},{\"name\":\"noescape_main3\",\"parent\":\"noescape_main2\",\"components\":[{\"type\":\"UnityEngine.UI.Image\",\"color\":\"0 0.5937501 1 0.7485165\"},{\"type\":\"RectTransform\",\"anchormin\":\"0 0\",\"anchormax\":\"{amax} 1\",\"offsetmax\":\"0 0\"}]},{\"name\":\"noescape_main4\",\"parent\":\"noescape_main2\",\"components\":[{\"type\":\"UnityEngine.UI.Text\",\"text\":\"{0}\",\"align\":\"MiddleCenter\"},{\"type\":\"UnityEngine.UI.Outline\",\"color\":\"0 0 0 1\",\"distance\":\"0.5 0\"},{\"type\":\"RectTransform\",\"anchormin\":\"0.001751313 0\",\"anchormax\":\"1.001751 1\",\"offsetmax\":\"0 0\"}]}]";
-
-        void DrawUITimer(BasePlayer player)
-        {
-            if (player != null && timers.ContainsKey(player.userID))
-            {
-                var time = GetFormatTime(ApiGetTime(player.userID));
-                CuiHelper.DestroyUi(player, "noescape_main2");
-                var amax = Convert.ToDouble((float) Math.Min(ApiGetTime(player.userID), blockTime) / blockTime);
-                CuiHelper.AddUi(player,
-                    UI.Replace("{0}", Messages["guitimertext"].Replace("{0}", time.ToString()).ToString())
-                        .Replace("{min}", GUITimerAnchormin).Replace("{max}", GUITimerAnchormax)
-                        .Replace("{amax}", amax.ToString()));
-            }
-        }
-
-        void DestroyUITimer(BasePlayer player)
-        {
-            CuiHelper.DestroyUi(player, "noescape_main2");
-        }
-
-        void DestroyUI(BasePlayer player)
-        {
-            CuiHelper.DestroyUi(player, "noescape_background");
-        }
-
-        DynamicConfigFile cooldownsFile = Interface.Oxide.DataFileSystem.GetFile("NoEscapeCooldown");
-
-        private class Cooldown
-        {
-            public ulong UserId;
-            public double Expired;
-            [JsonIgnore] public Action OnExpired;
-        }
-
-        private static Dictionary<string, List<Cooldown>> cooldowns;
-
-        internal static void Service()
-        {
-            var time = GrabCurrentTime();
-            List<string> toRemove = new List<string>();
-            foreach (var cd in cooldowns)
-            {
-                var keyCooldowns = cd.Value;
-                List<string> toRemoveCooldowns = new List<string>();
-                for (var i = keyCooldowns.Count - 1; i >= 0; i--)
-                {
-                    var cooldown = keyCooldowns[i];
-                    if (cooldown.Expired < time)
-                    {
-                        cooldown.OnExpired?.Invoke();
-                        keyCooldowns.RemoveAt(i);
-                        ;
-                    }
-                }
-
-                if (keyCooldowns.Count == 0) toRemove.Add(cd.Key);
-            }
-
-            toRemove.ForEach(p => cooldowns.Remove(p));
-        }
-
-        public static void SetCooldown(BasePlayer player, string key, int seconds, Action onExpired = null)
-        {
-            List<Cooldown> cooldownList;
-            if (!cooldowns.TryGetValue(key, out cooldownList)) cooldowns[key] = cooldownList = new List<Cooldown>();
-            cooldownList.Add(new Cooldown()
-                {UserId = player.userID, Expired = GrabCurrentTime() + (double) seconds, OnExpired = onExpired});
-        }
-
-        public static int GetCooldown(BasePlayer player, string key)
-        {
-            List<Cooldown> source = new List<Cooldown>();
-            if (cooldowns.TryGetValue(key, out source))
-            {
-                Cooldown cooldown =
-                    source.FirstOrDefault<Cooldown>(
-                        (Func<Cooldown, bool>) (p => (long) p.UserId == (long) player.userID));
-                if (cooldown != null) return (int) (cooldown.Expired - GrabCurrentTime());
-            }
-
-            return 0;
-        }
-
-        static double GrabCurrentTime() => DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1, 0, 0, 0)).TotalSeconds;
-        private Image raidhomeImage;
-
-        void OnMapInitialized()
-        {
-            InitImages();
-        }
-
-        TimeSpan TimeLeft(DateTime time)
-        {
-            return DateTime.Now.Subtract(time);
-        }
-
-        void InitImages()
-        {
-            try
-            {
-                if (plugins.Exists("RustMap"))
-                {
-                    uint raidhomeCRC = uint.Parse((string) RustMap?.Call("RaidHomePng"));
-                    raidhomeImage = (Bitmap) (new ImageConverter().ConvertFrom(FileStorage.server.Get(raidhomeCRC,
-                        FileStorage.Type.png, CommunityEntity.ServerInstance.net.ID)));
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        double ApiGetTime(ulong player) => timers.ContainsKey(player) ? timers[player].Seconds : 0;
-
-        List<Vector3> ApiGetOwnerRaidZones(ulong uid)
-        {
-            return new List<Vector3>(raids.Where(p => p.Value.owners.Contains(uid)).Select(r => r.Value.pos));
-        }
-
-        bool IsRaidBlock(ulong id)
-        {
-            if (timers.ContainsKey(id)) return true;
+            if (!IsRaidBlocked(player)) return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null) return null;
+            player.ChatMessage(string.Format(Messages["blockupgrade"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime)));
             return false;
         }
 
-        void OnServerSave()
+        private bool? OnStructureRepair(BaseCombatEntity entity, BasePlayer player)
         {
-            cooldownsFile.WriteObject(cooldowns);
+            if (!config.PlayerBlockSettings.CanRepair) return null;
+            if (!IsRaidBlocked(player)) return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null) return null;
+            player.ChatMessage(string.Format(Messages["blockrepair"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime)));
+            return false;
         }
 
-        void LoadData()
+        object OnStructureDemolish(BaseCombatEntity entity, BasePlayer player)
         {
-            Interface.Oxide.DataFileSystem.WriteObject("NoEscapeCooldown", new Dictionary<string, FileInfo>());
-            cooldowns = cooldownsFile.ReadObject<Dictionary<string, List<Cooldown>>>() ??
-                        new Dictionary<string, List<Cooldown>>();
+            if (!config.PlayerBlockSettings.CanDefaultremove) return null;
+            if (player == null) return null;
+            if (!IsRaidBlocked(player)) return null;
+            var component = PlayerBlockStatus.Get(player);
+            if (component == null) return null;
+            player.ChatMessage(string.Format(Messages["blockremove"], NumericalFormatter.FormatTime(component.CurrentBlocker.TotalTime - component.CurrentTime)));
+            return null;
         }
 
-        void SaveData()
-        {
-            cooldownsFile.WriteObject(cooldowns);
-        }
+        private SphereComponent GetRaidZone(Vector3 pos) =>
+             BlockerList.Where(p => Vector3.Distance(p.transform.position, pos) < config.BlockSettings.BlockerDistance).FirstOrDefault();
 
-        Dictionary<string, string> Messages = new Dictionary<string, string>()
-        {
-            {"blocksuccess", "Блок деактивирован. Функции разблокированы"},
-            {"guitimertext", "<b>Блокировка:</b> Осталось {0}"},
-            {"noblockowner", "Ваше строение разрушено! Летите на защиту"},
-            {
-                "blockactive",
-                "Ваше строение разрушено, активирован рейд блок на <color=#ECBE13>{0}</color>\nНекоторые функции временно недоступны."
-            },
-            {
-                "blockactiveAttacker",
-                "Вы уничтожили чужой объект, активирован рейд блок на <color=#ECBE13>{0}</color>\nНекоторые функции временно недоступны."
-            },
-            {"blockattackactive", "Включен режим боя, активирован блок на {0}! Некоторые функции временно недоступны."},
-            {"blockrepair", "Вы не можете ремонтировать строения во время рейда, подождите {0} сек."},
-            {
-                "isblock",
-                "NoEscape by <color=#ECBE13><size=15>RustPlugin.ru</size></color>\nУ вас есть активный рейд блок!\nДо окончания: <color=#ECBE13>{0}</color>"
-            },
-            {"noblock", "NoEscape by <color=#ECBE13><size=15>RustPlugin.ru</size></color>\nУ вас нету рейд блока :)"},
-            {"blocktp", "Вы не можете использовать телепорт во время рейда, подождите {0} сек."},
-            {"blockremove", "Вы не можете удалить постройки во время рейда, подождите {0} сек."},
-            {"blockupgrade", "Вы не можете использовать автоулучшение построек во время рейда, подождите {0} сек."},
-            {"blockKits", "Вы не можете использовать киты во время рейда, подождите {0} сек."},
-            {"blockbuld", "Вы не можете строить во время рейда, подождите {0} сек."},
-            {"yourbuildingdestroy", "Вас, или дом Вашего соклана рейдят! Добавлена отметка на карту"},
-            {"yourbuildingdestroyOwner", "Внимание! Ваш дом рейдит игрок {1}! Добавлена отметка на карту"},
-            {"isClanMember", "Внимание! Данное строение пренадлежит Вашему соклановцу! Урон уменьшен"},
-            {"isFriendMember", "Внимание! Данное строение пренадлежит Вашему другу! Урон уменьшен"},
-            {"removerestrict", "Хозяев нет в сети! Ремув запрещён!"},
-            {"ownerhome", "Вы рядом со своим домом, который рейдят!\nРейдблок активирован на {0}!"},
-            {"raidremove", "Вы не можете удалять обьекты во время рейда, подождите {0} сек."},
-            {"blockrec", "Вы не можете использовать переработчик во время рейда, подождите {0} сек."},
-            {"ownernotonline", "Владельцов нет в сети, ремув недоступен!"},
-            {"DamageOnlineOwner", "Один их хозяев постройки сейчас в сети.\nУрон по объектам владельца стандартный"},
-            {
-                "DamageNotOnlineOwner",
-                "Не одного владельца постройки нет в сети. \nУрон по объектам владельца уменьшен в 2 раза!"
-            },
-            {"OwnerEnterOnline", "Хозяин постройки зашел в игру.\nУрон по объектам владельца стандартный!"},
-            {"blocktrade", "Вы не можете использовать обмен во время рейда, подождите {0} сек."},
-            {"BlockLadders", "Вы не можете установить штурмовую лестницу в зоне действия чужого шкафа"}
-        };
+        #endregion
 
-        public static class PermissionService
-        {
-            public static Permission permission = Interface.GetMod().GetLibrary<Permission>();
+        #region Messages
 
-            public static bool HasPermission(ulong uid, string permissionName)
-            {
-                return !string.IsNullOrEmpty(permissionName) &&
-                       permission.UserHasPermission(uid.ToString(), permissionName);
-            }
-
-            public static void RegisterPermissions(Plugin owner, List<string> permissions)
-            {
-                if (owner == null) throw new ArgumentNullException("owner");
-                if (permissions == null) throw new ArgumentNullException("commands");
-                foreach (var permissionName in permissions.Where(permissionName =>
-                    !permission.PermissionExists(permissionName)))
+        Dictionary<string, string> Messages = new Dictionary<string, string>() {
                 {
-                    permission.RegisterPermission(permissionName, owner);
-                }
+                "blocksuccess", "Блок деактивирован. Функции разблокированы"
             }
-        }
+            , {
+                "guitimertext", "<b>Блокировка:</b> Осталось {0}"
+            }
+            , {
+                "blockactive", "Ваше строение в квадрате <color=#ECBE13>{0}</color> разрушено, активирован рейд блок на <color=#ECBE13>{1}</color>\nНекоторые функции временно недоступны."
+            }
+             , {
+                "blockactiveOwner", "Внимание! Ваше строение в квадрате <color=#ECBE13>{0}</color> разрушено."
+            }
+             , {
+                "enterRaidZone", "Внимание! Вы вошли в зону рейд блока, активирован блок на <color=#ECBE13>{0}</color>\nНекоторые функции временно недоступны."
+            }
+             , {
+                "blockactiveAuthCup", "Внимание! Строение в каком вы проживаете в квадрате <color=#ECBE13>{0}</color> было разрушено, активирован рейд блок на <color=#ECBE13>{1}</color>\nНекоторые функции временно недоступны."
+            }
+            , {
+                "blockactiveAttacker", "Вы уничтожили чужой объект, активирован рейд блок на <color=#ECBE13>{0}</color>\nНекоторые функции временно недоступны."
+            }
+            , {
+                "blockrepair", "Вы не можете ремонтировать строения во время рейда, подождите {0}"
+            }
+            , {
+                "blocktp", "Вы не можете использовать телепорт во время рейда, подождите {0}"
+            }
+            , {
+                "blockremove", "Вы не можете удалить постройки во время рейда, подождите {0}"
+            }
+            , {
+                "blockupgrade", "Вы не можете использовать улучшение построек во время рейда, подождите {0}"
+            }
+            , {
+                "blockKits", "Вы не можете использовать киты во время рейда, подождите {0}"
+            }
+            , {
+                "blockbuld", "Вы не можете строить во время рейда, подождите {0}"
+            },
+            {
+                "raidremove", "Вы не можете удалять обьекты во время рейда, подождите {0}"
+            },
+            {
+                "blocktrade", "Вы не можете использовать обмен во время рейда, подождите {0} "
+            },
+            {
+                "commandBlock", "Вы не можете использовать данную команду во время рейда, подождите {0}"
+            },
+        };
+        #endregion
     }
-}                        
+}

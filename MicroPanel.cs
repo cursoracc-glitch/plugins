@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("MicroPanel", "WhitePlugiins.ru", "2.1.0")]
+    [Info("MicroPanel", "LAGZYA", "2.0.9")]
     public class MicroPanel : RustPlugin
     {
         private void OnServerInitialized()
@@ -107,8 +107,8 @@ namespace Oxide.Plugins
 
         private class ConfigData
         {
-            [JsonProperty("Лейбел")] public string ServerName = "<b><color=#ff8200>WhitePlugins</color><color=#ffffff >.ru</color></b>";
-            [JsonProperty("Иконка")] public string icon = "https://i.imgur.com/te8YtBD.png";
+            [JsonProperty("Лейбел")] public string ServerName = "<b><color=#ff8200>DRIMFOX.RU PLUG</color></b>";
+            [JsonProperty("Иконка")] public string icon = "https://i.imgur.com/XxbjJEU.png";
             [JsonProperty("Цвет полоски")] public string colorpolos = "#ff8200";
             
             [JsonProperty("Включить поддержку плагина IQFakeActive")]
@@ -118,7 +118,7 @@ namespace Oxide.Plugins
             public bool time = true;
 
             [JsonProperty("ЦВЕТ(ВКЛЮЧЕННЫХ ИВЕНТОВ И ОНЛАЙНА)")]
-            public string coloron = "#00ff00";
+            public string coloron = "#ae4fff";
 
             [JsonProperty("ЦВЕТ(ОФЛАЙНА И ВЫКЛЮЧЕННЫХ ИВЕНТОВ)")]
             public string coloroff = "#ffffff";
@@ -130,10 +130,10 @@ namespace Oxide.Plugins
             public string offsetmax = "0 0";
 
             [JsonProperty("Двигать панель ивентов - MIN")]
-            public string evoffsetmin = "220 -46";
+            public string evoffsetmin = "310 -38";
 
             [JsonProperty("Двигать панель ивентов - MAX")]
-            public string evoffsetmax = "355 -26";
+            public string evoffsetmax = "515 -5";
             [JsonProperty("Показывать время?")]
             public bool stime = true;
             [JsonProperty("Как часто обновлять время (СЕК)?")]
@@ -166,23 +166,23 @@ namespace Oxide.Plugins
                     new Buttons()
                     {
                         Commnad = "chat.say /store",
-                        Name = "МАГАЗИН",
+                        Name = "[- МАГАЗИН -]",
                     },
                     new Buttons()
                     {
-                        Commnad = "chat.say /info",
-                        Name = "ИНФОРМАЦИЯ",
+                        Commnad = "chat.say /pass",
+                        Name = "[- SOPASS -]",
                     },
                     new Buttons()
                     {
                         Commnad = "chat.say /fmenu",
-                        Name = "ДРУЗЬЯ",
+                        Name = "[- SOFRIENDS -]",
                     },
                 };
                 newConfig.newsList = new List<string>()
                 {
-                    "Сайт:whiteplugins.ru/resources/",
-                    "Дискорд:discord.gg/TMnqdtWtY4"
+                    "Сайт: DRIMFOX.RU",
+                    "Группа в вк: vk.com/drimfox"
                 };
                 return newConfig;
             }
@@ -241,69 +241,107 @@ namespace Oxide.Plugins
 
         void OnEntitySpawned(BaseNetworkable entity)
         {
-            if (entity is BaseHelicopter)
+            switch (entity)
             {
-                IsHeli = true;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "heli");
-            }
-            else if (entity is BradleyAPC)
-            {
-                isTank = true;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "bradley");
-            }
-            else if (entity is CargoPlane)
-            {
-                IsAir = true;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "air");
-            }
-            else if (entity is CargoShip)
-            {
-                IsCargo = true;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "cargo");
-            }
-            else if (entity is CH47Helicopter)
-            {
-                IsCh = true;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "ch");
+                case PatrolHelicopter _:
+                {
+                    IsHeli = true;
+                    foreach (var basePlayer in BasePlayer.activePlayerList)
+                        EventInit(basePlayer, "heli");
+                    break;
+                }
+                case BradleyAPC _:
+                {
+                    isTank = true;
+                    foreach (var basePlayer in BasePlayer.activePlayerList)
+                        EventInit(basePlayer, "bradley");
+                    break;
+                }
+                case CargoPlane _:
+                {
+                    IsAir = true;
+                    foreach (var basePlayer in BasePlayer.activePlayerList)
+                        EventInit(basePlayer, "air");
+                    break;
+                }
+                case CargoShip _:
+                {
+                    IsCargo = true;
+                    foreach (var basePlayer in BasePlayer.activePlayerList)
+                        EventInit(basePlayer, "cargo");
+                    break;
+                }
+                case CH47Helicopter _:
+                {
+                    IsCh = true;
+                    foreach (var basePlayer in BasePlayer.activePlayerList)
+                        EventInit(basePlayer, "ch");
+
+                    break;
+                }
             }
         }
 
         void OnEntityKill(BaseNetworkable entity)
         {
-            if (entity is CargoPlane)
+            switch (entity)
             {
-                IsAir = false;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "air");
-            }
-            else if (entity is CargoShip)
-            {
-                IsCargo = false;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "cargo");
-            }
-            else if (entity is BaseHelicopter)
-            {
-                IsHeli = false;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "heli");
-            }
-            else if (entity is BradleyAPC)
-            {
-                isTank = false;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "bradley");
-            }
-            else if (entity is CH47Helicopter)
-            {
-                IsCh = false;
-                foreach (var basePlayer in BasePlayer.activePlayerList)
-                    EventInit(basePlayer, "ch");
+                case CargoPlane _:
+                {
+                    if (CargoPlane.serverEntities.Count(p => p is CargoPlane) == 0)
+                    {
+                        IsAir = false;
+                        foreach (var basePlayer in BasePlayer.activePlayerList)
+                            EventInit(basePlayer, "air");
+                    }
+                 
+                    break;
+                }
+                case CargoShip _:
+                {
+                    if (CargoShip.serverEntities.Count(p => p is CargoShip) == 0)
+                    {
+                        IsCargo = false;
+                        foreach (var basePlayer in BasePlayer.activePlayerList)
+                            EventInit(basePlayer, "cargo");
+                    }
+
+                    break;
+                }
+                case PatrolHelicopter _:
+                {
+                    if (PatrolHelicopter.serverEntities.Count(p => p is PatrolHelicopter) == 0)
+                    {
+                        IsHeli = false;
+                        foreach (var basePlayer in BasePlayer.activePlayerList)
+                            EventInit(basePlayer, "heli");
+                    }
+
+                  
+                    break;
+                }
+                case BradleyAPC _:
+                {
+                    if (BradleyAPC.serverEntities.Count(p => p is BradleyAPC) == 0)
+                    {
+                        isTank = false;
+                        foreach (var basePlayer in BasePlayer.activePlayerList)
+                            EventInit(basePlayer, "bradley");
+                    }
+
+                    break;
+                }
+                case CH47Helicopter _:
+                {
+                    if (CH47Helicopter.serverEntities.Count(p => p is CH47Helicopter) == 0)
+                    {
+                        IsCh = false;
+                        foreach (var basePlayer in BasePlayer.activePlayerList)
+                            EventInit(basePlayer, "ch");
+                    }
+
+                    break;
+                }
             }
         } 
 
@@ -930,38 +968,7 @@ namespace Oxide.Plugins
                     }
                 });
             }
-            cont.Add(new CuiElement()
-            {
-                Parent = Layer,
-                Name = Layer + "Timefon",
-                Components =
-                {
-                    new CuiImageComponent()
-                    {
-                        Color = "0.64 0.64 0.64 0.25"
-                    },
-                    new CuiRectTransformComponent()
-                    {
-                        AnchorMin = "0 0", AnchorMax = "0 0", OffsetMin = cfg.tvoffsetmin, OffsetMax = cfg.tvoffsetmax
-                    }
-                }
-            });
-            cont.Add(new CuiElement()
-            {
-                Parent = Layer + "Timefon",
-                Components =
-                {
-                    new CuiTextComponent()
-                    {
-                        Color = HexToRustFormat(cfg.coloroff), Text = "TIME", FontSize = 9,
-                        Align = TextAnchor.MiddleLeft, Font = "robotocondensed-regular.ttf",
-                    },
-                    new CuiRectTransformComponent()
-                    {
-                        AnchorMin = "0.1 0.05", AnchorMax = "0.4899999 0.95"
-                    }
-                }
-            });
+           
             cont.Add(new CuiPanel()
             {
                 Image =
@@ -996,8 +1003,43 @@ namespace Oxide.Plugins
                         }
                     }
                 });
-            } 
+            }
 
+            if (cfg.stime)
+            {
+                cont.Add(new CuiElement()
+                {
+                    Parent = Layer,
+                    Name = Layer + "Timefon",
+                    Components =
+                    {
+                        new CuiImageComponent()
+                        {
+                            Color = "0.64 0.64 0.64 0.25"
+                        },
+                        new CuiRectTransformComponent()
+                        {
+                            AnchorMin = "0 0", AnchorMax = "0 0", OffsetMin = cfg.tvoffsetmin, OffsetMax = cfg.tvoffsetmax
+                        }
+                    }
+                });
+                cont.Add(new CuiElement()
+                {
+                    Parent = Layer + "Timefon",
+                    Components =
+                    {
+                        new CuiTextComponent()
+                        {
+                            Color = HexToRustFormat(cfg.coloroff), Text = "TIME", FontSize = 9,
+                            Align = TextAnchor.MiddleLeft, Font = "robotocondensed-regular.ttf",
+                        },
+                        new CuiRectTransformComponent()
+                        {
+                            AnchorMin = "0.1 0.05", AnchorMax = "0.4899999 0.95"
+                        }
+                    }
+                });
+            }
             CuiHelper.AddUi(player, cont);
             OnlinePlayer();
             if (cfg.stime)

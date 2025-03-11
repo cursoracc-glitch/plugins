@@ -1,8 +1,11 @@
 using Rust;
 using System;
 using System.Collections.Generic;
+using System.Collections;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Reflection;
 using UnityEngine;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -10,120 +13,86 @@ using Oxide.Core.Configuration;
 using Random = System.Random;
 using Oxide.Core;
 using Oxide.Core.Plugins;
-
-/*
- * This update 3.5.7
- * Added 5 missing prefabs using automation checks so far.
- * Re-wrote config generations now includes planned auto updater features.
- * This update is fully backwards compatible with your current files.
- * This update also does not affect any websites.
- * Added Lang File System
- * Updated blacklist command
- * Fixed items not being removed from held entity 
- */
+using Facepunch.Extend;
 
 namespace Oxide.Plugins
 {
-    [Info("BetterLoot", "Tryhard & Khan", "3.5.8")]
+    [Info("BetterLoot", "Default", "3.5.3")]
     [Description("A light loot container modification system")]
     public class BetterLoot : RustPlugin
     {
-        #region Fields
-
-        [PluginReference] Plugin CustomLootSpawns;
-        
-        private static BetterLoot _instance;
-        private static PluginConfig _config;
-        private bool Changed = true;
-        private bool initialized;
-        private double baseItemRarity = 2;
-        private int populatedContainers;
-        private const string Admin = "betterloot.admin";
-        
+        [PluginReference]
+        Plugin CustomLootSpawns;
+        static BetterLoot bl = null;
+        bool Changed = true;
+        int populatedContainers;
         StoredExportNames storedExportNames = new StoredExportNames();
         StoredBlacklist storedBlacklist = new StoredBlacklist();
         Random rng = new Random();
+        bool initialized = false;
         Dictionary<string, List<string>[]> Items = new Dictionary<string, List<string>[]>();
         Dictionary<string, List<string>[]> Blueprints = new Dictionary<string, List<string>[]>();
         Dictionary<string, int[]> itemWeights = new Dictionary<string, int[]>();
         Dictionary<string, int[]> blueprintWeights = new Dictionary<string, int[]>();
         Dictionary<string, int> totalItemWeight = new Dictionary<string, int>();
         Dictionary<string, int> totalBlueprintWeight = new Dictionary<string, int>();
-        
-        private static int RarityIndex(Rarity rarity)
-        {
-            switch (rarity)
-            {
-                case Rarity.None: return 0;
-                case Rarity.Common: return 1;
-                case Rarity.Uncommon: return 2;
-                case Rarity.Rare: return 3;
-                case Rarity.VeryRare: return 4;
-            }
-            return -1;
-        }
-
-        #endregion
-
-        #region DataFile
-
         DynamicConfigFile lootTable;
-        Dictionary<string, object> lootTables = null;
-        DynamicConfigFile getFile(string file) => Interface.Oxide.DataFileSystem.GetDatafile($"{Name}/{file}");
-        bool chkFile(string file) => Interface.Oxide.DataFileSystem.ExistsDatafile($"{Name}/{file}");
 
-        private class StoredExportNames
+        DynamicConfigFile getFile(string file) => Interface.Oxide.DataFileSystem.GetDatafile($"{this.Title}/{file}");
+        bool chkFile(string file) => Interface.Oxide.DataFileSystem.ExistsDatafile($"{this.Title}/{file}");
+        Dictionary<string, object> lootTables = null;
+
+        static List<object> lootPrefabDefaults()
         {
-            public int version;
-            public Dictionary<string, string> AllItemsAvailable = new Dictionary<string, string>();
-        }
-        
-        private int ItemWeight(double baseRarity, int index) { return (int)(Math.Pow(baseRarity, 4 - index) * 1000); }
-        
-        private object GetAmounts(ItemAmount amount, int mul = 1)
-        {
-            if (amount.itemDef.isWearable || (amount.itemDef.condition.enabled && amount.itemDef.GetComponent<ItemModDeployable>() == null))
-                mul = 1;
-            object options = new Dictionary<string, object>
+            var dp = new List<object>()
             {
-                ["Min"] = (int)amount.amount * mul,
-                ["Max"] = ((ItemAmountRanged)amount).maxAmount > 0f &&
-                          ((ItemAmountRanged)amount).maxAmount > amount.amount
-                    ? (int)((ItemAmountRanged)amount).maxAmount * mul
-                    : (int)amount.amount * mul,
+                "assets/bundled/prefabs/radtown/crate_basic.prefab",
+                "assets/bundled/prefabs/radtown/crate_elite.prefab",
+                "assets/bundled/prefabs/radtown/crate_mine.prefab",
+                "assets/bundled/prefabs/radtown/crate_normal.prefab",
+                "assets/bundled/prefabs/radtown/crate_normal_2.prefab",
+                "assets/bundled/prefabs/radtown/crate_normal_2_food.prefab",
+                "assets/bundled/prefabs/radtown/crate_normal_2_medical.prefab",
+                "assets/bundled/prefabs/radtown/crate_tools.prefab",
+                "assets/bundled/prefabs/radtown/crate_underwater_advanced.prefab",
+                "assets/bundled/prefabs/radtown/crate_underwater_basic.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm ammo.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm c4.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm construction resources.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm construction tools.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm food.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm medical.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm res.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm tier1 lootbox.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm tier2 lootbox.prefab",
+                "assets/bundled/prefabs/radtown/dmloot/dm tier3 lootbox.prefab",
+                "assets/bundled/prefabs/radtown/vehicle_parts.prefab",
+                "assets/bundled/prefabs/radtown/foodbox.prefab",
+                "assets/bundled/prefabs/radtown/loot_barrel_1.prefab",
+                "assets/bundled/prefabs/radtown/loot_barrel_2.prefab",
+                "assets/bundled/prefabs/autospawn/resource/loot/loot-barrel-1.prefab",
+                "assets/bundled/prefabs/autospawn/resource/loot/loot-barrel-2.prefab",
+                "assets/bundled/prefabs/autospawn/resource/loot/trash-pile-1.prefab",
+                "assets/bundled/prefabs/radtown/loot_trash.prefab",
+                "assets/bundled/prefabs/radtown/minecart.prefab",
+                "assets/bundled/prefabs/radtown/oil_barrel.prefab",
+                "assets/prefabs/npc/m2bradley/bradley_crate.prefab",
+                "assets/prefabs/npc/patrol helicopter/heli_crate.prefab",
+                "assets/prefabs/deployable/chinooklockedcrate/codelockedhackablecrate.prefab",
+                "assets/prefabs/deployable/chinooklockedcrate/codelockedhackablecrate_oilrig.prefab",
+                "assets/prefabs/misc/supply drop/supply_drop.prefab",
+                //"assets/prefabs/npc/scientist/scientist_corpse.prefab"
             };
-            return options;
+            return dp;
         }
-        
-        private void GetLootSpawn(LootSpawn lootSpawn, ref Dictionary<string, object> items)
-        {
-            if (lootSpawn.subSpawn != null && lootSpawn.subSpawn.Length > 0)
-            {
-                foreach (var entry in lootSpawn.subSpawn)
-                    GetLootSpawn(entry.category, ref items);
-                return;
-            }
-            if (lootSpawn.items != null && lootSpawn.items.Length > 0)
-            {
-                foreach (var amount in lootSpawn.items)
-                {
-                    object options = GetAmounts(amount, 1);
-                    string itemName = amount.itemDef.shortname;
-                    if (amount.itemDef.spawnAsBlueprint)
-                        itemName += ".blueprint";
-                    if (!items.ContainsKey(itemName))
-                        items.Add(itemName, options);
-                }
-            }
-        }
-        
-        private void LoadAllContainers()
+
+        void LoadAllContainers()
         {
             try { lootTable = getFile("LootTables"); }
             catch (JsonReaderException e)
             {
                 PrintWarning($"JSON error in 'LootTables' > Line: {e.LineNumber} | {e.Path}");
-                Interface.GetMod().UnloadPlugin(Name);
+                Interface.GetMod().UnloadPlugin(this.Title);
                 return;
             }
             lootTables = new Dictionary<string, object>();
@@ -131,7 +100,7 @@ namespace Oxide.Plugins
             if (lootTables == null)
                 lootTables = new Dictionary<string, object>();
             bool wasAdded = false;
-            foreach (var lootPrefab in _config.Generic.WatchedPrefabs)
+            foreach (var lootPrefab in lootPrefabsToUse)
             {
                 if (!lootTables.ContainsKey((string)lootPrefab))
                 {
@@ -271,7 +240,7 @@ namespace Oxide.Plugins
                         {
                             int index = 0;
                             object indexoverride;
-                            if (_config.Rare.Override.TryGetValue(def.shortname, out indexoverride))
+                            if (rarityItemOverride.TryGetValue(def.shortname, out indexoverride))
                                 index = Convert.ToInt32(indexoverride);
                             else
                                 index = (int)def.rarity;
@@ -300,228 +269,153 @@ namespace Oxide.Plugins
             Puts($"Using '{activeTypes}' active of '{lootTables.Count}' supported containertypes");
         }
 
-        private void SaveExportNames()
+        int ItemWeight(double baseRarity, int index) { return (int)(Math.Pow(baseRarity, 4 - index) * 1000); }
+
+        void GetLootSpawn(LootSpawn lootSpawn, ref Dictionary<string, object> items)
         {
-            storedExportNames = Interface.GetMod().DataFileSystem.ReadObject<StoredExportNames>("BetterLoot\\NamesList");
-            if (storedExportNames.AllItemsAvailable.Count == 0 || (int)storedExportNames.version != Rust.Protocol.network)
+            if (lootSpawn.subSpawn != null && lootSpawn.subSpawn.Length > 0)
             {
-                storedExportNames = new StoredExportNames();
-                var exportItems = new List<ItemDefinition>(ItemManager.itemList);
-                storedExportNames.version = Rust.Protocol.network;
-                foreach (var it in exportItems)
-                    storedExportNames.AllItemsAvailable.Add(it.shortname, it.displayName.english);
-                Interface.GetMod().DataFileSystem.WriteObject("BetterLoot\\NamesList", storedExportNames);
-                Puts($"Exported {storedExportNames.AllItemsAvailable.Count} items to 'NamesList'");
+                foreach (var entry in lootSpawn.subSpawn)
+                    GetLootSpawn(entry.category, ref items);
+                return;
+            }
+            if (lootSpawn.items != null && lootSpawn.items.Length > 0)
+            {
+                foreach (var amount in lootSpawn.items)
+                {
+                    object options = GetAmounts(amount, 1);
+                    string itemName = amount.itemDef.shortname;
+                    if (amount.itemDef.spawnAsBlueprint)
+                        itemName += ".blueprint";
+                    if (!items.ContainsKey(itemName))
+                        items.Add(itemName, options);
+                }
             }
         }
-        
-        private class StoredBlacklist
+
+        object GetAmounts(ItemAmount amount, int mul = 1)
+        {
+            if (amount.itemDef.isWearable || (amount.itemDef.condition.enabled && amount.itemDef.GetComponent<ItemModDeployable>() == null))
+                mul = 1;
+            object options = new Dictionary<string, object>
+            {
+                ["Min"] = (int)amount.amount * mul,
+                ["Max"] = ((ItemAmountRanged)amount).maxAmount > 0f &&
+                          ((ItemAmountRanged)amount).maxAmount > amount.amount
+                    ? (int)((ItemAmountRanged)amount).maxAmount * mul
+                    : (int)amount.amount * mul,
+                
+
+            };
+            return options;
+        }
+
+        static Dictionary<string, object> defaultItemOverride()
+        {
+            var dp = new Dictionary<string, object>();
+            dp.Add("autoturret", 4);
+            dp.Add("lmg.m249", 4);
+            dp.Add("targeting.computer", 3);
+            return dp;
+        }
+
+        double baseItemRarity;
+        double blueprintProbability;
+        bool removeStackedContainers;
+        bool listUpdatesOnLoaded;
+        double hammerLootCycleTime;
+        int lootMultiplier;
+        int scrapMultiplier;
+        bool enableHammerLootCycle;
+        Dictionary<string, object> rarityItemOverride = null;
+        List<object> lootPrefabsToUse = null;
+
+        object GetConfig(string menu, string datavalue, object defaultValue)
+        {
+            var data = Config[menu] as Dictionary<string, object>;
+            if (data == null)
+            {
+                data = new Dictionary<string, object>();
+                Config[menu] = data;
+                Changed = true;
+            }
+            object value;
+            if (data.TryGetValue(datavalue, out value)) return value;
+            value = defaultValue;
+            data[datavalue] = value;
+            Changed = true;
+            return value;
+        }
+
+        void LoadVariables()
+        {
+            baseItemRarity = 2;
+            rarityItemOverride = (Dictionary<string, object>)GetConfig("Rarity", "Override", defaultItemOverride());
+            lootPrefabsToUse = (List<object>)GetConfig("Generic", "WatchedPrefabs", lootPrefabDefaults());
+            listUpdatesOnLoaded = Convert.ToBoolean(GetConfig("Generic", "listUpdatesOnLoaded", true));
+            removeStackedContainers = Convert.ToBoolean(GetConfig("Generic", "removeStackedContainers", true));
+            blueprintProbability = Convert.ToDouble(GetConfig("Generic", "blueprintProbability", 0.11));
+            hammerLootCycleTime = Convert.ToDouble(GetConfig("Loot", "hammerLootCycleTime", 3));
+            lootMultiplier = Convert.ToInt32(GetConfig("Loot", "lootMultiplier", 1));
+            scrapMultiplier = Convert.ToInt32(GetConfig("Loot", "scrapMultiplier", 1));
+            enableHammerLootCycle = Convert.ToBoolean(GetConfig("Loot", "enableHammerLootCycle", false));
+
+            if (!Changed) return;
+            SaveConfig();
+            Changed = false;
+        }
+
+        class StoredBlacklist
         {
             public List<string> ItemList = new List<string>();
+
+            public StoredBlacklist()
+            {
+            }
         }
 
-        private void LoadBlacklist()
+        void LoadBlacklist()
         {
             storedBlacklist = Interface.GetMod().DataFileSystem.ReadObject<StoredBlacklist>("BetterLoot\\Blacklist");
-            if (storedBlacklist.ItemList.Count != 0) return;
-            Puts("No Blacklist found, creating new file...");
-            storedBlacklist = new StoredBlacklist();
-            storedBlacklist.ItemList.Add("flare");
-            Interface.GetMod().DataFileSystem.WriteObject("BetterLoot\\Blacklist", storedBlacklist);
-        }
-
-        private void SaveBlacklist() => Interface.GetMod().DataFileSystem.WriteObject("BetterLoot\\Blacklist", storedBlacklist);
-        
-        #endregion
-
-        #region Config
-
-        private class PluginConfig : SerializableConfiguration
-        {
-            public Generic Generic = new Generic();
-            public Loot Loot = new Loot();
-            [JsonProperty("Rarity")]
-            public Rare Rare = new Rare();
-
-            public string ToJson() => JsonConvert.SerializeObject(this);
-            public Dictionary<string, object> ToDictionary() => JsonConvert.DeserializeObject<Dictionary<string, object>>(ToJson());
-        }
-        
-        private class Generic
-        {
-            public double blueprintProbability = 0.11;
-            public bool listUpdatesOnLoaded = true;
-            public bool removeStackedContainers = true;
-            public List<object> WatchedPrefabs = new List<object>();
-        }
-
-        private class Loot
-        {
-            public bool enableHammerLootCycle = false;
-            public double hammerLootCycleTime = 3.0;
-            public int lootMultiplier = 1;
-            public int scrapMultiplier = 1;
-        }
-
-        private class Rare
-        {
-            public Dictionary<string, object> Override = new Dictionary<string, object>
+            if (storedBlacklist.ItemList.Count == 0)
             {
-                {"autoturret", 4},
-                {"lmg.m249", 4},
-                {"targeting.computer", 3},
-            };
-        }
-        
-        private void CheckConfig()
-        {
-            foreach (GameManifest.PrefabProperties category in GameManifest.Current.prefabProperties)
-            {
-                if (!(category.name.Contains("resource/loot") || 
-                      category.name.Contains("misc/supply drop/supply_drop") || 
-                      category.name.Contains("/npc/m2bradley/bradley_crate") || 
-                      category.name.Contains("/npc/patrol helicopter/heli_crate") || 
-                      category.name.Contains("/deployable/chinooklockedcrate/chinooklocked") || 
-                      category.name.Contains("/deployable/chinooklockedcrate/codelocked") || 
-                      category.name.Contains("prefabs/radtown") || 
-                      category.name.Contains("props/roadsigns")) ||
-                    category.name.Contains("radtown/ore") || 
-                    category.name.Contains("static") || 
-                    category.name.Contains("/spawners") || 
-                    category.name.Contains("radtown/desk") || 
-                    category.name.Contains("radtown/loot_component_test")) continue;
-                if (!_config.Generic.WatchedPrefabs.Contains(category.name))
-                {
-                    _config.Generic.WatchedPrefabs.Add(category.name);
-                }
-            }
-            SaveConfig();
-        }
-        
-        protected override void LoadDefaultConfig() => _config = new PluginConfig();
-        
-        protected override void LoadConfig()
-        {
-            base.LoadConfig();
-
-            try
-            {
-                _config = Config.ReadObject<PluginConfig>();
-
-                if (_config == null)
-                {
-                    PrintWarning($"Generating Config File for Better Loot");
-                    throw new JsonException();
-                }
-
-                if (MaybeUpdateConfig(_config))
-                {
-                    PrintWarning("Configuration appears to be outdated; updating and saving Better Loot");
-                    SaveConfig();
-                }
-            }
-            catch (Exception ex)
-            {
-                PrintWarning("Failed to load Better Loot config file (is the config file corrupt?) (" + ex.Message + ")");
-            }
-        }
-        protected override void SaveConfig()
-        {
-            //PrintToConsole($"Configuration changes saved to {Name}.json");
-            PrintWarning($"Configuration changes saved to {Name}.json");
-            Config.WriteObject(_config, true);
-        }
-
-        #endregion
-
-        #region Updater
-
-        internal class SerializableConfiguration
-        {
-            public string ToJson() => JsonConvert.SerializeObject(this);
-
-            public Dictionary<string, object> ToDictionary() => JsonHelper.Deserialize(ToJson()) as Dictionary<string, object>;
-        }
-
-        private static class JsonHelper
-        {
-            public static object Deserialize(string json) => ToObject(JToken.Parse(json));
-
-            private static object ToObject(JToken token)
-            {
-                switch (token.Type)
-                {
-                    case JTokenType.Object:
-                        return token.Children<JProperty>().ToDictionary(prop => prop.Name, prop => ToObject(prop.Value));
-                    case JTokenType.Array:
-                        return token.Select(ToObject).ToList();
-
-                    default:
-                        return ((JValue) token).Value;
-                }
+                Puts("No Blacklist found, creating new file...");
+                storedBlacklist = new StoredBlacklist();
+                storedBlacklist.ItemList.Add("flare");
+                Interface.GetMod().DataFileSystem.WriteObject("BetterLoot\\Blacklist", storedBlacklist);
+                return;
             }
         }
 
-        private bool MaybeUpdateConfig(SerializableConfiguration config)
+        void SaveBlacklist() => Interface.GetMod().DataFileSystem.WriteObject("BetterLoot\\Blacklist", storedBlacklist);
+
+        protected override void LoadDefaultConfig()
         {
-            var currentWithDefaults = config.ToDictionary();
-            var currentRaw = Config.ToDictionary(x => x.Key, x => x.Value);
-            return MaybeUpdateConfigDict(currentWithDefaults, currentRaw);
+            Config.Clear();
+            LoadVariables();
         }
 
-        private bool MaybeUpdateConfigDict(Dictionary<string, object> currentWithDefaults, Dictionary<string, object> currentRaw)
+        void Init()
         {
-            bool changed = false;
-
-            foreach (var key in currentWithDefaults.Keys)
-            {
-                object currentRawValue;
-                if (currentRaw.TryGetValue(key, out currentRawValue))
-                {
-                    var defaultDictValue = currentWithDefaults[key] as Dictionary<string, object>;
-                    var currentDictValue = currentRawValue as Dictionary<string, object>;
-
-                    if (defaultDictValue != null)
-                    {
-                        if (currentDictValue == null)
-                        {
-                            currentRaw[key] = currentWithDefaults[key];
-                            changed = true;
-                        }
-                        else if (MaybeUpdateConfigDict(defaultDictValue, currentDictValue))
-                            changed = true;
-                    }
-                }
-                else
-                {
-                    currentRaw[key] = currentWithDefaults[key];
-                    changed = true;
-                }
-            }
-
-            return changed;
-        }
-
-        #endregion
-
-        #region Oxide
-
-        private void Init()
-        {
-            CheckConfig();
+            LoadVariables();
             LoadBlacklist();
-            _instance = this;
+            bl = this;
         }
 
-        private void OnServerInitialized()
+        void OnServerInitialized()
         {
             ItemManager.Initialize();
-            permission.RegisterPermission(Admin, this);
             LoadAllContainers();
-            UpdateInternals(_config.Generic.listUpdatesOnLoaded);
+            UpdateInternals(listUpdatesOnLoaded);
         }
 
-        private void Unload()
+
+        //void OnLootEntity(BasePlayer player, BaseEntity target)
+        //{
+            //Puts($"{player.displayName} looted {target.PrefabName}");
+        //}
+
+        void Unload() 
         {
             var gameObjects = UnityEngine.Object.FindObjectsOfType<HammerHitLootCycle>().ToList();
             if (gameObjects.Count > 0) 
@@ -531,110 +425,9 @@ namespace Oxide.Plugins
                     UnityEngine.Object.Destroy(objects);
                 }
             }
-            _instance = null;
-        }
-        
-        private object OnLootSpawn(LootContainer container)
-        {
-            if (!initialized || container == null)
-                return null;
-            if (CustomLootSpawns != null && (CustomLootSpawns && (bool)CustomLootSpawns?.Call("IsLootBox", container.GetComponent<BaseEntity>())))
-                return null;
-            if (PopulateContainer(container))
-            {
-                ItemManager.DoRemoves();
-                return true;
-            }
-            return null;
-        }
-        
-        //void OnLootEntity(BasePlayer player, BaseEntity target)
-        //{
-        //Puts($"{player.displayName} looted {target.PrefabName}");
-        //}
-
-        #endregion
-
-        #region Core
-        
-        private bool PopulateContainer(LootContainer container)
-        {
-            Dictionary<string, object> con;
-            object containerobj;
-            if (!lootTables.TryGetValue(container.PrefabName, out containerobj))
-                return false;
-            con = containerobj as Dictionary<string, object>;
-            if (!(bool)con["Enabled"])
-                return false;
-            var lootitemcount = (con["ItemList"] as Dictionary<string, object>)?.Count();
-            int itemCount = Mathf.RoundToInt(UnityEngine.Random.Range(Convert.ToSingle(Mathf.Min((int)con["ItemsMin"], (int)con["ItemsMax"])) * 100f, Convert.ToSingle(Mathf.Max((int)con["ItemsMin"], (int)con["ItemsMax"])) * 100f) / 100f);
-            if (lootitemcount > 0 && itemCount > lootitemcount && lootitemcount < 36)
-                itemCount = (int)lootitemcount;
-            if (container.inventory == null)
-            {
-                container.inventory = new ItemContainer();
-                container.inventory.ServerInitialize(null, 36);
-                container.inventory.GiveUID();
-            }
-            else
-            {
-                container.inventory.Clear();
-                container.inventory.capacity = 36;
-                ItemManager.DoRemoves();
-            }
-            var items = new List<Item>();
-            var itemNames = new List<string>();
-            var itemBlueprints = new List<int>();
-            var maxRetry = 10;
-            for (int i = 0; i < itemCount; ++i)
-            {
-                if (maxRetry == 0)
-                {
-                    break;
-                }
-                var item = MightyRNG(container.PrefabName, itemCount, (bool)(itemBlueprints.Count >= (int)con["MaxBPs"]));
-
-                if (item == null)
-                {
-                    --maxRetry;
-                    --i;
-                    continue;
-                }
-                if (itemNames.Contains(item.info.shortname) || (item.IsBlueprint() && itemBlueprints.Contains(item.blueprintTarget)))
-                {
-                    item.Remove();
-                    --maxRetry;
-                    --i;
-                    continue;
-                }
-                else
-                    if (item.IsBlueprint())
-                    itemBlueprints.Add(item.blueprintTarget);
-                else
-                    itemNames.Add(item.info.shortname);
-                items.Add(item);
-                if (storedBlacklist.ItemList.Contains(item.info.shortname)) 
-                {
-                    items.Remove(item);
-					item.Remove(); // broken item fix
-                }
-            }
-            foreach (var item in items.Where(x => x != null && x.IsValid()))
-                if (!item.MoveToContainer(container.inventory, -1, false)) { item.DoRemove(); } // broken item fix / fixes full container 
-            if ((int)con["Scrap"] > 0)
-            {
-                int scrapCount = (int)con["Scrap"];
-                Item item = ItemManager.Create(ItemManager.FindItemDefinition("scrap"), scrapCount * _config.Loot.scrapMultiplier, 0uL); 
-                if (!item.MoveToContainer(container.inventory, -1, false)) { item.DoRemove(); } // broken item fix
-            }
-            container.inventory.capacity = container.inventory.itemList.Count;
-            container.inventory.MarkDirty();
-            container.SendNetworkUpdate();
-            populatedContainers++;
-            return true;
         }
 
-        private void UpdateInternals(bool doLog)
+        void UpdateInternals(bool doLog)
         {
             SaveExportNames();
             if (Changed)
@@ -645,27 +438,29 @@ namespace Oxide.Plugins
             Puts("Updating internals ...");
             populatedContainers = 0;
             NextTick(() =>
-            {
-                if (_config.Generic.removeStackedContainers)
-                    FixLoot();
-                foreach (var container in BaseNetworkable.serverEntities.Where(p => p != null && p.GetComponent<BaseEntity>() != null && p is LootContainer).Cast<LootContainer>().ToList())
-                {
-                    if (container == null)
-                        continue;
-                    if (CustomLootSpawns != null && (CustomLootSpawns && (bool)CustomLootSpawns?.Call("IsLootBox", container.GetComponent<BaseEntity>())))
-                        continue;
-                    if (PopulateContainer(container))
-                        populatedContainers++;
-                }
-                
-                Puts($"Populated '{populatedContainers}' supported containers.");
-                initialized = true;
-                populatedContainers = 0;
-                ItemManager.DoRemoves();
-            });
+           {
+               if (removeStackedContainers)
+                   FixLoot();
+               foreach (var container in BaseNetworkable.serverEntities.Where(p => p != null && p.GetComponent<BaseEntity>() != null && p is LootContainer).Cast<LootContainer>().ToList())
+               {
+                   if (container == null)
+                       continue;
+                   if (CustomLootSpawns != null && (CustomLootSpawns && (bool)CustomLootSpawns?.Call("IsLootBox", container.GetComponent<BaseEntity>())))
+                       continue;
+                   if (PopulateContainer(container))
+                       populatedContainers++;
+               }
+
+
+               Puts($"Populated '{populatedContainers}' supported containers.");
+               initialized = true;
+               populatedContainers = 0;
+               ItemManager.DoRemoves();
+           });
         }
-        
-        private void FixLoot()
+
+
+        void FixLoot()
         {
             var spawns = Resources.FindObjectsOfTypeAll<LootContainer>()
                 .Where(c => c.isActiveAndEnabled).
@@ -717,10 +512,90 @@ namespace Oxide.Plugins
                 Puts($"No stacked LootContainer found.");
             ItemManager.DoRemoves();
         }
-        
-        private Item MightyRNG(string type, int itemCount, bool blockBPs = false)
+
+        bool PopulateContainer(LootContainer container)
         {
-            bool asBP = rng.NextDouble() < _config.Generic.blueprintProbability && !blockBPs;
+            Dictionary<string, object> con;
+            object containerobj;
+            if (!lootTables.TryGetValue(container.PrefabName, out containerobj))
+                return false;
+            con = containerobj as Dictionary<string, object>;
+            if (!(bool)con["Enabled"])
+                return false;
+            var lootitemcount = (con["ItemList"] as Dictionary<string, object>)?.Count();
+            int itemCount = Mathf.RoundToInt(UnityEngine.Random.Range(Convert.ToSingle(Mathf.Min((int)con["ItemsMin"], (int)con["ItemsMax"])) * 100f, Convert.ToSingle(Mathf.Max((int)con["ItemsMin"], (int)con["ItemsMax"])) * 100f) / 100f);
+            if (lootitemcount > 0 && itemCount > lootitemcount && lootitemcount < 36)
+                itemCount = (int)lootitemcount;
+            if (container.inventory == null)
+            {
+                container.inventory = new ItemContainer();
+                container.inventory.ServerInitialize(null, 36);
+                container.inventory.GiveUID();
+            }
+            else
+            {
+                while (container.inventory.itemList.Count > 0)
+                {
+                    var item = container.inventory.itemList[0];
+                    item.RemoveFromContainer();
+                    item.Remove(0f);
+                }
+                container.inventory.capacity = 36;
+            }
+            var items = new List<Item>();
+            var itemNames = new List<string>();
+            var itemBlueprints = new List<int>();
+            var maxRetry = 10;
+            for (int i = 0; i < itemCount; ++i)
+            {
+                if (maxRetry == 0)
+                {
+                    break;
+                }
+                var item = MightyRNG(container.PrefabName, itemCount, (bool)(itemBlueprints.Count >= (int)con["MaxBPs"]));
+
+                if (item == null)
+                {
+                    --maxRetry;
+                    --i;
+                    continue;
+                }
+                if (itemNames.Contains(item.info.shortname) || (item.IsBlueprint() && itemBlueprints.Contains(item.blueprintTarget)))
+                {
+                    item.Remove(0f);
+                    --maxRetry;
+                    --i;
+                    continue;
+                }
+                else
+                    if (item.IsBlueprint())
+                    itemBlueprints.Add(item.blueprintTarget);
+                else
+                    itemNames.Add(item.info.shortname);
+                items.Add(item);
+                if (storedBlacklist.ItemList.Contains(item.info.shortname)) 
+                {
+                    items.Remove(item);
+                }
+            }
+            foreach (var item in items.Where(x => x != null && x.IsValid()))
+                item.MoveToContainer(container.inventory, -1, false);
+            if ((int)con["Scrap"] > 0)
+            {
+                int scrapCount = (int)con["Scrap"];
+                Item item = ItemManager.Create(ItemManager.FindItemDefinition("scrap"), scrapCount * scrapMultiplier, 0uL); 
+                item.MoveToContainer(container.inventory, -1, false);
+            }
+            container.inventory.capacity = container.inventory.itemList.Count;
+            container.inventory.MarkDirty();
+            container.SendNetworkUpdate();
+            populatedContainers++;
+            return true;
+        }
+
+        Item MightyRNG(string type, int itemCount, bool blockBPs = false)
+        {
+            bool asBP = rng.NextDouble() < blueprintProbability && !blockBPs;
             List<string> selectFrom;
             int limit = 0;
             string itemName;
@@ -782,7 +657,7 @@ namespace Oxide.Plugins
             if (((lootTables[type] as Dictionary<string, object>)["ItemList"] as Dictionary<string, object>).TryGetValue(item.info.shortname, out itemOptions))
             {
                 Dictionary<string, object> options = itemOptions as Dictionary<string, object>;
-                item.amount = UnityEngine.Random.Range(Math.Min((int)options["Min"], (int)options["Max"]), Math.Max((int)options["Min"], (int)options["Max"])) * _config.Loot.lootMultiplier;
+                item.amount = UnityEngine.Random.Range(Math.Min((int)options["Min"], (int)options["Max"]), Math.Max((int)options["Min"], (int)options["Max"])) * lootMultiplier;
                 //if (options.ContainsKey("SkinId"))
                     //item.skin = (uint)options["SkinId"];
 
@@ -790,16 +665,51 @@ namespace Oxide.Plugins
             item.OnVirginSpawn();
             return item;
         }
-        
-        private bool ItemExists(string name)
+
+        object OnLootSpawn(LootContainer container)
         {
-            // remove useless loop
-            ItemDefinition itemDef = ItemManager.itemList.Find((ItemDefinition x) => x.shortname == name);
-            if (itemDef != null) return true;            
+            if (!initialized || container == null)
+                return null;
+            if (CustomLootSpawns != null && (CustomLootSpawns && (bool)CustomLootSpawns?.Call("IsLootBox", container.GetComponent<BaseEntity>())))
+                return null;
+            if (PopulateContainer(container))
+            {
+                ItemManager.DoRemoves();
+                return true;
+            }
+            return null;
+        }
+
+        static int RarityIndex(Rarity rarity)
+        {
+            switch (rarity)
+            {
+                case Rarity.None: return 0;
+                case Rarity.Common: return 1;
+                case Rarity.Uncommon: return 2;
+                case Rarity.Rare: return 3;
+                case Rarity.VeryRare: return 4;
+            }
+            return -1;
+        }
+
+        bool ItemExists(string name)
+        {
+            foreach (var def in ItemManager.itemList)
+            {
+                if (def.shortname != name)
+                    continue;
+                var testItem = ItemManager.CreateByName(name, 1);
+                if (testItem != null)
+                {
+                    testItem.Remove(0f);
+                    return true;
+                }
+            }
             return false;
         }
-        
-        private bool isSupplyDropActive()
+
+        bool isSupplyDropActive()
         {
             Dictionary<string, object> con;
             object containerobj;
@@ -811,24 +721,44 @@ namespace Oxide.Plugins
             return false;
         }
 
-        #endregion
+        class StoredExportNames
+        {
+            public int version;
+            public Dictionary<string, string> AllItemsAvailable = new Dictionary<string, string>();
+            public StoredExportNames()
+            {
+            }
+        }
+
+        void SaveExportNames()
+        {
+            storedExportNames = Interface.GetMod().DataFileSystem.ReadObject<StoredExportNames>("BetterLoot\\NamesList");
+            if (storedExportNames.AllItemsAvailable.Count == 0 || (int)storedExportNames.version != Rust.Protocol.network)
+            {
+                storedExportNames = new StoredExportNames();
+                var exportItems = new List<ItemDefinition>(ItemManager.itemList);
+                storedExportNames.version = Rust.Protocol.network;
+                foreach (var it in exportItems)
+                    storedExportNames.AllItemsAvailable.Add(it.shortname, it.displayName.english);
+                Interface.GetMod().DataFileSystem.WriteObject("BetterLoot\\NamesList", storedExportNames);
+                Puts($"Exported {storedExportNames.AllItemsAvailable.Count} items to 'NamesList'");
+            }
+        }
 
         [ChatCommand("blacklist")]
-        private void CmdChatBlacklistNew(BasePlayer player, string command, string[] args)
+        void cmdChatBlacklist(BasePlayer player, string command, string[] args)
         {
+            string usage = "Usage: /blacklist [additem|deleteitem] \"ITEMNAME\"";
             if (!initialized)
             {
-                SendReply(player, BLLang( "initialized")); return;
-            }
-            if (!permission.UserHasPermission(player.UserIDString, Admin))
-            {
-                SendReply(player, BLLang("perm")); return;
+                SendReply(player, string.Format("Plugin not enabled."));
+                return;
             }
             if (args.Length == 0)
             {
                 if (storedBlacklist.ItemList.Count == 0)
                 {
-                    SendReply(player, BLLang("none"));
+                    SendReply(player, string.Format("There are no blacklisted items"));
                 }
                 else
                 {
@@ -839,48 +769,67 @@ namespace Oxide.Plugins
                             sb.Append(", ");
                         sb.Append(item);
                     }
-                    SendReply(player, BLLang("blocked", player.UserIDString, sb.ToString()));
+                    SendReply(player, string.Format("Blacklisted items: {0}", sb.ToString()));
                 }
                 return;
             }
-
-            switch (args[0].ToLower())
+            if (!ServerUsers.Is(player.userID, ServerUsers.UserGroup.Owner))
             {
-                case "additem":
-                    if (!ItemExists(args[1]))
-                    {
-                        SendReply(player, BLLang("notvalid", player.UserIDString, args[1]));
-                        return;
-                    }
-                    if (!storedBlacklist.ItemList.Contains(args[1]))
-                    {
-                        storedBlacklist.ItemList.Add(args[1]);
-                        UpdateInternals(false);
-                        SendReply(player, BLLang("blockedpass", player.UserIDString, args[1]));
-                        SaveBlacklist();
-                        return;
-                    }
-                    SendReply(player, BLLang("blockedtrue", player.UserIDString, args[1]));
-                    break;
-                case "deleteitem":
-                    if (!ItemExists(args[1]))
-                    {
-                        SendReply(player, BLLang("notvalid", player.UserIDString, args[1]));
-                        return;
-                    }
-                    if (storedBlacklist.ItemList.Contains(args[1]))
-                    {
-                        storedBlacklist.ItemList.Remove(args[1]);
-                        UpdateInternals(false);
-                        SendReply(player, BLLang("unblacklisted", player.UserIDString, args[1]));
-                        SaveBlacklist();
-                        return;
-                    }
-                    SendReply(player, BLLang("blockedfalse", player.UserIDString, args[1]));
-                    break;
-                default:
-                    SendReply(player, BLLang("syntax"));
-                    break;
+                //SendReply(player, string.Format(lang.GetMessage("msgNotAuthorized", this, player.UserIDString)));
+                SendReply(player, "You are not authorized to use this command");
+                return;
+            }
+            if (args.Length != 2)
+            {
+                SendReply(player, usage);
+                return;
+            }
+            if (args[0] == "additem")
+            {
+                if (!ItemExists(args[1]))
+                {
+                    SendReply(player, string.Format("Not a valid item: {0}", args[1]));
+                    return;
+                }
+                if (!storedBlacklist.ItemList.Contains(args[1]))
+                {
+                    storedBlacklist.ItemList.Add(args[1]);
+                    UpdateInternals(false);
+                    SendReply(player, string.Format("The item '{0}' is now blacklisted", args[1]));
+                    SaveBlacklist();
+                    return;
+                }
+                else
+                {
+                    SendReply(player, string.Format("The item '{0}' is already blacklisted", args[1]));
+                    return;
+                }
+            }
+            else if (args[0] == "deleteitem")
+            {
+                if (!ItemExists(args[1]))
+                {
+                    SendReply(player, string.Format("Not a valid item: {0}", args[1]));
+                    return;
+                }
+                if (storedBlacklist.ItemList.Contains(args[1]))
+                {
+                    storedBlacklist.ItemList.Remove(args[1]);
+                    UpdateInternals(false);
+                    SendReply(player, string.Format("The item '{0}' is now no longer blacklisted", args[1]));
+                    SaveBlacklist();
+                    return;
+                }
+                else
+                {
+                    SendReply(player, string.Format("The item '{0}' is not blacklisted", args[1]));
+                    return;
+                }
+            }
+            else
+            {
+                SendReply(player, usage);
+                return;
             }
         }
 
@@ -892,7 +841,7 @@ namespace Oxide.Plugins
             var item = player.GetActiveItem();
             if (item.hasCondition) return null;
             //Puts($"{item.ToString()}");
-            if (!player.IsAdmin || c.HitEntity.GetComponent<LootContainer>() == null || !item.ToString().Contains("hammer") || !_config.Loot.enableHammerLootCycle)  return null;
+            if (!player.IsAdmin || c.HitEntity.GetComponent<LootContainer>() == null || !item.ToString().Contains("hammer") || !enableHammerLootCycle)  return null;
             var inv = c.HitEntity.GetComponent<StorageContainer>();
             inv.gameObject.AddComponent<HammerHitLootCycle>();
             player.inventory.loot.StartLootingEntity(inv, false);
@@ -904,50 +853,26 @@ namespace Oxide.Plugins
             return null;
             }
 
-        private class HammerHitLootCycle : FacepunchBehaviour
+        class HammerHitLootCycle : FacepunchBehaviour
         {
-            private void Awake()
+            void Awake()
             {
-                if (!_instance.initialized) return;
-                InvokeRepeating(Repeater, (float)_config.Loot.hammerLootCycleTime, (float)_config.Loot.hammerLootCycleTime);
+                if (!bl.initialized) return;
+                InvokeRepeating(Repeater, (float)bl.hammerLootCycleTime, (float)bl.hammerLootCycleTime);
             }
-            private void Repeater()
+            void Repeater()
             {
                 if (!enabled) return;
                 LootContainer loot = GetComponent<LootContainer>();
-                _instance.Puts($"{loot}");
-                _instance.PopulateContainer(loot);
+                bl.Puts($"{loot}");
+                bl.PopulateContainer(loot);
             }
             private void PlayerStoppedLooting(BasePlayer player)
             {
-                //_instance.Puts($"Ended looting of the box"); Doesn't call but it works for a reason I don't quite understand
+                //bl.Puts($"Ended looting of the box"); Doesn't call but it works for a reason I don't quite understand
                 CancelInvoke(Repeater);
                 Destroy(this);
             }
-        }
-
-        #endregion
-
-        #region Lang
-
-        private string BLLang(string key, string id = null) => lang.GetMessage(key, this, id);
-        private string BLLang(string key, string id = null, params object[] args) => string.Format(lang.GetMessage(key, this, id), args);
-        
-        protected override void LoadDefaultMessages()
-        {
-            lang.RegisterMessages(new Dictionary<string, string>
-            {
-                { "initialized", "Plugin not enabled"},
-                { "perm", "You are not authorized to use this command"},
-                { "syntax", "Usage: /blacklist [additem|deleteitem] \"ITEMNAME\""},
-                { "none", "There are no blacklisted items"},
-                { "blocked", "Blacklisted items: {0}"},
-                { "notvalid", "Not a valid item: {0}"},
-                {"blockedpass", "The item '{0}' is now blacklisted"},
-                {"blockedtrue", "The item '{0}' is already blacklisted}"},
-                {"unblacklisted", "The item '{0}' has been unblacklisted"},
-                {"blockedfalse", "The item '{0}' is not blacklisted"},
-            }, this); //en
         }
 
         #endregion

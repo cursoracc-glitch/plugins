@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("NoteUI", "redesign Deversive", "1.0.3")]
+    [Info("NoteUI", "noname", "1.0.1")]
     public class NoteUI : RustPlugin
     {
         #region Variables
@@ -54,7 +54,7 @@ namespace Oxide.Plugins
                 explosioneffecticon = "https://i.imgur.com/EKlH8Hy.png",
                 lockeffecticon = "https://i.imgur.com/ETrXVzq.png",
                 infoeffecticon = "https://i.imgur.com/nCAejF7.png",
-                usesounds = true,
+				usesounds = true,
                 fadein = 0.4f,
                 timetodelete = 5,
             };
@@ -86,9 +86,6 @@ namespace Oxide.Plugins
             NoteUIAdd(player, "info", Text, Description);
         }
 
-        private string notifimage = "https://imgur.com/26ZzZI5.png";
-        private string bell = "https://imgur.com/e4Jg2qz.png";
-        
         void OnServerInitialized()
         {
             if (!plugins.Exists("ImageLibrary"))
@@ -97,10 +94,9 @@ namespace Oxide.Plugins
                 Unload();
                 return;
             }
-            //ImageLibrary.Call("AddImage", cfg.explosioneffecticon, "explosion");
-            //ImageLibrary.Call("AddImage", cfg.lockeffecticon, "lock");
-            ImageLibrary.Call("AddImage", notifimage, "info");
-            ImageLibrary.Call("AddImage", bell, "bell");
+            ImageLibrary.Call("AddImage", cfg.explosioneffecticon, "explosion");
+            ImageLibrary.Call("AddImage", cfg.lockeffecticon, "lock");
+            ImageLibrary.Call("AddImage", cfg.infoeffecticon, "info");
         }
 
         void Unload()
@@ -118,13 +114,13 @@ namespace Oxide.Plugins
             CuiHelper.DestroyUi(player, NoteUIHandler);
             switch (Type)
             {
-                /*case "explosion":
+                case "explosion":
                     container.Add(new CuiPanel
                     {
                         Image = { FadeIn = cfg.fadein, Color = HexToCuiColor("#d4a1d400") },
                         RectTransform = { AnchorMin = "0.3011301 0.8373263", AnchorMax = "0.6792551 0.9283854" },
                         CursorEnabled = false,
-                    }, "Overlay", NoteUIHandler);
+                    }, "Hud", NoteUIHandler);
                     container.Add(new CuiElement
                     {
                         Parent = NoteUIHandler,
@@ -150,7 +146,7 @@ namespace Oxide.Plugins
                         {
                             new CuiTextComponent { FadeIn = cfg.fadein, Text = Name, Align = TextAnchor.MiddleLeft, FontSize = 12, Font = "RobotoCondensed-regular.ttf" },
                             new CuiRectTransformComponent {AnchorMin = "0.07438016 0.4799993", AnchorMax = "0.8181818 0.8799993"},
-                            new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+							new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
                         }
                     });
                     container.Add(new CuiElement
@@ -160,7 +156,7 @@ namespace Oxide.Plugins
                         {
                             new CuiTextComponent { FadeIn = cfg.fadein, Text = Description, Align = TextAnchor.MiddleLeft, FontSize = 14, Font = "RobotoCondensed-regular.ttf" },
                             new CuiRectTransformComponent {AnchorMin = "0.07644629 0.1399995", AnchorMax = "0.9896694 0.5399995"},
-                            new CuiOutlineComponent {Color = "0 0 0 1", Distance = "0.3 0.3"}
+							new CuiOutlineComponent {Color = "0 0 0 1", Distance = "0.3 0.3"}
                         }
                     });
                     break;
@@ -170,7 +166,7 @@ namespace Oxide.Plugins
                         Image = { FadeIn = cfg.fadein, Color = HexToCuiColor("#d4a1d400") },
                         RectTransform = { AnchorMin = "0.3011301 0.8373263", AnchorMax = "0.6792551 0.9283854" },
                         CursorEnabled = false,
-                    }, "Overlay", NoteUIHandler);
+                    }, "Hud", NoteUIHandler);
                     container.Add(new CuiElement
                     {
                         Parent = NoteUIHandler,
@@ -196,7 +192,7 @@ namespace Oxide.Plugins
                         {
                             new CuiTextComponent { FadeIn = cfg.fadein, Text = Name, Align = TextAnchor.MiddleCenter, FontSize = 16, Font = "RobotoCondensed-regular.ttf" },
                             new CuiRectTransformComponent {AnchorMin = "0.07438016 0.4799993", AnchorMax = "0.8181818 0.8799993"},
-                            new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+							new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
                         }
                     });
                     container.Add(new CuiElement
@@ -206,68 +202,49 @@ namespace Oxide.Plugins
                         {
                             new CuiTextComponent { FadeIn = cfg.fadein, Text = Description, Align = TextAnchor.MiddleCenter, FontSize = 14, Font = "RobotoCondensed-regular.ttf" },
                             new CuiRectTransformComponent {AnchorMin = "0.07644629 0.1399995", AnchorMax = "0.9896694 0.5399995"},
-                            new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+							new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
                         }
                     });
-                    break;*/
+                    break;
                 case "info":
                     container.Add(new CuiPanel
                     {
                         Image = { FadeIn = cfg.fadein, Color = HexToCuiColor("#d4a1d400") },
-                        RectTransform = { AnchorMin = "0.3947916 0.8259259", AnchorMax = "0.6682292 0.9287037" },
+                        RectTransform = { AnchorMin = "0.341142 0.8660589", AnchorMax = "0.636164 0.9132813" },
                         CursorEnabled = false,
-                    }, "Overlay", NoteUIHandler);
+                    }, "Hud", NoteUIHandler);
                     container.Add(new CuiElement
                     {
                         Parent = NoteUIHandler,
-                       //Name = "background",
                         Components =
                         {
-                            //new CuiTextComponent { FadeIn = cfg.fadein, Text = "Уведомление", Align = TextAnchor.MiddleCenter, FontSize = 16, Font = "RobotoCondensed-bold.ttf" },
-                            new CuiImageComponent { Png = (string) ImageLibrary.Call("GetImage", "info"), Material = "assets/icons/greyout.mat"},
-                            new CuiRectTransformComponent {AnchorMin = "0.1012163 0.2342343", AnchorMax = "0.9657144 0.8018019"},
-                            //new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+                            new CuiRectTransformComponent { AnchorMin = "0.01048555 0.1290863", AnchorMax = "0.06007232 0.8349687" },
                         }
                     });
                     container.Add(new CuiElement
                     {
                         Parent = NoteUIHandler,
-                        //Name = "background",
                         Components =
                         {
-                            new CuiTextComponent { FadeIn = cfg.fadein, Text = "Уведомление", Align = TextAnchor.UpperLeft, FontSize = 16, Font = "RobotoCondensed-bold.ttf" },
-                            new CuiRectTransformComponent {AnchorMin = "0.1658087 0.4234225", AnchorMax = "0.6905609 0.7837829"},
-                            //new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+                            new CuiTextComponent { FadeIn = cfg.fadein, Text = "Уведомление", Align = TextAnchor.MiddleCenter, FontSize = 16, Font = "RobotoCondensed-bold.ttf" },
+                            new CuiRectTransformComponent {AnchorMin = "0.0709796 0.6009494", AnchorMax = "0.9829992 1.189184"},
+                            new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
                         }
                     });
                     container.Add(new CuiElement
                     {
                         Parent = NoteUIHandler,
-                        //Name = "background",
                         Components =
                         {
-                            new CuiTextComponent { FadeIn = cfg.fadein, Text = Name, Align = TextAnchor.MiddleLeft, FontSize = 12, Font = "RobotoCondensed-regular.ttf" },
-                            new CuiRectTransformComponent {AnchorMin = "0.1564356 0.2612609", AnchorMax = "0.9168315 0.6126121"},
-                            //new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+                            new CuiTextComponent { FadeIn = cfg.fadein, Text = Name, Align = TextAnchor.MiddleCenter, FontSize = 16, Font = "RobotoCondensed-regular.ttf" },
+                            new CuiRectTransformComponent {AnchorMin = "0.07024754 0.1764701", AnchorMax = "0.9793388 0.7647049"},
+							new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
                         }
                     });
-                    container.Add(new CuiElement
-                    {
-                        Parent = NoteUIHandler,
-                        //Name = "background",
-                        Components =
-                        {
-                            //new CuiTextComponent { FadeIn = cfg.fadein, Text = "Уведомление", Align = TextAnchor.MiddleCenter, FontSize = 16, Font = "RobotoCondensed-bold.ttf" },
-                            new CuiImageComponent { Png = (string) ImageLibrary.Call("GetImage", "bell"), Material = "assets/icons/greyout.mat"},
-                            new CuiRectTransformComponent {AnchorMin = "0 0.09909844", AnchorMax = "0.1980195 0.9999994"},
-                            //new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
-                        }
-                    });
-                    
                     break;
             }
             CuiHelper.AddUi(player, container);
-            if (cfg.usesounds) Effect.server.Run("assets/prefabs/locks/keypad/effects/lock.code.unlock.prefab", player, 0, Vector3.zero, Vector3.zero);
+			if (cfg.usesounds) Effect.server.Run("assets/bundled/prefabs/fx/notice/stack.world.fx.prefab", player, 0, Vector3.zero, Vector3.zero);
             timer.Once(cfg.timetodelete, () => CuiHelper.DestroyUi(player, NoteUIHandler));
         }
 
