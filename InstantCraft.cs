@@ -17,22 +17,18 @@ namespace Oxide.Plugins
             [JsonProperty(PropertyName = "Список предметов с обычным временем крафта")]
             public List<string> normal = new List<string>
             {
-                "",
-                "put item shortname here"
             };
 
             [JsonProperty(PropertyName = "Список заблокированных предметов")]
             public List<string> blocked = new List<string>
             {
-                "",
-                "put item shortname here"
             };
             
             [JsonProperty(PropertyName = "Разделять вещи при выдаче на стаки")]
             public bool split = false;
         }
 		
-        private void Init()
+        private void OnServerInitialized()
         {
             config = Config.ReadObject<PluginConfig>();
             Config.WriteObject(config);
@@ -52,7 +48,7 @@ namespace Oxide.Plugins
             if (IsBlocked(name))
             {
                 task.cancelled = true;
-                SendReply(player, "Данный предмет заблокирован для крафта!");
+                SendReply(player, lang.GetMessage("NOFASTCRAFT", this, player.UserIDString));
                 GiveRefund(player, task.takenItems);
                 return null;
             }
@@ -63,14 +59,14 @@ namespace Oxide.Plugins
             if (HasPlace(slots, stacks) == false)
             {
                 task.cancelled = true;
-                SendReply(player, "У вас недостаточно места, нужно {0} свободно {1}.", stacks.Count, slots);
+                SendReply(player, lang.GetMessage("NOFREESPACE", this, player.UserIDString), stacks.Count, slots);
                 GiveRefund(player, task.takenItems);
                 return null;
             }
             
             if (IsNormalItem(name))
             {
-                SendReply(player, "Предмет убран из списка мгновенного крафта и будут крафтится с обычной скоростью!");
+                SendReply(player, lang.GetMessage("NOFASTCRAFT", this, player.UserIDString));
                 return null;
             }
             
@@ -162,5 +158,30 @@ namespace Oxide.Plugins
 
             return slots > 0;
         }
+
+        #region Language
+        private void LoadDefaultMessages()
+        {
+            lang.RegisterMessages(new Dictionary<string, string>() 
+            {
+                { "ITEMBANNED", "Данный <color=#8e6874>предмет</color> нельзя создать!" },
+                { "NOFASTCRAFT", "<size=14>Этот предмет <color=#8e6874>нельзя</color> быстро создать!</size>\n<size=12>- он будет создаваться с <color=#8e6874>обычной</color> скоростью</size>" },
+                { $"NOFREESPACE", "<size=14>У вас недостаточно места в инвентаре!</size>\n<size=12>- нужно <color=#8e6874>{0}</color> свободно <color=#8e6874>{1}</color></size>" }
+            }, this, "ru");
+
+            lang.RegisterMessages(new Dictionary<string, string>() 
+            {
+                { "ITEMBANNED", "This <color=#8e6874>item</color> cannot be created!" },
+                { "NOFASTCRAFT", "<size=14>This item <color=#8e6874>can't</color> be created quickly!</size>\n<size=12>-it will be created at <color=#8e6874>usual</color> speed</size>." },
+                { $"NOFREESPACE", "<size=14>You don't have enough space in your inventory!</size>\n<size=12>- you need <color=#8e6874>{0}</color> free <color=#8e6874>{1}</color></size>" }
+            }, this, "en");
+        }
+
+        private string _(BasePlayer player, string key, params object[] args)
+        {
+            return string.Format(lang.GetMessage(key, this, player?.UserIDString), args);
+        }
+        #endregion
+
     }
 }

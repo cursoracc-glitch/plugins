@@ -1,9 +1,6 @@
-using System;
-using System.Collections;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Text;
-using ConVar;
 using Newtonsoft.Json;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
@@ -11,55 +8,33 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("XerCopterCraft", "Mercury", "1.0.3")]
+    [Info("XerCopterCraft", "https://topplugin.ru/", "1.0.1")]
     class XerCopterCraft : RustPlugin
     {
-        /// <summary>
-        ///  Обновление 1.0.3
-        ///  - Поправлен подгрузка изображений
-        ///  - Изменен метод форматирования HEX цетов
-        ///  - Добавлена поддержка IQChat
-        /// </summary>
-        /// 
-
         #region Reference
 
-        [PluginReference] Plugin ImageLibrary, IQChat;
+        [PluginReference] Plugin ImageLibrary;
+        private static XerCopterCraft __ins;
+        public string GetImage(string shortname, ulong skin = 0) => (string)ImageLibrary?.Call("GetImage", shortname, skin);
+        //public bool AddImage(string url, string shortname, ulong skin = 0) => (bool)ImageLibrary?.Call("AddImage", url, shortname, skin);
 
-        #region IQChat
-        public void SendChat(BasePlayer player, string Message, Chat.ChatChannel channel = Chat.ChatChannel.Global)
+        public static class IMGLibrary
         {
-            if (IQChat)
-                IQChat?.Call("API_ALERT_PLAYER", player, Message, config.prefixChat, config.avatarChat);
-            else player.SendConsoleCommand("chat.add", channel, 0, Message);
+            public static bool AddImage(string url, string imageName, ulong imageId = 0, Action callback = null) => (bool)__ins.ImageLibrary.Call("AddImage", url, imageName, imageId, callback);
+            public static bool AddImageData(string imageName, byte[] array, ulong imageId = 0, Action callback = null) => (bool)__ins.ImageLibrary.Call("AddImageData", imageName, array, imageId, callback);
+            public static string GetImageURL(string imageName, ulong imageId = 0) => (string)__ins.ImageLibrary.Call("GetImageURL", imageName, imageId);
+            public static string GetImage(string imageName, ulong imageId = 0, bool returnUrl = false) => (string)__ins.ImageLibrary.Call("GetImage", imageName, imageId, returnUrl);
+            public static List<ulong> GetImageList(string name) => (List<ulong>)__ins.ImageLibrary.Call("GetImageList", name);
+            public static Dictionary<string, object> GetSkinInfo(string name, ulong id) => (Dictionary<string, object>)__ins.ImageLibrary.Call("GetSkinInfo", name, id);
+            public static bool HasImage(string imageName, ulong imageId) => (bool)__ins.ImageLibrary.Call("HasImage", imageName, imageId);
+            public static bool IsInStorage(uint crc) => (bool)__ins.ImageLibrary.Call("IsInStorage", crc);
+            public static bool IsReady() => (bool)__ins.ImageLibrary.Call("IsReady");
+            public static void ImportImageList(string title, Dictionary<string, string> imageList, ulong imageId = 0, bool replace = false, Action callback = null) => __ins.ImageLibrary.Call("ImportImageList", title, imageList, imageId, replace, callback);
+            public static void ImportItemList(string title, Dictionary<string, Dictionary<ulong, string>> itemList, bool replace = false, Action callback = null) => __ins.ImageLibrary.Call("ImportItemList", title, itemList, replace, callback);
+            public static void ImportImageData(string title, Dictionary<string, byte[]> imageList, ulong imageId = 0, bool replace = false, Action callback = null) => __ins.ImageLibrary.Call("ImportImageData", title, imageList, imageId, replace, callback);
+            public static void LoadImageList(string title, List<KeyValuePair<string, ulong>> imageList, Action callback = null) => __ins.ImageLibrary.Call("LoadImageList", title, imageList, callback);
+            public static void RemoveImage(string imageName, ulong imageId) => __ins?.ImageLibrary?.Call("RemoveImage", imageName, imageId);
         }
-        #endregion
-
-        #region IL
-        private string GetImage(string fileName, ulong skin = 0)
-        {
-            var imageId = (string)plugins.Find("ImageLibrary").CallHook("GetImage", fileName, skin);
-            if (!string.IsNullOrEmpty(imageId))
-                return imageId;
-            return string.Empty;
-        }
-        public bool AddImage(string url, string shortname, ulong skin = 0) => (bool)ImageLibrary?.Call("AddImage", url, shortname, skin);
-        public bool HasImage(string imageName) => (bool)ImageLibrary?.Call("HasImage", imageName);
-
-        private IEnumerator DownloadImages()
-        {
-            var Items = config.CraftItemList;
-
-            PrintError("AddImages SkyPlugins.ru...");
-            foreach (var Item in Items)
-            {
-                if (!HasImage($"{Item.Key}_256px"))
-                    AddImage($"http://api.skyplugins.ru/api/getimage/{Item.Key}/256", $"{Item.Key}_256px");
-            }
-            yield return new WaitForSeconds(0.04f);
-            PrintError("AddImages SkyPlugins.ru - completed..");
-        }
-        #endregion
 
         #endregion
 
@@ -72,10 +47,6 @@ namespace Oxide.Plugins
 
         private class Configuration
         {
-            [JsonProperty("Avatar IQChat")]
-            public ulong avatarChat = 0;
-            [JsonProperty("Префикс IQChat")]
-            public string prefixChat = "[Copter]";
             [JsonProperty("SkinId (Иконка в инвентаре)")]
             public ulong skinID = 1680939801;
             [JsonProperty("Миникоптер(Эту вещь игрок будет держать в руках,когда поставит - он заменится на коптер)")]
@@ -92,8 +63,10 @@ namespace Oxide.Plugins
                     CraftItemList = new Dictionary<string, int>
                     {
                         ["metalblade"] = 10,
-                        ["rope"] = 10,
+                        ["rope"] = 15,
                         ["gears"] = 15,
+                        ["stones"] = 5,
+                        ["fuse"] = 1,
                         ["wood"] = 5000,
                         ["metal.fragments"] = 6500,
                     }
@@ -156,13 +129,10 @@ namespace Oxide.Plugins
 
         #region Commands
 
-        [ChatCommand("craft")]
+        [ChatCommand("copter")]
         void OpenCraftMenu(BasePlayer player)
         {
-            if (player == null) return;
-            if (permission.UserHasPermission(player.UserIDString, "xercoptercraft.use"))
-                OpenMenuCraft(player);
-            else SendChat(player, "Недостаточно прав");
+            OpenMenuCraft(player);
         }
 
         [ConsoleCommand("craft_copter")]
@@ -190,6 +160,7 @@ namespace Oxide.Plugins
         [ConsoleCommand("give_minicopter")]
         void GiveMinicopterCommand(ConsoleSystem.Arg args)
         {
+            if (!(args.IsAdmin || args.IsRcon)) return;
             BasePlayer target = BasePlayer.FindByID(ulong.Parse(args.Args[0]));
             if (target == null) { PrintWarning("Игрока нет на сервере!Он не получил миникоптер!"); return; };
             GiveMinicopter(target);
@@ -201,13 +172,25 @@ namespace Oxide.Plugins
         #endregion
 
         #region Hooks
-        void Unload() => ServerMgr.Instance.StopCoroutine(DownloadImages());
 
+        private string notifimage = "https://imgur.com/26ZzZI5.png";
+        private string bell = "https://imgur.com/e4Jg2qz.png";
+        string MainIMG = "https://imgur.com/uXKc6US.png";
+        
+        
         void OnServerInitialized()
         {
-            permission.RegisterPermission("xercoptercraft.use", this);
-            AddImage(config.InterfaceSettings.CopterPNG, "CopterImage");
-            ServerMgr.Instance.StartCoroutine(DownloadImages());
+            __ins = this;
+            IMGLibrary.AddImage(config.InterfaceSettings.CopterPNG, "CopterImage");
+            ImageLibrary.Call("AddImage", notifimage, "info");
+            ImageLibrary.Call("AddImage", bell, "bell");
+            ImageLibrary.Call("AddImage", MainIMG, "MainIMG");
+            
+            foreach (var items in config.CraftItemList) 
+            {
+                if (!string.IsNullOrEmpty(items.Key) && !IMGLibrary.HasImage(items.Key, 0)) IMGLibrary.AddImage("https://rustlabs.com/img/items180/" + items.Key + ".png", items.Key, 0);
+            }
+            
         }
 
         private void OnEntityBuilt(Planner plan, GameObject go)
@@ -217,6 +200,14 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Main
+
+        [ConsoleCommand("giveminicopter")]
+        void consolegiveminic(ConsoleSystem.Arg args)
+        {
+            if(!args.IsAdmin) return;
+            GiveMinicopter(args.Player());
+        }
         #region Main
 
         private void SpawnCopter(Vector3 position, Quaternion rotation = default(Quaternion), ulong ownerID = 0)
@@ -312,15 +303,19 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #endregion
+
         #region UI
 
         #region Parent
-        static string MainPanel = "XCC_MAINPANEL_3365";
+        static string MainPanel = "XCC_MAINPANEL_skykey";
         static string CraftItemsPanel = "XCC_CRAFT_ITEMS_PANEL";
         static string ItemParent = "XCC_CRAFT_ITEMS_PARENT";
         static string MessagePanel = "XCC_MESSAGE_PANEL";
         #endregion
 
+        
+        
         #region Message
 
         void MessageUI(BasePlayer player, string Messages, string Color)
@@ -328,17 +323,60 @@ namespace Oxide.Plugins
             CuiHelper.DestroyUi(player, MessagePanel);
             CuiElementContainer container = new CuiElementContainer();
 
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0.3291668 0.8583333", AnchorMax = "0.6614581 0.9166667" },
-                Image = {FadeIn = 0.4f, Color = HexToRustFormat(Color) }
-            }, "Overlay", MessagePanel);
-
-            container.Add(new CuiLabel
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                Text = { Text = String.Format(Messages), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 30, Color = HexToRustFormat("#FFFFFFFF") }
-            }, MessagePanel);
+            
+                container.Add(new CuiPanel
+                    {
+                        Image = { FadeIn = 1f, Color = HexToRustFormat("#d4a1d400") },
+                        RectTransform = { AnchorMin = "0.3947916 0.8259259", AnchorMax = "0.6682292 0.9287037" },
+                        CursorEnabled = false,
+                    }, "Overlay", MessagePanel);
+                    container.Add(new CuiElement
+                    {
+                        Parent = MessagePanel,
+                       //Name = "background",
+                        Components =
+                        {
+                            //new CuiTextComponent { FadeIn = cfg.fadein, Text = "Уведомление", Align = TextAnchor.MiddleCenter, FontSize = 16, Font = "RobotoCondensed-bold.ttf" },
+                            new CuiImageComponent { Png = (string) ImageLibrary.Call("GetImage", "info"), Material = "assets/icons/greyout.mat"},
+                            new CuiRectTransformComponent {AnchorMin = "0.1012163 0.2342343", AnchorMax = "0.9657144 0.8018019"},
+                            //new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+                        }
+                    });
+                    container.Add(new CuiElement
+                    {
+                        Parent = MessagePanel,
+                        //Name = "background",
+                        Components =
+                        {
+                            new CuiTextComponent { FadeIn = 1f, Text = "Уведомление", Align = TextAnchor.UpperLeft, FontSize = 16, Font = "RobotoCondensed-bold.ttf" },
+                            new CuiRectTransformComponent {AnchorMin = "0.1658087 0.4234225", AnchorMax = "0.6905609 0.7837829"},
+                            //new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+                        }
+                    });
+                    container.Add(new CuiElement
+                    {
+                        Parent = MessagePanel,
+                        //Name = "background",
+                        Components =
+                        {
+                            new CuiTextComponent { FadeIn = 1f, Text = String.Format(Messages), Align = TextAnchor.MiddleLeft, FontSize = 12, Font = "RobotoCondensed-regular.ttf" },
+                            new CuiRectTransformComponent {AnchorMin = "0.1564356 0.2612609", AnchorMax = "0.9168315 0.6126121"},
+                            //new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+                        }
+                    });
+                    container.Add(new CuiElement
+                    {
+                        Parent = MessagePanel,
+                        //Name = "background",
+                        Components =
+                        {
+                            //new CuiTextComponent { FadeIn = cfg.fadein, Text = "Уведомление", Align = TextAnchor.MiddleCenter, FontSize = 16, Font = "RobotoCondensed-bold.ttf" },
+                            new CuiImageComponent { Png = (string) ImageLibrary.Call("GetImage", "bell"), Material = "assets/icons/greyout.mat"},
+                            new CuiRectTransformComponent {AnchorMin = "0 0.09909844", AnchorMax = "0.1980195 0.9999994"},
+                            //new CuiOutlineComponent {Color = "0 0 0 0", Distance = "0.3 0.3"}
+                        }
+                    });
+                    
 
             CuiHelper.AddUi(player, container);
 
@@ -347,6 +385,16 @@ namespace Oxide.Plugins
 
         #endregion
 
+        [ConsoleCommand("CloseUI21315asd")]
+        private void CloseUI(ConsoleSystem.Arg args)
+        {
+            BasePlayer player = args.Player();
+            if (player == null) return;
+            CuiHelper.DestroyUi(player, MainPanel);
+            CuiHelper.DestroyUi(player, "container123412");
+        }
+
+        
         #region MainMenu
 
         void OpenMenuCraft(BasePlayer player)
@@ -356,52 +404,59 @@ namespace Oxide.Plugins
 
             container.Add(new CuiPanel
             {
+                Image = { Color = "0 0 0 0" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
                 CursorEnabled = true,
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1"},
-                Image = { Color = HexToRustFormat("#0000008F") }
             }, "Overlay", MainPanel);
-
-            container.Add(new CuiButton
-            {
-                RectTransform = { AnchorMin = "-100 -100", AnchorMax = "100 100" },
-                Button = { Close = MainPanel, Color = "0 0 0 0" },
-                Text = { FadeIn = 0.8f, Text = "" }
-            }, MainPanel);
-
-            #region Titles
-
-            container.Add(new CuiLabel
-            {
-                RectTransform = { AnchorMin = "0 0.8962963", AnchorMax = "1 1" },
-                Text = { Text = String.Format(config.InterfaceSettings.TitleMenu), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 30, Color = HexToRustFormat("#FFFFFFFF") }
-            }, MainPanel);
-
-            container.Add(new CuiLabel
-            {
-                RectTransform = { AnchorMin = "0 0.4805566", AnchorMax = "1 0.5546331" },
-                Text = { Text = String.Format(config.InterfaceSettings.TitleItems), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 30, Color = HexToRustFormat("#FFFFFFFF") }
-            }, MainPanel);
-
-            #endregion
-
-            container.Add(new CuiButton
-            {
-                RectTransform = { AnchorMin = "0.4078125 0.5546297", AnchorMax = "0.5895833 0.5962934" },
-                Button = { Command = "craft_copter", Color = HexToRustFormat("#319A56FF") },
-                Text = { FadeIn = 0.9f, Text = config.InterfaceSettings.ButtonTitle,Align = TextAnchor.MiddleCenter, FontSize = 25 }
-            }, MainPanel);
 
             container.Add(new CuiElement
             {
                 Parent = MainPanel,
+                Name = "container123412",
+                Components =
+                {
+                    new CuiImageComponent { Png = GetImage(MainIMG), Material = "assets/icons/greyout.mat"},
+                    new CuiRectTransformComponent { AnchorMin = "0.2406265 0.1981481", AnchorMax = "0.7598959 0.795370" }
+                }
+            });
+            
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                Button = { Color = "0 0 0 0", Close = MainPanel },
+                Text = { Text = "" }
+            }, "container123412");
+            
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.3842712 0.8139536", AnchorMax = "0.6459364 0.9689922" },
+                Text = { Text = $"КОПТЕРЫ", Color = HexToRustFormat("#CAD5DF"), Align = TextAnchor.UpperCenter, FontSize = 28, Font = "robotocondensed-bold.ttf" }
+            },  "container123412");
+            
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.3741207 0.7937984", AnchorMax = "0.665997 0.9100775" },
+                Text = { Text = $"Здесь вы можете скрафтить коптер", Color = HexToRustFormat("#8E8E8E"), Align = TextAnchor.UpperCenter, FontSize = 13, Font = "robotocondensed-regular.ttf" }
+            },  "container123412");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.4178125 0.5546297", AnchorMax = "0.5895833 0.5962934" },
+                Button = { Command = "craft_copter", Color = HexToRustFormat("#319A56FF") },
+                Text = { FadeIn = 0.9f, Text = "СОЗДАТЬ",Align = TextAnchor.MiddleCenter, FontSize = 15 }
+            }, "container123412");
+
+            container.Add(new CuiElement
+            {
+                Parent = "container123412",
                 Components =
                 {
                     new CuiRawImageComponent {
                         Png = GetImage("CopterImage"), 
                     },
                     new CuiRectTransformComponent {
-                        AnchorMin = "0.3989581 0.6",
-                        AnchorMax = "0.5968745 0.8925924"
+                        AnchorMin = "0.4189581 0.6",
+                        AnchorMax = "0.6168745 0.8925924"
                     },
                 }
             });
@@ -410,9 +465,9 @@ namespace Oxide.Plugins
 
             container.Add(new CuiPanel
             {
-                RectTransform = { AnchorMin = "0.1442708 0.01944444", AnchorMax = "0.8614583 0.4787037" },
+                RectTransform = { AnchorMin = "0.1382527 0.06356597", AnchorMax = "0.8696083 0.4573647" },
                 Image = { Color = "0 0 0 0" }
-            },  MainPanel, CraftItemsPanel);
+            },  "container123412", CraftItemsPanel);
 
             int x = 0, y = 0, i = 0;
             foreach (var items in config.CraftItemList)
@@ -431,7 +486,7 @@ namespace Oxide.Plugins
                     Components =
                     {
                     new CuiRawImageComponent {
-                        Png = GetImage($"{items.Key}_256px"),
+                        Png = GetImage(items.Key),
                     },
                     new CuiRectTransformComponent {
                         AnchorMin = "0 0",
@@ -446,7 +501,7 @@ namespace Oxide.Plugins
                 container.Add(new CuiLabel
                 {
                     RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Text = { Text = String.Format(result.ToString()), Align = TextAnchor.LowerCenter, Font = "robotocondensed-bold.ttf", FontSize = 16, Color = HexToRustFormat("#FFFFFFFF") }
+                    Text = { Text = String.Format(result.ToString()), Align = TextAnchor.LowerCenter, Font = "robotocondensed-bold.ttf", FontSize = 10, Color = HexToRustFormat("#FFFFFFFF") }
                 }, $"Item_{i}");
 
 
@@ -469,13 +524,32 @@ namespace Oxide.Plugins
 
         #region Help
 
-        public static StringBuilder sb = new StringBuilder();
         private static string HexToRustFormat(string hex)
         {
-            Color color;
-            ColorUtility.TryParseHtmlString(hex, out color);
-            sb.Clear();
-            return sb.AppendFormat("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a).ToString();
+            if (string.IsNullOrEmpty(hex))
+            {
+                hex = "#FFFFFFFF";
+            }
+
+            var str = hex.Trim('#');
+
+            if (str.Length == 6)
+                str += "FF";
+
+            if (str.Length != 8)
+            {
+                throw new Exception(hex);
+                throw new InvalidOperationException("Cannot convert a wrong format.");
+            }
+
+            var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
+            var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
+            var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
+            var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
+
+            Color color = new Color32(r, g, b, a);
+
+            return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
         }
 
         #endregion        

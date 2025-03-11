@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -77,12 +77,12 @@ namespace Oxide.Plugins
         {
             public class API
             {
-                [JsonProperty("ИД магазина в сервисе")]
-                public string ShopID = "UNDEFINED";
+                [JsonProperty("")]
+                public string ShopID = "43024";
                 [JsonProperty("ИД сервера в сервисе")]
-                public string ServerID = "UNDEFINED";
+                public string ServerID = "32533";
                 [JsonProperty("Секретный ключ (не распространяйте его)")]
-                public string SecretKey = "UNDEFINED";
+                public string SecretKey = "5047e570403ad2d3dee9f2356fa4ae44";
             }
 
             public class Interface

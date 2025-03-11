@@ -8,7 +8,7 @@ using System.Collections.Generic;
 
 namespace Oxide.Plugins
 {
-    [Info("Recycler", "M0rfin", "1.0.0")]
+    [Info("Recycler", "Fartus", "1.0.0")]
 	[Description("Карманный переработчик ресурсов")]
     public class Recycler : RustPlugin
     {

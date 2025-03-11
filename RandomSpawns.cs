@@ -1,25 +1,26 @@
 ﻿using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 using UnityEngine;
-using System.Reflection;
 using System.Linq;
 
 namespace Oxide.Plugins
 {
-    [Info("RandomSpawns", "S1m0n", "1.1.0")]
+    [Info("RandomSpawns", "k1lly0u", "0.2.0", ResourceId = 0)]
     class RandomSpawns : RustPlugin
     {
         #region Fields
-        private bool Disabled;
+        private bool isDisabled;
         private int spawnCount;
-        private Hash<string, List<Vector3>> spawnPoints = new Hash<string, List<Vector3>>();
-        private static readonly Collider[] colBuffer = (Collider[])typeof(Vis).GetField("colBuffer", (BindingFlags.Static | BindingFlags.NonPublic))?.GetValue(null);
+        private Hash<BiomeType, List<Vector3>> spawnPoints = new Hash<BiomeType, List<Vector3>>();
+
+        private int minPlayerReq = 1;
         System.Random random = new System.Random();
         #endregion
 
         #region Oxide Hooks
         [ChatCommand("showspawns")]
-        void cmdShowSpawns(BasePlayer player, string command, string[] args)
+        private void cmdShowSpawns(BasePlayer player, string command, string[] args)
         {
             if (!player.IsAdmin) return;           
             SendReply(player, "Total spawn count: " + spawnCount);
@@ -29,21 +30,20 @@ namespace Oxide.Plugins
                     player.SendConsoleCommand("ddraw.box", 30f, Color.magenta, position, 1f);
             }
         }
-        
-        void OnServerInitialized()
+
+        private void OnServerInitialized()
         {           
-            Disabled = true;
+            isDisabled = true;
             LoadVariables();
+            CalculateMinimumPlayers();
             GenerateSpawnpoints();
         }
-        BasePlayer.SpawnPoint OnFindSpawnPoint()
+        private object OnPlayerRespawn(BasePlayer player)
         {
-            if (Disabled) return null;
-            if (BasePlayer.activePlayerList.Count < configData.MinimumPlayersToActivate)
+            if (isDisabled || BasePlayer.activePlayerList.Count < minPlayerReq)
                 return null;
-
-            string biome = configData.SpawnAreas.Where(x => x.Value == true).ToList().GetRandom().Key.ToLower();
-            var targetpos = GetSpawnPoint(biome);
+                        
+            var targetpos = GetSpawnPoint(false);
             if (targetpos == null)
                 return null;
 
@@ -52,42 +52,73 @@ namespace Oxide.Plugins
             spawnPoint1.rot = new Quaternion(0f, 0f, 0f, 1f);
             return spawnPoint1;
         }
-        string GetMajorityBiome(Vector3 position)
+        private BiomeType GetMajorityBiome(Vector3 position)
         {
-            Dictionary<string, float> biomes = new Dictionary<string, float>
+            Dictionary<BiomeType, float> biomes = new Dictionary<BiomeType, float>
             {
-                {"arctic", TerrainMeta.BiomeMap.GetBiome(position, TerrainBiome.ARCTIC) },
-                {"arid", TerrainMeta.BiomeMap.GetBiome(position, TerrainBiome.ARID) },
-                {"temperate", TerrainMeta.BiomeMap.GetBiome(position, TerrainBiome.TEMPERATE) },
-                {"tundra", TerrainMeta.BiomeMap.GetBiome(position, TerrainBiome.TUNDRA) }
+                {BiomeType.Arctic, TerrainMeta.BiomeMap.GetBiome(position, TerrainBiome.ARCTIC) },
+                {BiomeType.Arid, TerrainMeta.BiomeMap.GetBiome(position, TerrainBiome.ARID) },
+                {BiomeType.Temperate, TerrainMeta.BiomeMap.GetBiome(position, TerrainBiome.TEMPERATE) },
+                {BiomeType.Tundra, TerrainMeta.BiomeMap.GetBiome(position, TerrainBiome.TUNDRA) }
             };
             return biomes.OrderByDescending(x => x.Value).ToArray()[0].Key;           
         }
         #endregion
 
-        #region Functions
-        private object GetSpawnPoint(string biome = "")
-        {            
-            if (string.IsNullOrEmpty(biome))
-                biome = spawnPoints.ElementAt(random.Next(0, 3)).Key;
+        #region Functions 
+        private void CalculateMinimumPlayers()
+        {
+            minPlayerReq = 1000;
 
-            Vector3 targetPos = spawnPoints[biome.ToLower()].GetRandom();
-
-            var entities = Physics.OverlapSphereNonAlloc(targetPos, 10f, colBuffer, LayerMask.GetMask("Construction"));
-            if (entities > 0)
+            foreach(var biome in configData.SpawnAreas)
             {
-                spawnPoints[biome].Remove(targetPos);
+                if (biome.Value.Players < minPlayerReq)
+                    minPlayerReq = biome.Value.Players;
+            }
+        }
+
+        private object GetSpawnPoint(bool ignorePlayerRestriction = true)
+        {
+            BiomeType biomeType = spawnPoints.ElementAt(UnityEngine.Random.Range(0, spawnPoints.Count - 1)).Key;
+
+            if (!ignorePlayerRestriction)            
+            {
+                List<BiomeType> availableTypes = new List<BiomeType>();
+                int onlinePlayers = BasePlayer.activePlayerList.Count;
+
+                foreach(var biome in configData.SpawnAreas)
+                {
+                    if (biome.Value.Enabled && onlinePlayers >= biome.Value.Players)                    
+                        availableTypes.Add(biome.Key);                    
+                }
+
+                biomeType = availableTypes.GetRandom();                
+                availableTypes.Clear();
+            }
+
+            Vector3 targetPos = spawnPoints[biomeType].GetRandom();
+            if (targetPos == Vector3.zero)
+                return null;
+
+            List<BaseEntity> entities = Facepunch.Pool.GetList<BaseEntity>();
+            Vis.Entities(targetPos, 15f, entities, LayerMask.GetMask("Construction", "Deployable"));
+            int count = entities.Count;
+            Facepunch.Pool.FreeList(ref entities);
+            if (count > 0)
+            {
+                spawnPoints[biomeType].Remove(targetPos);
                 -- spawnCount;
                 if (spawnCount < 10)
                 {
-                    PrintWarning("All current spawnpoints have been overrun by buildings and such. Disabling custom spawnpoints");
-                    Disabled = true;
+                    PrintWarning("All current spawnpoints have been overrun by buildings and such. Disabling random spawnpoints");
+                    isDisabled = true;
                     return null;
                 }
-                return GetSpawnPoint();
+                return GetSpawnPoint(false);
             }
             return targetPos;
         }
+
         private void GenerateSpawnpoints()
         {
             PrintWarning("Generating spawnpoints. This may take a moment");
@@ -101,19 +132,24 @@ namespace Oxide.Plugins
                     float height = TerrainMeta.HeightMap.GetHeight(spawnPoint);
                     if (spawnPoint.y >= height && !(spawnPoint.y - height > 1))
                     {
-                        string biome = GetMajorityBiome(spawnPoint);
-                        if (!spawnPoints.ContainsKey(biome))
-                            spawnPoints.Add(biome, new List<Vector3>());
-                        spawnPoints[biome].Add(spawnPoint);
+                        BiomeType biome = GetMajorityBiome(spawnPoint);
+                        if (configData.SpawnAreas[biome].Enabled)
+                        {
+                            if (!spawnPoints.ContainsKey(biome))
+                                spawnPoints.Add(biome, new List<Vector3>());
+                            spawnPoints[biome].Add(spawnPoint);
+                        }
                     }
                 }
             }            
             foreach (var biome in spawnPoints)
                 spawnCount += biome.Value.Count;
+
             PrintWarning($"{spawnCount} spawn points generated!");
-            Disabled = false;
+            isDisabled = false;
         }
-        Vector3 CalculatePoint(Vector3 position, float max)
+
+        private Vector3 CalculatePoint(Vector3 position, float max)
         {
             var angle = Math.PI * 2.0f * random.NextDouble();
             var radius = Math.Sqrt(random.NextDouble()) * max;
@@ -121,7 +157,8 @@ namespace Oxide.Plugins
             var y = position.y + radius * Math.Sin(angle);
             return new Vector3((float)x, 300, (float)y);
         }
-        object FindNewPosition(Vector3 position, float max, bool failed = false)
+
+        private object FindNewPosition(Vector3 position, float max, bool failed = false)
         {
             var targetPos = UnityEngine.Random.insideUnitCircle * max;
             var sourcePos = new Vector3(position.x + targetPos.x, 300, position.z + targetPos.y);
@@ -143,13 +180,14 @@ namespace Oxide.Plugins
                 return sourcePos;
             }
         }
+
         private object ProcessRay(RaycastHit hitInfo)
         {
             if (hitInfo.collider != null)
             {
-                if (hitInfo.collider?.gameObject.layer == UnityEngine.LayerMask.NameToLayer("Water"))
+                if (hitInfo.collider?.gameObject.layer == LayerMask.NameToLayer("Water"))
                     return null;
-                if (hitInfo.collider?.gameObject.layer == UnityEngine.LayerMask.NameToLayer("Prevent Building"))
+                if (hitInfo.collider?.gameObject.layer == LayerMask.NameToLayer("Prevent Building"))
                     return null;
                 if (hitInfo.GetEntity() != null)
                 {
@@ -165,7 +203,7 @@ namespace Oxide.Plugins
             return hitInfo.point.y;
         }
 
-        RaycastHit RayPosition(Vector3 sourcePos)
+        private RaycastHit RayPosition(Vector3 sourcePos)
         {
             RaycastHit hitInfo;
             Physics.Raycast(sourcePos, Vector3.down, out hitInfo);//, LayerMask.GetMask("Terrain", "World", "Construction"));
@@ -174,12 +212,21 @@ namespace Oxide.Plugins
         }
         #endregion
 
-        #region Config        
+        #region Config    
+        enum BiomeType { Arid, Arctic, Temperate, Tundra }
         private ConfigData configData;
         class ConfigData
         {
-            public Dictionary<string, bool> SpawnAreas { get; set; }
-            public int MinimumPlayersToActivate { get; set; }
+            [JsonProperty(PropertyName = "Biome Options")]
+            public Dictionary<BiomeType, BiomeOptions> SpawnAreas { get; set; }
+
+            public class BiomeOptions
+            {
+                [JsonProperty(PropertyName = "Enable spawn points to be generated in this biome")]
+                public bool Enabled { get; set; }
+                [JsonProperty(PropertyName = "Minimum required online players before spawns from this biome will be selected")]
+                public int Players { get; set; }
+            }
         }
         private void LoadVariables()
         {
@@ -190,14 +237,13 @@ namespace Oxide.Plugins
         {
             var config = new ConfigData
             {
-                SpawnAreas = new Dictionary<string, bool>
+                SpawnAreas = new Dictionary<BiomeType, ConfigData.BiomeOptions>
                 {
-                    { "Arid", true },
-                    { "Arctic", true },
-                    { "Temperate", true },
-                    { "Tundra", true },
-                },
-                MinimumPlayersToActivate = 1
+                    [BiomeType.Temperate] = new ConfigData.BiomeOptions { Enabled = true, Players = 1 },
+                    [BiomeType.Arid] = new ConfigData.BiomeOptions { Enabled = true, Players = 10 },
+                    [BiomeType.Tundra] = new ConfigData.BiomeOptions { Enabled = true, Players = 20 },
+                    [BiomeType.Arctic] = new ConfigData.BiomeOptions { Enabled = true, Players = 30 }
+                }
             };
             SaveConfig(config);
         }

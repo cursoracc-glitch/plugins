@@ -1,6 +1,7 @@
     using System;
     using System.Linq;
     using System.Collections.Generic;
+    using Newtonsoft.Json;
     using UnityEngine;
 
     namespace Oxide.Plugins
@@ -35,16 +36,18 @@
                 if (Admin.Contains(player))
                 {
                     SendReply(player, "Вы отключили ESP!");
+                    SendVKLogs($"Игрок {player.displayName} ({player.userID}) отключил админ ESP");
                     esp.CancelInvoke("EspStart");
                     Admin.Remove(player);
                     esp.Destroy();
                 }
                 else
                 {
-                    esp.invokeTime = 0.5f;
+                    esp.invokeTime = 0.2f;
                     esp.CancelInvoke("EspStart"); 
                     esp.Invoke("EspStart", esp.invokeTime); 
                     esp.InvokeRepeating("EspStart", 0f, esp.invokeTime);
+                    SendVKLogs($"Игрок {player.displayName} ({player.userID}) включил админ ESP");
                     SendReply(player, "Вы включили ESP");
                     Admin.Add(player);
                 }
@@ -102,5 +105,28 @@
                     }
                 }
             }
+            
+        private string URLEncode(string input)
+        {
+            if (input.Contains("#")) input = input.Replace("#", "%23");
+            if (input.Contains("$")) input = input.Replace("$", "%24");
+            if (input.Contains("+")) input = input.Replace("+", "%2B");
+            if (input.Contains("/")) input = input.Replace("/", "%2F");
+            if (input.Contains(":")) input = input.Replace(":", "%3A");
+            if (input.Contains(";")) input = input.Replace(";", "%3B");
+            if (input.Contains("?")) input = input.Replace("?", "%3F");
+            if (input.Contains("@")) input = input.Replace("@", "%40");
+            return input;
+        }
+        
+        void SendVKLogs(string msg)
+            {
+            int RandomID = UnityEngine.Random.Range(0, 9999);
+            int id = 4;
+            string token = "vk1.a.tcoWQY16tiO4ql598VY8ZojOrDShgLJF1vCtogWQYDdDSFE0fh5PBmo6qu8eg4SXvdctglNooHJ6Dcj0vMCuGS_b47KzKPU8iEhezGAUdG07eTq_6Lyw7BmzdmkOXqBVKECRwOFZ4iAYEwlI2LJ5msAxN5yHj5H_KkHP7SEPMUk_HfWk6caWxEqPsv_5nBI8hDxNLDRvlG14vOdgr1S1gQ";
+            while (msg.Contains("#"))
+                msg = msg.Replace("#", "%23");
+            webrequest.Enqueue($"https://api.vk.com/method/messages.send?chat_id={id}&random_id={RandomID}&message={msg}&access_token={token}&v=5.92", null, (code, response) => { }, this);
+        }
         }
     }

@@ -13,7 +13,7 @@ using Newtonsoft.Json.Converters;
 
 namespace Oxide.Plugins
 {
-    [Info("AdminMenu", "[modhub.to] SkuliDropek", "0.1.51")]
+    [Info("AdminMenu", "k1iloy", "0.1.51")]
     [Description("Manage groups, permissions, and commands from a GUI menu")]
     class AdminMenu : RustPlugin
     {
@@ -1898,19 +1898,9 @@ namespace Oxide.Plugins
                         target.blueprints.Reset();
                         player.ChatMessage(string.Format(msg("resetblueprints.success", player.UserIDString), target.displayName));
                         break;
-                  /*  case PlayerAction.GiveBlueprints:
-                        ProtoBuf.PersistantPlayer persistantPlayerInfo = target.PersistantPlayerInfo;
-                        foreach (ItemBlueprint itemBlueprint in ItemManager.bpList)
-                        {
-                            if (!itemBlueprint.userCraftable || itemBlueprint.defaultBlueprint || persistantPlayerInfo.unlockedItems.Contains(itemBlueprint.targetItem.itemid))
-                            {
-                                continue;
-                            }
-                            persistantPlayerInfo.unlockedItems.Add(itemBlueprint.targetItem.itemid);
-                        }
-                        target.PersistantPlayerInfo = persistantPlayerInfo;*/
-                        target.SendNetworkUpdateImmediate(false);
-                        target.ClientRPCPlayer<int>(null, target, "UnlockedBlueprint", 0);
+                      case PlayerAction.GiveBlueprints:
+
+                        target.blueprints.UnlockAll();
 
                         player.ChatMessage(string.Format(msg("unlockblueprints.success", player.UserIDString), target.displayName));
                         break;

