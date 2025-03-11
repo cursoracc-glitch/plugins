@@ -14,7 +14,7 @@ using UnityEngine.Networking;
 
 namespace Oxide.Plugins
 {
-    [Info("Image Library", "Absolut & K1lly0u", "2.0.62")]
+    [Info("Image Library", "Sempai#3239", "2.0.54")]
     [Description("Plugin API for downloading and managing images")]
     class ImageLibrary : RustPlugin
     {
@@ -48,7 +48,6 @@ namespace Oxide.Plugins
         private void Loaded()
         {
             identifiers = Interface.Oxide.DataFileSystem.GetFile("ImageLibrary/image_data");
-            
             urls = Interface.Oxide.DataFileSystem.GetFile("ImageLibrary/image_urls");
             skininfo = Interface.Oxide.DataFileSystem.GetFile("ImageLibrary/skin_data");
 
@@ -74,7 +73,7 @@ namespace Oxide.Plugins
             foreach (BasePlayer player in BasePlayer.activePlayerList)
                 OnPlayerConnected(player);
         }
-    
+
         private void OnPlayerConnected(BasePlayer player) => GetPlayerAvatar(player?.UserIDString);
 
         private void Unload()
@@ -87,6 +86,7 @@ namespace Oxide.Plugins
         #endregion Oxide Hooks
 
         #region Functions
+
         private IEnumerator ProcessLoadOrders()
         {
             yield return new WaitWhile(() => !isInitialized);
@@ -146,11 +146,11 @@ namespace Oxide.Plugins
         private void RefreshImagery()
         {
             imageIdentifiers.imageIds.Clear();
-            imageIdentifiers.lastCEID = CommunityEntity.ServerInstance.net.ID.Value;
+            imageIdentifiers.lastCEID = CommunityEntity.ServerInstance.net.ID;
 
             AddImage("http://i.imgur.com/sZepiWv.png", "NONE", 0);
             AddImage("http://i.imgur.com/lydxb0u.png", "LOADING", 0);
-            foreach (KeyValuePair<string, string> image in configData.UserImages)
+            foreach (var image in configData.UserImages)
             {
                 if (!string.IsNullOrEmpty(image.Value))
                     AddImage(image.Value, image.Key, 0);
@@ -171,7 +171,7 @@ namespace Oxide.Plugins
 
             isInitialized = true;
 
-            if (imageIdentifiers.lastCEID != CommunityEntity.ServerInstance.net.ID.Value)
+            if (imageIdentifiers.lastCEID != CommunityEntity.ServerInstance.net.ID)
             {
                 if (imageIdentifiers.imageIds.Count < 2)
                 {
@@ -188,59 +188,40 @@ namespace Oxide.Plugins
         private void RestoreLoadedImages()
         {
             orderPending = true;
+            int failed = 0;
 
+            Dictionary<string, byte[]> oldFiles = new Dictionary<string, byte[]>();
+
+            for (int i = imageIdentifiers.imageIds.Count - 1; i >= 0; i--)
+            {
+                var image = imageIdentifiers.imageIds.ElementAt(i);
+
+                uint imageId;
+                if (!uint.TryParse(image.Value, out imageId))
+                    continue;
+
+                byte[] bytes = FileStorage.server.Get(imageId, FileStorage.Type.png, imageIdentifiers.lastCEID);
+                if (bytes != null)
+                    oldFiles.Add(image.Key, bytes);
+                else
+                {
+                    failed++;
+                    imageIdentifiers.imageIds.Remove(image.Key);
+                }
+            }
+
+            Facepunch.Sqlite.Database db = new Facepunch.Sqlite.Database();
             try
             {
-                Facepunch.Sqlite.Database db = new Facepunch.Sqlite.Database();
-                db.Open(string.Concat(ConVar.Server.rootFolder, "/", "sv.files.", Rust.Protocol.save - 1, ".db"));                
-                if (db.TableExists("data"))
-                {
-                    Dictionary<string, byte[]> oldFiles = new Dictionary<string, byte[]>();
-                    int failed = 0;
-
-                    for (int i = imageIdentifiers.imageIds.Count - 1; i >= 0; i--)
-                    {
-                        KeyValuePair<string, string> image = imageIdentifiers.imageIds.ElementAt(i);
-
-                        uint imageId;
-                        if (!uint.TryParse(image.Value, out imageId))
-                            continue;
-
-                        byte[] bytes = db.Query<byte[], int, int, int>("SELECT data FROM data WHERE crc = ? AND filetype = ? AND entid = ? LIMIT 1", (int)imageId, 0, (int)imageIdentifiers.lastCEID );
-                        if (bytes != null)
-                            oldFiles.Add(image.Key, bytes);
-                        else
-                        {
-                            failed++;
-                            imageIdentifiers.imageIds.Remove(image.Key);
-                        }
-                    }
-
-                    if (oldFiles.Count > 0)
-                    {
-                        loadOrders.Enqueue(new LoadOrder("Image restoration from previous database", oldFiles));
-                        PrintWarning($"{imageIdentifiers.imageIds.Count - failed} images queued for restoration from previous image db, {failed} images failed");
-                    }
-
-                }
+                db.Open($"{ConVar.Server.rootFolder}/sv.files.0.db");
+                db.Execute("DELETE FROM data WHERE entid = ?", imageIdentifiers.lastCEID);
                 db.Close();
             }
-            catch
-            {
-                PrintError("Failed to open previous image database. Unable to clone previous image data");
-            }
-            //Facepunch.Sqlite.Database db = new Facepunch.Sqlite.Database();
-            //try
-            //{
-            //    db.Open($"{ConVar.Server.rootFolder}/sv.files.0.db");
-            //    db.Execute("DELETE FROM data WHERE entid = ?", imageIdentifiers.lastCEID);
-            //    db.Close();
-            //}
-            //catch { }
+            catch { }
 
-            //loadOrders.Enqueue(new LoadOrder("Image restoration from previous database", oldFiles));
-            //PrintWarning($"{imageIdentifiers.imageIds.Count - failed} images queued for restoration, {failed} images failed");
-            imageIdentifiers.lastCEID = CommunityEntity.ServerInstance.net.ID.Value;
+            loadOrders.Enqueue(new LoadOrder("Image restoration from previous database", oldFiles));
+            PrintWarning($"{imageIdentifiers.imageIds.Count - failed} images queued for restoration, {failed} images failed");
+            imageIdentifiers.lastCEID = CommunityEntity.ServerInstance.net.ID;
             SaveData();
 
             orderPending = false;
@@ -250,56 +231,16 @@ namespace Oxide.Plugins
         #endregion Functions
 
         #region Workshop Names and Image URLs
+
         private void AddDefaultUrls()
         {
             foreach (ItemDefinition itemDefinition in ItemManager.itemList)
             {
                 string identifier = $"{itemDefinition.shortname}_0";
                 if (!imageUrls.URLs.ContainsKey(identifier))
-                    imageUrls.URLs.Add(identifier, $"{configData.ImageURL}{itemDefinition.shortname}.png");
-                else imageUrls.URLs[identifier] = $"{configData.ImageURL}{itemDefinition.shortname}.png";
+                    imageUrls.URLs.Add(identifier, $"https://www.rustedit.io/images/imagelibrary/{itemDefinition.shortname}.png");
             }
-            
             SaveUrls();
-
-            LoadInbuiltSkinLookup();
-        }
-
-        private void LoadInbuiltSkinLookup()
-        {
-            const string LOOKUP_TABLE = "https://raw.githubusercontent.com/k1lly0u/Oxide/master/il_inbuilt_skins.json";
-
-            try
-            {
-                Debug.Log("Loading inbuilt skin manifest from GitHub...");
-                webrequest.Enqueue(LOOKUP_TABLE, string.Empty, (int code, string response) =>
-                {
-                    Dictionary<string, string> collection = JsonConvert.DeserializeObject<Dictionary<string, string>>(response);
-
-                    foreach (ItemSkinDirectory.Skin skin in ItemSkinDirectory.Instance.skins)
-                    {
-                        if (skin.invItem == null || string.IsNullOrEmpty(skin.invItem.itemname))
-                            continue;
-
-                        string filename;
-                        if (collection.TryGetValue(skin.name, out filename))
-                        {
-                            string identifier = $"{skin.invItem.itemname}_{skin.id}";
-
-                            if (!imageUrls.URLs.ContainsKey(identifier))
-                                imageUrls.URLs.Add(identifier, $"{configData.ImageURL}{filename}.png");
-                            else imageUrls.URLs[identifier] = $"{configData.ImageURL}{filename}.png";
-                        }
-                    }
-
-                    Debug.Log("Skin manifest imported successfully");
-                    SaveUrls();
-                }, this);
-            }
-            catch
-            {
-                Debug.LogError("Failed to download inbuilt skin manifest from GitHub. Unable to gather inbuilt skin list");
-            }
         }
 
         private readonly Dictionary<string, string> workshopNameToShortname = new Dictionary<string, string>
@@ -398,10 +339,10 @@ namespace Oxide.Plugins
         public List<ulong> GetImageList(string name)
         {
             List<ulong> skinIds = new List<ulong>();
-            string[] matches = imageUrls.URLs.Keys.Where(x => x.StartsWith(name)).ToArray();
+            var matches = imageUrls.URLs.Keys.Where(x => x.StartsWith(name)).ToArray();
             for (int i = 0; i < matches.Length; i++)
             {
-                int index = matches[i].IndexOf("_");
+                var index = matches[i].IndexOf("_");
                 if (matches[i].Substring(0, index) == name)
                 {
                     ulong skinID;
@@ -424,11 +365,8 @@ namespace Oxide.Plugins
         [HookMethod("HasImage")]
         public bool HasImage(string imageName, ulong imageId)
         {
-            string key = $"{imageName}_{imageId}";
-            string value;
-
-            if (imageIdentifiers.imageIds.TryGetValue(key, out value) && IsInStorage(uint.Parse(value)))            
-                return true;            
+            if (imageIdentifiers.imageIds.ContainsKey($"{imageName}_{imageId}") && IsInStorage(uint.Parse(imageIdentifiers.imageIds[$"{imageName}_{imageId}"])))
+                return true;
 
             return false;
         }
@@ -442,7 +380,7 @@ namespace Oxide.Plugins
         public void ImportImageList(string title, Dictionary<string, string> imageList, ulong imageId = 0, bool replace = false, Action callback = null)
         {
             Dictionary<string, string> newLoadOrder = new Dictionary<string, string>();
-            foreach (KeyValuePair<string, string> image in imageList)
+            foreach (var image in imageList)
             {
                 if (!replace && HasImage(image.Key, imageId))
                     continue;
@@ -465,9 +403,9 @@ namespace Oxide.Plugins
         public void ImportItemList(string title, Dictionary<string, Dictionary<ulong, string>> itemList, bool replace = false, Action callback = null)
         {
             Dictionary<string, string> newLoadOrder = new Dictionary<string, string>();
-            foreach (KeyValuePair<string, Dictionary<ulong, string>> image in itemList)
+            foreach (var image in itemList)
             {
-                foreach (KeyValuePair<ulong, string> skin in image.Value)
+                foreach (var skin in image.Value)
                 {
                     if (!replace && HasImage(image.Key, skin.Key))
                         continue;
@@ -491,7 +429,7 @@ namespace Oxide.Plugins
         public void ImportImageData(string title, Dictionary<string, byte[]> imageList, ulong imageId = 0, bool replace = false, Action callback = null)
         {
             Dictionary<string, byte[]> newLoadOrder = new Dictionary<string, byte[]>();
-            foreach (KeyValuePair<string, byte[]> image in imageList)
+            foreach (var image in imageList)
             {
                 if (!replace && HasImage(image.Key, imageId))
                     continue;
@@ -518,7 +456,7 @@ namespace Oxide.Plugins
 
             foreach (KeyValuePair<string, ulong> image in imageList)
             {
-                if (HasImage(image.Key, image.Value))                
+                if (HasImage(image.Key, image.Value))
                     continue;
 
                 string identifier = $"{image.Key}_{image.Value}";
@@ -614,20 +552,20 @@ namespace Oxide.Plugins
         }
 
         private string BuildDetailsString(List<ulong> list, int page)
-        {            
-            int totalPages = Mathf.CeilToInt((float)list.Count / 100f);
-            int index = page * 100;
-            int limit = Mathf.Min((page + 1) * 100, list.Count);
-            string details = string.Format("?key={0}&itemcount={1}", configData.SteamAPIKey, (limit - index));
+        {
+            int start = page * 100;
+            int end = start + 100 > list.Count ? list.Count : start + 100;
 
-            for (int i = index; i < limit; i++)            
-                details += string.Format("&publishedfileids[{0}]={1}", i - index, list[i]);
-            
+            string details = string.Format("?key={0}&itemcount={1}", configData.SteamAPIKey, end - start);
+
+            for (int i = start; i < end; i++)
+                details += string.Format("&publishedfileids[{0}]={1}", i - start, list[i]);
+
             return details;
         }
 
         private string BuildDetailsString(List<ulong> list)
-        {            
+        {
             string details = string.Format("?key={0}&itemcount={1}", configData.SteamAPIKey, list.Count);
 
             for (int i = 0; i < list.Count; i++)
@@ -636,7 +574,7 @@ namespace Oxide.Plugins
             return details;
         }
 
-        private bool IsValid(PublishedFileDetails item)
+        private bool IsValid(PublishedFileQueryDetail item)
         {
             if (string.IsNullOrEmpty(item.preview_url))
                 return false;
@@ -656,17 +594,17 @@ namespace Oxide.Plugins
             GetApprovedItemSkins(BuildApprovedItemList(), 0);
         }
 
-        private void QueueFileQueryRequest(string details, Action<PublishedFileDetails[]> callback)
+        private void QueueFileQueryRequest(string details, Action<PublishedFileQueryDetail[]> callback)
         {
             webrequest.Enqueue(STEAM_API_URL, details, (code, response) =>
             {
                 try
                 {
-                    QueryResponse query = JsonConvert.DeserializeObject<QueryResponse>(response, errorHandling);
+                    PublishedFileQueryResponse query = JsonConvert.DeserializeObject<PublishedFileQueryResponse>(response, errorHandling);
                     if (query == null || query.response == null || query.response.publishedfiledetails.Length == 0)
                     {
                         if (code != 200)
-                            PrintError($"There was a error querying Steam for workshop item data : Code ({code})\n{details}");
+                            PrintError($"There was a error querying Steam for workshop item data : Code ({code})");
                         return;
                     }
                     else
@@ -697,24 +635,24 @@ namespace Oxide.Plugins
 
             string details = BuildDetailsString(itemsToDownload, page);
 
-            QueueFileQueryRequest(details, (PublishedFileDetails[] items) =>
+            QueueFileQueryRequest(details, (PublishedFileQueryDetail[] items) =>
             {
                 ServerMgr.Instance.StartCoroutine(ProcessApprovedBlock(itemsToDownload, items, page, totalPages));
             });
         }
 
-        private IEnumerator ProcessApprovedBlock(List<ulong> itemsToDownload, PublishedFileDetails[] items, int page, int totalPages)
+        private IEnumerator ProcessApprovedBlock(List<ulong> itemsToDownload, PublishedFileQueryDetail[] items, int page, int totalPages)
         {
             PrintWarning($"Processing approved skins; Page {page + 1}/{totalPages + 1}");
 
             Dictionary<string, Dictionary<ulong, string>> loadOrder = new Dictionary<string, Dictionary<ulong, string>>();
 
-            foreach (PublishedFileDetails item in items)
+            foreach (PublishedFileQueryDetail item in items)
             {
                 if (!IsValid(item))
                     continue;
 
-                foreach (PublishedFileDetails.Tag tag in item.tags)
+                foreach (PublishedFileQueryDetail.Tag tag in item.tags)
                 {
                     if (string.IsNullOrEmpty(tag.tag))
                         continue;
@@ -736,7 +674,7 @@ namespace Oxide.Plugins
                                     {"title", item.title },
                                     {"votesup", 0 },
                                     {"votesdown", 0 },
-                                    {"description", item.file_description },
+                                    {"description", item.description },
                                     {"score", 0 },
                                     {"views", 0 },
                                     {"created", new DateTime() },
@@ -782,7 +720,7 @@ namespace Oxide.Plugins
             {
                 webrequest.Enqueue(STEAM_API_URL, details, (code, response) =>
                 {
-                    QueryResponse query = JsonConvert.DeserializeObject<QueryResponse>(response, errorHandling);
+                    PublishedFileQueryResponse query = JsonConvert.DeserializeObject<PublishedFileQueryResponse>(response, errorHandling);
                     if (query == null || query.response == null || query.response.publishedfiledetails.Length == 0)
                     {
                         if (code != 200)
@@ -812,7 +750,7 @@ namespace Oxide.Plugins
                         {
                             Dictionary<string, Dictionary<ulong, string>> loadOrder = new Dictionary<string, Dictionary<ulong, string>>();
 
-                            foreach (PublishedFileDetails item in query.response.publishedfiledetails)
+                            foreach (PublishedFileQueryDetail item in query.response.publishedfiledetails)
                             {
                                 if (!string.IsNullOrEmpty(item.preview_url))
                                 {
@@ -835,7 +773,7 @@ namespace Oxide.Plugins
                                             {"title", item.title },
                                             {"votesup",  0 },
                                             {"votesdown", 0 },
-                                            {"description", item.file_description },
+                                            {"description", item.description },
                                             {"score", 0 },
                                             {"views", item.views },
                                             {"created", new DateTime(item.time_created) },
@@ -880,85 +818,47 @@ namespace Oxide.Plugins
         }
 
         #region JSON Response Classes
-        public class QueryResponse
+        public class PublishedFileQueryResponse
         {
-            public Response response;
+            public FileResponse response { get; set; }
         }
 
-        public class Response
+        public class FileResponse
         {
-            public int total;
-            public PublishedFileDetails[] publishedfiledetails;
+            public int result { get; set; }
+            public int resultcount { get; set; }
+            public PublishedFileQueryDetail[] publishedfiledetails { get; set; }
         }
 
-        public class PublishedFileDetails
+        public class PublishedFileQueryDetail
         {
-            public int result;
-            public string publishedfileid;
-            public string creator;
-            public int creator_appid;
-            public int consumer_appid;
-            public int consumer_shortcutid;
-            public string filename;
-            public string file_size;
-            public string preview_file_size;
-            public string file_url;
-            public string preview_url;
-            public string url;
-            public string hcontent_file;
-            public string hcontent_preview;
-            public string title;
-            public string file_description;
-            public int time_created;
-            public int time_updated;
-            public int visibility;
-            public int flags;
-            public bool workshop_file;
-            public bool workshop_accepted;
-            public bool show_subscribe_all;
-            public int num_comments_public;
-            public bool banned;
-            public string ban_reason;
-            public string banner;
-            public bool can_be_deleted;
-            public string app_name;
-            public int file_type;
-            public bool can_subscribe;
-            public int subscriptions;
-            public int favorited;
-            public int followers;
-            public int lifetime_subscriptions;
-            public int lifetime_favorited;
-            public int lifetime_followers;
-            public string lifetime_playtime;
-            public string lifetime_playtime_sessions;
-            public int views;
-            public int num_children;
-            public int num_reports;
-            public Preview[] previews;
-            public Tag[] tags;
-            public int language;
-            public bool maybe_inappropriate_sex;
-            public bool maybe_inappropriate_violence;
+            public string publishedfileid { get; set; }
+            public int result { get; set; }
+            public string creator { get; set; }
+            public int creator_app_id { get; set; }
+            public int consumer_app_id { get; set; }
+            public string filename { get; set; }
+            public int file_size { get; set; }
+            public string preview_url { get; set; }
+            public string hcontent_preview { get; set; }
+            public string title { get; set; }
+            public string description { get; set; }
+            public int time_created { get; set; }
+            public int time_updated { get; set; }
+            public int visibility { get; set; }
+            public int banned { get; set; }
+            public string ban_reason { get; set; }
+            public int subscriptions { get; set; }
+            public int favorited { get; set; }
+            public int lifetime_subscriptions { get; set; }
+            public int lifetime_favorited { get; set; }
+            public int views { get; set; }
+            public Tag[] tags { get; set; }
 
             public class Tag
             {
-                public string tag;
-                public bool adminonly;
+                public string tag { get; set; }
             }
-
-        }
-
-        public class Preview
-        {
-            public string previewid;
-            public int sortorder;
-            public string url;
-            public int size;
-            public string filename;
-            public int preview_type;
-            public string youtubevideoid;
-            public string external_reference;
         }
         #endregion
         #endregion
@@ -1130,10 +1030,10 @@ namespace Oxide.Plugins
                 }
                 if (il.configData.ShowProgress && listCount > 1)
                 {
-                    float time = UnityEngine.Time.time;
+                    var time = UnityEngine.Time.time;
                     if (time > nextUpdate)
                     {
-                        int amountDone = listCount - queueList.Count;
+                        var amountDone = listCount - queueList.Count;
                         print($"{request} storage process at {Math.Round((amountDone / (float)listCount) * 100, 0)}% ({amountDone}/{listCount})");
                         nextUpdate = time + il.configData.UpdateInterval;
                     }
@@ -1161,26 +1061,13 @@ namespace Oxide.Plugins
                     yield break;
                 }
 
-                if (www?.downloadHandler?.data != null)
+                Texture2D texture = new Texture2D(2, 2);
+                texture.LoadImage(www.downloadHandler.data);
+                if (texture != null)
                 {
-                    Texture2D texture = new Texture2D(2, 2);
-                    texture.LoadImage(www.downloadHandler.data);
-                    if (texture != null)
-                    {
-                        bool shouldStore = true;
-                        byte[] bytes = texture.EncodeToPNG();
-
-                        if (bytes.Length > 3145728)
-                        {
-                            Debug.Log($"[ImageLibrary] Failed to store image data for image : {info.name} for equest {request}\nURL: {info.url}\n{bytes.Length} bytes is larger then the allowed transferable size of 3145728 bytes");
-                            shouldStore = false;
-                        }
-
-                        DestroyImmediate(texture);
-
-                        if (shouldStore)
-                            StoreByteArray(bytes, info.name);
-                    }
+                    byte[] bytes = texture.EncodeToPNG();
+                    DestroyImmediate(texture);
+                    StoreByteArray(bytes, info.name);
                 }
                 www.Dispose();
             }
@@ -1221,15 +1108,15 @@ namespace Oxide.Plugins
             [JsonProperty(PropertyName = "Steam API key (get one here https://steamcommunity.com/dev/apikey)")]
             public string SteamAPIKey { get; set; }
 
-            [JsonProperty(PropertyName = "URL to web folder containing all item icons")]
-            public string ImageURL { get; set; }
+            //[JsonProperty(PropertyName = "Workshop - Download workshop image information")]
+            //public bool WorkshopImages { get; set; }
 
             [JsonProperty(PropertyName = "Progress - Show download progress in console")]
             public bool ShowProgress { get; set; }
 
             [JsonProperty(PropertyName = "Progress - Time between update notifications")]
             public int UpdateInterval { get; set; }
-            
+
             [JsonProperty(PropertyName = "User Images - Manually define images to be loaded")]
             public Dictionary<string, string> UserImages { get; set; }
 
@@ -1257,7 +1144,6 @@ namespace Oxide.Plugins
                 SteamAPIKey = string.Empty,
                 StoreAvatars = false,
                 UpdateInterval = 20,
-                ImageURL = "https://www.rustedit.io/images/imagelibrary/",
                 UserImages = new Dictionary<string, string>(),
                 Version = Version
             };
@@ -1277,9 +1163,6 @@ namespace Oxide.Plugins
             if (configData.Version < new VersionNumber(2, 0, 53))
                 configData.StoreAvatars = false;
 
-            if (configData.Version < new VersionNumber(2, 0, 55))
-                configData.ImageURL = baseConfig.ImageURL;
-
             configData.Version = Version;
             PrintWarning("Config update completed!");
         }
@@ -1289,9 +1172,7 @@ namespace Oxide.Plugins
         #region Data Management
 
         private void SaveData() => identifiers.WriteObject(imageIdentifiers);
-
         private void SaveSkinInfo() => skininfo.WriteObject(skinInformation);
-
         private void SaveUrls() => urls.WriteObject(imageUrls);
 
         private void LoadData()
@@ -1330,7 +1211,7 @@ namespace Oxide.Plugins
 
         private class ImageIdentifiers
         {
-            public ulong lastCEID;
+            public uint lastCEID;
             public Hash<string, string> imageIds = new Hash<string, string>();
         }
 

@@ -11,7 +11,7 @@ using Newtonsoft.Json;
 
 namespace Oxide.Plugins
 {
-    [Info("BHelp", "King", "1.0.0")]
+    [Info("BHelp", "https://devplugins.ru/", "1.0.0")]
     public class BHelp : RustPlugin
     {
         #region [Vars]
@@ -23,6 +23,11 @@ namespace Oxide.Plugins
         #region [Oxide]
 	    private void OnServerInitialized()
 	    {
+            PrintWarning("\n-----------------------------\n" +
+            "     Author - https://devplugins.ru/\n" +
+            "     VK - https://vk.com/dev.plugin\n" +
+            "     Discord - https://discord.gg/eHXBY8hyUJ\n" +
+            "-----------------------------");
             cmd.AddChatCommand("help", this, "MainUI");
             foreach (var key in config._SettingsHelp)
 				Buttons.Add(key.Key, key.Value._Name);
@@ -217,7 +222,7 @@ namespace Oxide.Plugins
                     container.Add(new CuiPanel
                     {
                         RectTransform = { AnchorMin = $"0 0", AnchorMax = $"0.99 0.03" },
-                        Image = { Color = "1.000 0.871 0.353 1" }
+                        Image = { Color = "0.00 0.84 0.47 1.00" }
                     }, Layer + ".Menu" + $".Button{y}");
                 }
 

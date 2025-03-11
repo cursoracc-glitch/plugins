@@ -5,9 +5,13 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using UnityEngine;
+
+///Скачано с дискорд сервера Rust Edit [PRO+]
+///discord.gg/9vyTXsJyKR
+
 namespace Oxide.Plugins
 {
-    [Info("AdminESP", "OxideBro / Fixed by Drop Dead", "0.0.12")]
+    [Info("AdminESP", "discord.gg/9vyTXsJyKR", "0.0.11")]
     public class AdminESP : RustPlugin
     {
         static Dictionary<ulong, PlayerSetting> PlayerSettings = new Dictionary<ulong, PlayerSetting>();
@@ -58,7 +62,7 @@ namespace Oxide.Plugins
             if (player == null) return;
             if (!permission.UserHasPermission(player.UserIDString, AdminPermission))
                 return;
-            var type = args.Args[0];
+                var type = args.Args[0];
             var value = args.Args[1];
 
             if (PlayerSettings.ContainsKey(player.userID))
@@ -67,17 +71,17 @@ namespace Oxide.Plugins
                 switch (type)
                 {
                     case "updatetime":
-                        if (float.Parse(value) > 0.3f && float.Parse(value) < 15)
+                        if (float.Parse(value) > 0.1f && float.Parse(value) < 15)
                             data.UpdateTime = float.Parse(value);
-                        if (float.Parse(value) > 0.3f && float.Parse(value) < 15)
+                        if (float.Parse(value) > 0.1f && float.Parse(value) < 15)
                             SendReply(player, $"Время обновления изменено до {data.UpdateTime} с.");
                         CrateMainMenu(player);
 
                         break;
                     case "playerdistance":
-                        if (int.Parse(value) >= 50 && int.Parse(value) <= 300)
+                        if (int.Parse(value) >= 50 && int.Parse(value) <= 1000)
                             data.PlayerDistance = int.Parse(value);
-                        if (int.Parse(value) >= 50 && int.Parse(value) <= 300)
+                        if (int.Parse(value) >= 50 && int.Parse(value) <= 1000)
                             SendReply(player, $"Дистанция видимости измнена до {data.PlayerDistance} м.");
                         CrateMainMenu(player);
 
@@ -223,7 +227,7 @@ namespace Oxide.Plugins
                         data.EyeLineDistance = int.Parse(args[2]);
                         SendReply(player, $"Длина линии взгляда игроков изменено на {data.EyeLineDistance}");
                         break;
-
+                   
                 }
 
             }
@@ -247,7 +251,7 @@ namespace Oxide.Plugins
         void OnPlayerConnected(BasePlayer player)
         {
             if (player == null) return;
-            if (player.HasPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot))
+             if (player.HasPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot))
             {
                 timer.In(1f, () => OnPlayerConnected(player));
                 return;
@@ -300,7 +304,7 @@ namespace Oxide.Plugins
             {
                 Image =
                 {
-                    Color = "1 1 1 0.0"
+                    Color = "1 1 1 0.2"
                 },
                 RectTransform =
                 {
@@ -791,21 +795,7 @@ namespace Oxide.Plugins
                     {
                         if (target == null || target.transform == null || target == player)
                             continue;
-
                         var currDistance = Math.Floor(Vector3.Distance(target.transform.position, player.transform.position));
-                        var targetSteamID = target.UserIDString;
-
-
-                        var steamIDsToHide = new List<string>
-            {
-                "76561199383783113"
-
-            };
-
-
-                        if (steamIDsToHide.Contains(targetSteamID))
-                            continue;
-
                         if (target.IsAdmin && !data.ShowAdmins) continue;
                         if (currDistance > data.PlayerDistance)
                             continue;
@@ -817,6 +807,7 @@ namespace Oxide.Plugins
                                 DDraw("box", target);
                             if (data.DrawEyeLine)
                                 DDraw("line", target);
+                           
                         }
                     }
                 }
@@ -828,49 +819,24 @@ namespace Oxide.Plugins
                 {
                     case "text":
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, true);
-
-                        Color espColor = GetEspColor(data.Enabled, target.UserIDString);
-                        player.SendConsoleCommand("ddraw.text", data.UpdateTime + Time.deltaTime, espColor, target.eyes.position + new Vector3(0, 0.4f, 0), messages);
-
+                            player.SendConsoleCommand("ddraw.text", data.UpdateTime + Time.deltaTime, Color.white, target.eyes.position + new Vector3(0, 0.4f, 0), messages);
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, false);
                         break;
                     case "box":
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, true);
-                        player.SendConsoleCommand("ddraw.box", data.UpdateTime + Time.deltaTime, Color.green, target.transform.position + new Vector3(0f, 1f, 0f), target.GetHeight(target.modelState.ducked));
+                        player.SendConsoleCommand("ddraw.box", data.UpdateTime + Time.deltaTime, Color.white, target.transform.position + new Vector3(0f, 1f, 0f), target.GetHeight(target.modelState.ducked));
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, false);
 
                         break;
                     case "line":
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, true);
-                        player.SendConsoleCommand("ddraw.line", data.UpdateTime + Time.deltaTime, Color.green, target.eyes.position, target.eyes.position + target.eyes.HeadRay().direction * data.EyeLineDistance);
+                        player.SendConsoleCommand("ddraw.line", data.UpdateTime + Time.deltaTime, Color.white, target.eyes.position, target.eyes.position + target.eyes.HeadRay().direction * data.EyeLineDistance);
                         if (player.Connection.authLevel < 2) SetPlayerFlag(player, BasePlayer.PlayerFlags.IsAdmin, false);
 
                         break;
 
                 }
 
-            }
-            Color GetEspColor(bool isEspEnabled, string targetSteamID)
-            {
-                if (isEspEnabled)
-                {
-
-                    ulong targetSteamID_Ulong = ulong.Parse(targetSteamID);
-
-
-                    if (PlayerSettings.TryGetValue(targetSteamID_Ulong, out var targetSettings) && targetSettings.Enabled)
-                    {
-                        return Color.red;
-                    }
-                    else
-                    {
-                        return Color.green;
-                    }
-                }
-                else
-                {
-                    return Color.green;
-                }
             }
 
             void SetPlayerFlag(BasePlayer player, BasePlayer.PlayerFlags f, bool b)
@@ -987,4 +953,4 @@ namespace Oxide.Plugins
             return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
         }
     }
-}
+}                                                                                                      
