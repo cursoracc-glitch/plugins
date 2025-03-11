@@ -1,0 +1,116 @@
+﻿using System.Collections.Generic;
+using Oxide.Core.Plugins;
+using Newtonsoft.Json;
+
+namespace Oxide.Plugins
+{
+    [Info("NeverWear", "k1lly0u", "0.1.5")]
+    class NeverWear : RustPlugin
+    {
+        [PluginReference] Plugin MachiningTools;
+
+		void Loaded() => RegisterPermissions();
+        void OnServerInitialized() => LoadVariables();
+
+		private void RegisterPermissions()
+        {
+            permission.RegisterPermission("neverwear.use", this);
+            permission.RegisterPermission("neverwear.attire", this);
+            permission.RegisterPermission("neverwear.weapons", this);
+            permission.RegisterPermission("neverwear.tools", this);
+        }
+
+        private bool HasPerm(BasePlayer player, string perm)
+        {
+            if (permission.UserHasPermission(player.UserIDString, perm)) return true;
+            return false;
+        }
+
+		private bool IsNeverWear(Item item)
+        {
+            var check = MachiningTools?.Call("IsMachiningToolItem", item);
+            if (check != null && (bool)check) return true;
+            return false;
+        }
+
+        void OnLoseCondition(Item item, ref float amount)
+        {
+            if (item != null)
+            {
+                if (IsNeverWear(item))
+					return;
+
+				BasePlayer player;
+
+				if (item.GetOwnerPlayer() == null)
+                {
+                    if (item?.info == null)
+						return;
+
+                    if (!item.info.shortname.Contains("mod"))
+						return;
+
+                    player = item?.GetRootContainer()?.GetOwnerPlayer();
+                    if (player == null)
+                        return;
+                }
+                else
+					player = item.GetOwnerPlayer();
+                    if (player != null)
+                    {
+                        var def = ItemManager.FindItemDefinition(item.info.itemid);
+                        if ((configData.useWhiteList && configData.WhitelistedItems.Contains(def.shortname) && HasPerm(player, "neverwear.use"))
+                            || (def.category == ItemCategory.Weapon && configData.useWeapons && HasPerm(player, "neverwear.weapons"))
+                            || (def.category == ItemCategory.Attire && configData.useAttire && HasPerm(player, "neverwear.attire"))
+                            || (def.category == ItemCategory.Tool && configData.useTools && HasPerm(player, "neverwear.tools")))
+                            if (item.hasCondition)
+                                item.RepairCondition(amount);
+                    }
+            }          
+            return;
+        }
+
+        #region Config        
+
+		private ConfigData configData;
+
+		class ConfigData
+        {
+            public bool useWeapons { get; set; }
+            public bool useTools { get; set; }            
+            public bool useAttire { get; set; }
+            public bool useWhiteList { get; set; }
+            public List<string> WhitelistedItems { get; set; }
+        }
+
+        private void LoadVariables()
+        {
+            LoadConfigVariables();
+            SaveConfig();
+        }
+
+        protected override void LoadDefaultConfig()
+        {
+            var config = new ConfigData
+            {
+                useTools = true,
+                useAttire = false,
+                useWeapons = false,
+                useWhiteList = false,
+                WhitelistedItems = new List<string>
+                {
+                    "hatchet",
+                    "pickaxe",
+                    "rifle.bolt",
+                    "rifle.ak"
+                }
+            };
+            SaveConfig(config);
+        }
+
+        private void LoadConfigVariables() => configData = Config.ReadObject<ConfigData>();
+		void SaveConfig(ConfigData config) => Config.WriteObject(config, true);
+
+		#endregion
+    }
+}
