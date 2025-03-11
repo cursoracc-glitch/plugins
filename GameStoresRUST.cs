@@ -14,7 +14,7 @@ using WebSocketSharp;
 
 namespace Oxide.Plugins
 {
-    [Info("GameStoresRUST", "HOUGAN & Sstine & rostov114 # GAMESTORES", "0.4.1")]
+    [Info("GameStoresRUST", "cherrymx", "5.0.0")]
     public class GameStoresRUST : RustPlugin
     {
         #region References
@@ -268,7 +268,7 @@ namespace Oxide.Plugins
                 { "REQUEST.PROCESSING", "Подождите, мы обрабатываем ваш запрос..." },
                 { "BASKET.UNAVAILABLE", "Корзина временно недоступна, попробуйте позже" },
                 { "BASKET.NO.AUTH", "Вы не авторизованы в магазине!\n" +
-                                    "Ссылку на авторизацию вы можете найти в разделе 'ПОМОЩЬ'" },
+                                    "Для начала вам необходимо войти в магазин с помощью STEAM аккаунта." },
 
 
                 { "USER.MANUAL", "ИНСТРУКЦИЯ ПОЛЬЗОВАТЕЛЯ" },
@@ -408,6 +408,7 @@ namespace Oxide.Plugins
                 }
             }
 
+            ImageLibrary.Call("AddImage", "https://gspics.org/images/2023/11/30/07bhI3.png", "backgroundpanel");
 			if (plugins.Find("ImageLibrary") != null && ImageLibrary != null && !(bool)ImageLibrary.Call("HasImage", $"blueprintbase"))
 				ImageLibrary.Call("AddImage", "http://gamestores.ru/img/games/rust/blueprintbase.png", "blueprintbase");
 				
@@ -769,7 +770,7 @@ namespace Oxide.Plugins
                         container.Add(new CuiLabel
                         {
                             RectTransform = { AnchorMin = "0 0.6", AnchorMax = "1 0.78", OffsetMax = "0 0" },
-                            Text = { Text = _(player, "USER.MANUAL"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 34 }
+                            Text = { Text = _(player, "USER.MANUAL"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 24 }
                         }, helpLayer);
 
                         container.Add(new CuiLabel
@@ -953,56 +954,37 @@ namespace Oxide.Plugins
             if (first)
             {
                 CuiHelper.DestroyUi(player, StoreLayer);
-                container.Add(new CuiPanel
+                container.Add(new CuiElement
                 {
-                    CursorEnabled = true,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                    Image = { Color = "0 0 0 0.8", Material = "assets/content/ui/uibackgroundblur.mat" },
-                }, "Overlay", StoreLayer);
+                    Name = StoreLayer,
+                    Parent = ".Mains",
+                    Components = 
+                    {
+                        new CuiRawImageComponent { Png = (string)ImageLibrary.Call("GetImage", "backgroundpanel"), Color = "1 1 1 1" },
+                        new CuiRectTransformComponent { AnchorMin = "-0.315 -0.27", AnchorMax = "1.3 1.275", OffsetMax = "0 0" },
+                    }
+                });
 
                 container.Add(new CuiButton
                 {
-                    RectTransform = { AnchorMin = "0.3 0.9", AnchorMax = "0.7 1", OffsetMax = "0 0" },
-                    Button = { Color = "0 0 0 0" },
-                    Text = { Text = _(player, "BASKET"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 32, Color = "1 1 1 0.6" }
-                }, StoreLayer, StoreLayer + ".ITT");
-
-                container.Add(new CuiLabel
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0", OffsetMin = "0 -0", OffsetMax = "0 20" },
-                    Text = { Text = _(player, "BASKET.DESCRIPTION"), Align = TextAnchor.UpperCenter, Font = "robotocondensed-regular.ttf", Color = "1 1 1 0.4" }
-                }, StoreLayer + ".ITT");
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0.065 0.9", AnchorMax = "0.2 1", OffsetMax = "0 0" },
-                    Button = { Color = "0 0 0 0", Command = "UI_GameStoresRUST help" },
-                    Text = { Text = _(player, "HELP"), Align = TextAnchor.MiddleLeft, Font = "robotocondensed-regular.ttf", FontSize = 28 }
+                    RectTransform = { AnchorMin = "0.8 0.804", AnchorMax = "0.817 0.832" },
+                    Button = { Close = "Menu_UI", Color = "0 0 0 0" },
+                    Text = { Text = "" }
                 }, StoreLayer);
             }
 
             CuiHelper.DestroyUi(player, StoreLayer + ".BlockPanel");
             container.Add(new CuiPanel
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.9", OffsetMax = "0 0" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.8", OffsetMax = "0 0" },
                 Image = { Color = "0 0 0 0" }
             }, StoreLayer, StoreLayer + ".BlockPanel");
 
             container.Add(new CuiLabel
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1.1", OffsetMax = "0 0" },
-                Text = { Text = _(player, "REQUEST.PROCESSING"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 34 }
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.8", OffsetMax = "0 0" },
+                Text = { Text = _(player, "REQUEST.PROCESSING"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 14 }
             }, StoreLayer + ".BlockPanel", StoreLayer + ".BlockPanel.Text");
-
-            if (first)
-            {
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0.8 0.9", AnchorMax = "0.935 1", OffsetMax = "0 0" },
-                    Button = { Color = "0 0 0 0", Close = StoreLayer, Command = "closemenu" },
-                    Text = { Text = _(player, "EXIT"), Align = TextAnchor.MiddleRight, Font = "robotocondensed-regular.ttf", FontSize = 28 }
-                }, StoreLayer);
-            }
 
             CuiHelper.AddUi(player, container);
 
@@ -1018,7 +1000,7 @@ namespace Oxide.Plugins
                             secondContainer.Add(new CuiLabel
                             {
                                 RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                                Text = { Text = _(player, "BASKET.UNAVAILABLE"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 38 }
+                                Text = { Text = _(player, "BASKET.UNAVAILABLE"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 20 }
                             }, StoreLayer + ".BlockPanel", StoreLayer + ".BlockPanel.Text");
                             CuiHelper.AddUi(player, secondContainer);
                             break;
@@ -1048,7 +1030,7 @@ namespace Oxide.Plugins
                                         secondContainer.Add(new CuiLabel
                                         {
                                             RectTransform = { AnchorMin = "0 0.1", AnchorMax = "1 1", OffsetMax = "0 0" },
-                                            Text = { Text = _(player, "BASKET.NO.AUTH"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 34 }
+                                            Text = { Text = _(player, "BASKET.NO.AUTH"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 20 }
                                         }, StoreLayer + ".BlockPanel", StoreLayer + ".BlockPanel.Text");
                                         CuiHelper.AddUi(player, secondContainer);
                                     }
@@ -1066,7 +1048,7 @@ namespace Oxide.Plugins
                                     List<object> data = firstInfo["data"] as List<object>;
                                     List<WItem> wItems = new List<WItem>();
 
-                                    foreach (var check in data.Skip(page * 21).Take(21))
+                                    foreach (var check in data.Skip(page * Settings.InterfaceSettings.ItemOnString * Settings.InterfaceSettings.StringAmount).Take(Settings.InterfaceSettings.ItemOnString * Settings.InterfaceSettings.StringAmount))
                                     {
                                         wItems.Add(new WItem(check as Dictionary<string, object>));
 
@@ -1086,22 +1068,22 @@ namespace Oxide.Plugins
                                     }
                                     secondContainer.Add(new CuiLabel
                                     {
-                                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.14", OffsetMax = "0 0" },
+                                        RectTransform = { AnchorMin = "0 0.76", AnchorMax = "1 0.8", OffsetMax = "0 0" },
                                         Text = { Text = (page + 1).ToString(), Align = TextAnchor.MiddleCenter, FontSize = 34 }
                                     }, StoreLayer + ".BlockPanel");
 
                                     secondContainer.Add(new CuiButton
                                     {
-                                        RectTransform = { AnchorMin = "0.4 0.14", AnchorMax = "0.4 0.14", OffsetMin = "-40 -125", OffsetMax = "125 40" },
+                                        RectTransform = { AnchorMin = "0.43 0.9", AnchorMax = "0.5 0.9", OffsetMin = "0 -85", OffsetMax = "0 30" },
                                         Button = { Color = "0 0 0 0", Command = page > 0 ? $"UI_GameStoresRUST page {page - 1}" : "" },
-                                        Text = { Text = "<", Color = page > 0 ? "1 1 1 1" : "1 1 1 0.2", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 80 }
+                                        Text = { Text = "<", Color = page > 0 ? "1 1 1 1" : "1 1 1 0.2", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 40 }
                                     }, StoreLayer + ".BlockPanel");
 
                                     secondContainer.Add(new CuiButton
                                     {
-                                        RectTransform = { AnchorMin = "0.6 0.14", AnchorMax = "0.6 0.14", OffsetMin = "-125 -125", OffsetMax = "40 40" },
-                                        Button = { Color = "0 0 0 0", Command = (page + 1) * 21 < data.Count ? $"UI_GameStoresRUST page {page + 1}" : "" },
-                                        Text = { Text = ">", Color = (page + 1) * 21 < data.Count ? "1 1 1 1" : "1 1 1 0.2", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 80 }
+                                        RectTransform = { AnchorMin = "0.49 0.9", AnchorMax = "0.56 0.9", OffsetMin = "0 -85", OffsetMax = "0 30" },
+                                        Button = { Color = "0 0 0 0", Command = (page + 1) * Settings.InterfaceSettings.ItemOnString * Settings.InterfaceSettings.StringAmount < data.Count ? $"UI_GameStoresRUST page {page + 1}" : "" },
+                                        Text = { Text = ">", Color = (page + 1) * Settings.InterfaceSettings.ItemOnString * Settings.InterfaceSettings.StringAmount < data.Count ? "1 1 1 1" : "1 1 1 0.2", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 40 }
                                     }, StoreLayer + ".BlockPanel");
 
 
@@ -1113,8 +1095,8 @@ namespace Oxide.Plugins
 
                                         secondContainer.Add(new CuiButton
                                         {
-                                            RectTransform = { AnchorMin = "0.495 0.55", AnchorMax = "0.495 0.55", OffsetMin = $"{xSwitch} {ySwitch - Settings.InterfaceSettings.ItemSide}", OffsetMax = $"{xSwitch + Settings.InterfaceSettings.ItemSide} {ySwitch}" },
-                                            Button = { Color = "1 1 1 0.2", Command = $"" },
+                                            RectTransform = { AnchorMin = "0.495 0.59", AnchorMax = "0.495 0.59", OffsetMin = $"{xSwitch} {ySwitch - Settings.InterfaceSettings.ItemSide}", OffsetMax = $"{xSwitch + Settings.InterfaceSettings.ItemSide} {ySwitch}" },
+                                            Button = { Color = "1 1 1 0", Command = $"" },
                                             Text = { Text = "" }
                                         }, StoreLayer + ".BlockPanel", StoreLayer + $".BlockPanel.{i}");
                                     }
@@ -1641,7 +1623,6 @@ namespace Oxide.Plugins
         private static int errorsReq = 0;
         private static void Request(string ask, Action<int, string> callback, BasePlayer player = null, bool cancel = true)
         {
-            float timeout = 3000f;
             if (player != null && !Delays.CanRequest(player))
             {
                 instance.ShowNotify(player, instance._(player, "MANY.REQUESTS"));
@@ -1702,12 +1683,11 @@ namespace Oxide.Plugins
                 if (player != null && cancel) Delays.FinishRequest(player);
 
                 callback?.Invoke(code, response);
-            }, instance, RequestMethod.GET, reqHeaders, timeout);
+            }, instance, RequestMethod.GET, reqHeaders);
                       
         }
         private static void CheckRequest(string link, Action<int, string> callback)
         {
-            float timeout = 3000f;
             Dictionary<string, string> reqHeaders = new Dictionary<string, string> { { "User-Agent", "GameStores Plugin" } };
             if (!SecureConnection && link.Contains("https://")) link = link.Replace("https://", "http://");
             instance.webrequest.Enqueue(link, "", (code, response) =>
@@ -1729,7 +1709,7 @@ namespace Oxide.Plugins
                 }
 
                 callback?.Invoke(code, response);
-            }, instance, RequestMethod.GET, reqHeaders, timeout);
+            }, instance, RequestMethod.GET, reqHeaders);
 
         }
 
