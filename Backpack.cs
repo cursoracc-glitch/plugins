@@ -1,685 +1,557 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
+using System.Globalization;
 using System.Linq;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using Oxide.Core;
-using Oxide.Core.Plugins;
 using Oxide.Core.Configuration;
-using Oxide.Core.Libraries;
+using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using UnityEngine;
-using Physics = UnityEngine.Physics;
 
 namespace Oxide.Plugins
 {
-    [Info("Backpack", "RustPlugin.ru / EcoSmile","1.0.2")]
+    [Info("Backpack", "TopPlugin.ru", "1.0.41")]
     public class Backpack : RustPlugin
     {
-        #region Classes
+        #region Fields 
 
-        public class BackpackBox : MonoBehaviour
-        {
-            public static readonly List<int> sizes = new List<int>() {6,15,30};
+        [PluginReference] private Plugin ImageLibrary;
 
-            StorageContainer storage;
-            BasePlayer owner;
-
-            public void Init(StorageContainer storage, BasePlayer owner)
-            {
-                this.storage = storage;
-                this.owner = owner;
-            }
-            
-            public static BackpackBox Spawn(BasePlayer player,  int size = 1)
-            {
-                player.EndLooting();
-                var storage = SpawnContainer(player,size,false);
-                var box = storage.gameObject.AddComponent<BackpackBox>();
-                box.Init(storage, player);
-                return box;
-            }
-
-            static int rayColl = LayerMask.GetMask("Construction", "Deployed", "Tree", "Terrain", "Resource", "World", "Water", "Default", "Prevent Building");
-
-            public static StorageContainer SpawnContainer (BasePlayer player, int size, bool die)
-            {
-                var pos = player.transform.position;
-                if (die)
-                {
-                    RaycastHit hit;
-                    if (Physics.Raycast(new Ray(player.GetCenter(), Vector3.down), out hit, 1000, rayColl, QueryTriggerInteraction.Ignore))
-                    {
-                        pos = hit.point;
-                    }
-                }
-                else
-                {
-                    pos -= new Vector3(0, 100, 0);
-                }
-                return SpawnContainer(player, size, pos);
-            }
-
-
-            private static StorageContainer SpawnContainer(BasePlayer player, int size, Vector3 position)
-            {
-                var storage = GameManager.server.CreateEntity("assets/prefabs/deployable/small stash/small_stash_deployed.prefab") as StorageContainer;
-                if(storage == null) return null;
-                storage.transform.position = position;
-                storage.panelName = "largewoodbox";
-                ItemContainer container = new ItemContainer { playerOwner = player };
-                container.ServerInitialize((Item)null, sizes[size]);
-                if((int)container.uid == 0)
-                    container.GiveUID();
-                storage.inventory = container;
-                if(!storage) return null;
-                storage.SendMessage("SetDeployedBy", player, (SendMessageOptions)1);
-                storage.Spawn();
-                return storage;
-            }
-
-            private void PlayerStoppedLooting(BasePlayer player)
-            {
-                Interface.Oxide.RootPluginManager.GetPlugin("Backpack").Call("BackpackHide", player.userID);
-            }
-
-            public void Close()
-            {
-                ClearItems();
-                storage.Kill();
-            }
-
-            public void StartLoot()
-            {
-                storage.SetFlag(BaseEntity.Flags.Open, true, false);
-                owner.inventory.loot.StartLootingEntity(storage, false);
-                owner.inventory.loot.AddContainer(storage.inventory);
-                owner.inventory.loot.SendImmediate();
-                owner.ClientRPCPlayer(null, owner, "RPC_OpenLootPanel", storage.panelName);
-                storage.DecayTouch();
-                storage.SendNetworkUpdate();
-            }
-
-            public void Push(List<Item> items)
-            {
-                for (int i = items.Count - 1; i >= 0; i--)
-                    items[i].MoveToContainer(storage.inventory);
-            }
-
-            public void ClearItems()
-            {
-                storage.inventory.itemList.Clear();
-            }
-
-            public List<Item> GetItems => storage.inventory.itemList.Where(i => i != null).ToList();
-
-        }
+        public Dictionary<ulong, BackpackStorage> opensBackpack = new Dictionary<ulong, BackpackStorage>();
+        public static Backpack ins = null;
+        public string Layer = "UI.Backpack";
+        public string LayerBlur = "UI.Backpack.Blur";
 
         #endregion
 
-        #region VARIABLES
-        
-        public Dictionary<ulong, BackpackBox> openedBackpacks = new Dictionary<ulong, BackpackBox>();
-        public Dictionary<ulong, List<SavedItem>> savedBackpacks;
-        public Dictionary<ulong, BaseEntity> visualBackpacks = new Dictionary<ulong, BaseEntity>();
+        #region Commands
 
-        #endregion
-
-        #region DATA
-
-        DynamicConfigFile backpacksFile = Interface.Oxide.DataFileSystem.GetFile("Backpack_Data");
-
-        void LoadBackpacks()
+        [ChatCommand("updatecraft")]
+        void chatCmdUpdateCraft(BasePlayer player, string command, string[] args)
         {
-            try
+            if (!player.IsAdmin) return;
+
+            List<ItemInfo> craftInfo = new List<ItemInfo>();
+
+            foreach (var item in player.inventory.containerMain.itemList)
             {
-                savedBackpacks = backpacksFile.ReadObject<Dictionary<ulong, List<SavedItem>>>();
-            }
-            catch (Exception)
-            {
-                savedBackpacks = new Dictionary<ulong, List<SavedItem>>();
-            }
-        }
-
-        void SaveBackpacks() => backpacksFile.WriteObject(savedBackpacks);
-
-        #endregion
-
-        #region OXIDE HOOKS
-        void OnEntityDeath(BaseCombatEntity ent, HitInfo info)
-        {
-            if (!(ent is BasePlayer)) return;
-            var player = (BasePlayer) ent;
-            if (PermissionService.HasPermission(player, BPIGNORE)) return;
-            if (InDuel(player)) return;
-            BackpackHide(player.userID);
-                List<SavedItem> savedItems;
-                List<Item> items = new List<Item>();
-                if (savedBackpacks.TryGetValue(player.userID, out savedItems))
+                if (craftInfo.Find(x => x.shortname.Equals(item.info.shortname)) != null)
                 {
-                    items = RestoreItems(savedItems);
-                    savedBackpacks.Remove(player.userID);
+                    continue;
                 }
-                if (items.Count <= 0) return;
-                var container = BackpackBox.SpawnContainer(player, GetBackpackSize(player), true);
-                if (container == null) return;
-                for (int i = items.Count - 1; i >= 0; i--)
-                    items[i].MoveToContainer(container.inventory);
-                timer.Once(300f, () =>
+
+                craftInfo.Add(new ItemInfo()
                 {
-                    if (container != null && !container.IsDestroyed)
-                        container.Kill();
+                    shortname = item.info.shortname,
+                    amount = item.amount,
+                    skinID = item.skin,
+                    itemID = item.info.itemid
                 });
-                Effect.server.Run("assets/bundled/prefabs/fx/dig_effect.prefab", container.transform.position);
-            
+            }
+
+            _config.items = craftInfo;
+
+            SendReply(player, "Крафт успешно обновлён!");
+
+            CheckConfig();
+
+            SaveConfig();
         }
-        const string BPIGNORE = "backpack.ignore";
-        void Loaded()
+
+        [ConsoleCommand("backpack.give")]
+        void chatCmdBackpackGive(ConsoleSystem.Arg arg)
         {
-            LoadBackpacks();
-            PermissionService.RegisterPermissions(this, permisions);
-            PermissionService.RegisterPermissions(this, new List<string>() { BPIGNORE });
+            if (!arg.IsAdmin) return;
+
+            var player = BasePlayer.FindByID(arg.GetULong(0));
+
+            if (player == null)
+            {
+                PrintError("Игрок не был найден!");
+                return;
+            }
+
+            Item item = ItemManager.CreateByPartialName("santabeard", 1);
+            item.name = _config.displayName;
+            item.skin = _config.skinIdBackpack;
+
+            string trimmed = _config.displayName.Trim();
+            var name = trimmed.Substring(0, trimmed.IndexOf('\n'));
+            item.MoveToContainer(player.inventory.containerMain);
+            player.SendConsoleCommand($"note.inv {item.info.itemid} 1 \"{name}\"");
+            PrintWarning($"Выдали рюкзак игроку {player.displayName}");
+        }
+
+        [ConsoleCommand("UI_Backpack")]
+        void consoleCommandBackpackUI(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Connection?.player as BasePlayer;
+
+            if (player == null) return;
+
+            switch (arg.GetString(0))
+            {
+                case "close":
+
+                    CuiHelper.DestroyUi(player, Layer);
+                    CuiHelper.DestroyUi(player, LayerBlur);
+
+                    break;
+                case "menuha":
+
+                    CuiHelper.DestroyUi(player, Layer);
+                    CuiHelper.DestroyUi(player, LayerBlur);
+                    player.SendConsoleCommand("chat.say /menu");
+                    break;
+
+                case "craft":
+
+                    var success = true;
+
+                    Dictionary<Item, int> items = new Dictionary<Item, int>();
+
+                    foreach (var craftedItem in _config.items)
+                    {
+
+                        var haveItem = HaveItem(player, craftedItem.itemID, craftedItem.skinID, craftedItem.amount);
+                        if (!haveItem)
+                        {
+                            success = false;
+                            SendReply(player,
+                        "[<color=#ff8f3a><size=16>Создание рюкзака</size></color>]\n<color=#ff0000>Вы не можете скрафтить предмет!</color> Не хватает ингредиента!");
+                            return;
+                        }
+                        var itemCraft = FindItem(player, craftedItem.itemID, craftedItem.skinID, craftedItem.amount);
+
+                        items.Add(itemCraft, craftedItem.amount);
+                    }
+
+                    foreach (var itemCraft in items)
+                    {
+                        itemCraft.Key.UseItem(itemCraft.Value);
+                    }
+
+                    if (success)
+                    {
+                        player.SendConsoleCommand("UI_Backpack close");
+                        Item craft = ItemManager.CreateByName("santabeard", 1, _config.skinIdBackpack);
+
+                        craft.name = _config.displayName;
+
+                        craft.MoveToContainer(player.inventory.containerMain);
+
+                        string trimmed = _config.displayName.Trim();
+                        var name = trimmed.Substring(0, trimmed.IndexOf('\n'));
+                        player.SendConsoleCommand($"note.inv {craft.info.itemid} 1 \"{name}\"");
+                    }
+
+                    break;
+            }
+        }
+
+        [ChatCommand("backpack.spawn")]
+        void chatCmdBackpackSpawn(BasePlayer player, string command, string[] args)
+        {
+            if (!player.IsAdmin) return;
+
+            Item item = ItemManager.CreateByPartialName("santabeard", 1);
+            item.name = _config.displayName;
+            item.skin = _config.skinIdBackpack;
+            string trimmed = _config.displayName.Trim();
+            var name = trimmed.Substring(0, trimmed.IndexOf('\n'));
+
+            item.MoveToContainer(player.inventory.containerMain);
+            player.SendConsoleCommand($"note.inv {item.info.itemid} 1 \"{name}\"");
+            SendReply(player, "Рюкзак был успешно выдан!");
+        }
+
+        private void chatCmdBackpackOpen(BasePlayer player, string command, string[] args)
+        {
+            player.SendConsoleCommand(_config.consoleCommand);
+        }
+
+        private void chatCmdBackpack(BasePlayer player, string command, string[] args)
+        {
+            CuiHelper.DestroyUi(player, Layer);
+            CuiHelper.DestroyUi(player, LayerBlur);
+
+            CuiElementContainer container = new CuiElementContainer();
+
+            container.Add(new CuiPanel()
+            {
+                CursorEnabled = true,
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                Image = { Color = HexToRGB("#202020C2"), Material = "assets/content/ui/uibackgroundblur.mat" }
+            }, "Overlay", LayerBlur);
+
+            container.Add(new CuiButton()
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                Button = { Command = "UI_Backpack close", Color = "0 0 0 0" },
+                Text = { Text = "" }
+            }, "Overlay", Layer);
+
+            container.Add(new CuiElement()
+            {
+                Parent = Layer,
+                Components =
+                {
+                    new CuiRawImageComponent()
+                    {
+                        Png = (string) ImageLibrary.Call("GetImage", "santabeard", _config.skinIdBackpack)
+                    },
+                    new CuiRectTransformComponent()
+                    {
+                        AnchorMin = $"0.415625 0.521296",
+                        AnchorMax = $"0.571875 0.799074"
+                    },
+                }
+            });
+
+            container.Add(new CuiLabel()
+            {
+                RectTransform = { AnchorMin = "0.446 0.806", AnchorMax = "0.68 0.861" },
+                Text = { Text = $"<color=#a100ff>КОЛИЧЕСТВО СЛОТОВ: {_config.backpackSize}</color>", Align = TextAnchor.MiddleLeft, Color = HexToRGB("#FFFFFFDA"), Font = "RobotoCondensed-Regular.ttf", FontSize = 14 }
+            }, Layer);
+
+            container.Add(new CuiLabel()
+            {
+                RectTransform = { AnchorMin = "0.378124 0.938889", AnchorMax = "0.633542 0.99537" },
+                Text = { Text = $"<b>КРАФТ РЮКЗАКА</b>", Align = TextAnchor.MiddleCenter, Color = HexToRGB("#a100ff"), Font = "RobotoCondensed-Bold.ttf", FontSize = 24 }
+            }, Layer);
+
+            container.Add(new CuiLabel()
+            {
+                RectTransform = { AnchorMin = "0.388 0.401", AnchorMax = "0.622 0.513" },
+                Text = { Text = $"НЕОБХОДИМЫЕ ПРЕДМЕТЫ \nДЛЯ КРАФТА", Align = TextAnchor.MiddleCenter, Color = HexToRGB("#a100ff"), Font = "RobotoCondensed-Regular.ttf", FontSize = 22 }
+            }, Layer);
+
+            float itemMinPosition = 515f;
+            float itemWidth = 0.403646f - 0.351563f;
+            float itemMargin = 0.409895f - 0.403646f;
+            int itemCount = _config.items.Count;
+            float itemMinHeight = 0.315741f;
+            float itemHeight = 0.408333f - 0.315741f;
+
+            if (itemCount > 5)
+            {
+                itemMinPosition = 0.5f - 5 / 2f * itemWidth - (5 - 1) / 2f * itemMargin;
+                itemCount -= 5;
+            }
+            else itemMinPosition = 0.5f - itemCount / 2f * itemWidth - (itemCount - 1) / 2f * itemMargin;
+
+            var countItem = 0;
+
+            foreach (var itemCraft in _config.items)
+            {
+                countItem++;
+
+                container.Add(new CuiElement()
+                {
+                    Parent = Layer,
+                    Name = Layer + $".Item{itemCraft.itemID}",
+                    Components =
+                    {
+                        new CuiRawImageComponent()
+                        {
+                            Png = (string) ImageLibrary.Call("GetImage", itemCraft.shortname, itemCraft.skinID),
+                        },
+                        new CuiRectTransformComponent()
+                        {
+                            AnchorMin = $"{itemMinPosition} {itemMinHeight}",
+                            AnchorMax = $"{itemMinPosition + itemWidth} {itemMinHeight + itemHeight}"
+                        },
+                    }
+                });
+
+                container.Add(new CuiLabel()
+                {
+                    RectTransform = { AnchorMin = "0 0.05", AnchorMax = "0.98 1" },
+                    Text = { Text = $"x{itemCraft.amount}", Align = TextAnchor.LowerRight, FontSize = 12 },
+                }, Layer + $".Item{itemCraft.itemID}");
+
+                itemMinPosition += (itemWidth + itemMargin);
+
+                if (countItem % 5 == 0)
+                {
+                    itemMinHeight -= (itemHeight + (itemMargin * 2f));
+
+                    if (itemCount > 5)
+                    {
+                        itemMinPosition = 0.5f - 5 / 2f * itemWidth - (5 - 1) / 2f * itemMargin;
+                        itemCount -= 5;
+                    }
+                    else itemMinPosition = 0.5f - itemCount / 2f * itemWidth - (itemCount - 1) / 2f * itemMargin;
+                }
+            }
+
+            itemMinHeight -= ((itemMargin * 3f) + (0.162037f - 0.0925926f));
+
+            container.Add(new CuiButton()
+            {
+                RectTransform = { AnchorMin = $"0.389062 {itemMinHeight}", AnchorMax = $"0.615103 {itemMinHeight + (0.162037f - 0.0925926f)}" },
+                Button = { Color = "0.00 0.50 0.00 1.00", Command = $"UI_Backpack craft", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" },
+                Text = { Text = "СКРАФТИТЬ", Font = "RobotoCondensed-Regular.ttf", FontSize = 28, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1" }
+            }, Layer);
+            container.Add(new CuiButton()
+            {
+                RectTransform = { AnchorMin = "0.765 0.943", AnchorMax = "0.866 0.985" },
+                Button = { Color = "1.00 0.56 0.23 1.00", Command = $"UI_Backpack menuha", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" },
+                Text = { Text = "В главное меню", Font = "RobotoCondensed-Regular.ttf", FontSize = 14, Align = TextAnchor.MiddleCenter, Color = "0.63 0.00 1.00 1.00" }
+            }, Layer);
+            container.Add(new CuiButton()
+            {
+                RectTransform = { AnchorMin = "0.875 0.943", AnchorMax = "0.977 0.9856" },
+                Button = { Color = "1.00 0.56 0.23 1.00", Command = $"UI_Backpack close", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" },
+                Text = { Text = "Закрыть", Font = "RobotoCondensed-Regular.ttf", FontSize = 14, Align = TextAnchor.MiddleCenter, Color = "0.63 0.00 1.00 1.00" }
+            }, Layer);
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        private void consoleCmdBackpack(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Connection?.player as BasePlayer;
+
+            if (player == null) return;
+
+            if (player.inventory.loot?.entitySource != null)
+            {
+                BackpackStorage backpackStorage;
+                if (opensBackpack.TryGetValue(player.userID, out backpackStorage) &&
+                    backpackStorage.gameObject == player.inventory.loot.entitySource.gameObject) return;
+
+                player.EndLooting();
+
+                timer.Once(0.1f, () => BackpackOpen(player));
+            }
+            else BackpackOpen(player);
+        }
+
+        #endregion
+
+        #region Hooks
+
+        private bool? CanWearItem(PlayerInventory inventory, Item item)
+        {
+            var player = inventory.gameObject.ToBaseEntity() as BasePlayer;
+
+            if (player == null) return null;
+            if (player.IsNpc) return null;
+
+            if (item.skin == _config.skinIdBackpack)
+            {
+                if (player.inventory.containerWear.itemList.Find(x => x.skin == _config.skinIdBackpack) != null)
+                    return false;
+                if (player.inventory.containerWear.itemList.Find(x => x.info.shortname == "santabeard") != null)
+                    return true;
+            }
+            return null;
         }
 
         void OnServerInitialized()
         {
-            InitFileManager();
-            ServerMgr.Instance.StartCoroutine(LoadImages());
+            LoadData();
+            LoadConfig();
+
+            CheckConfig();
+            UpdateData();
+
+            cmd.AddConsoleCommand(_config.consoleCommand, this, "consoleCmdBackpack");
+            cmd.AddChatCommand(_config.chatCommand, this, chatCmdBackpack);
+            cmd.AddChatCommand(_config.chatCommandOpen, this, chatCmdBackpackOpen);
+
+            ins = this;
         }
 
-        private bool loaded = false;
-        IEnumerator LoadImages()
+        void UpdateData()
         {
-            foreach (var name in images.Keys.ToList())
+            SaveData();
+            timer.Once(300f, () => UpdateData());
+        }
+
+        object CanAcceptItem(ItemContainer container, Item item)
+        {
+            if (item.IsLocked())
+                return ItemContainer.CanAcceptResult.CannotAccept;
+
+            return null;
+        }
+
+        void Unload()
+        {
+            foreach (var backpack in opensBackpack)
+                backpack.Value.Close();
+
+            foreach (var player in BasePlayer.activePlayerList)
             {
-                yield return m_FileManager.StartCoroutine( m_FileManager.LoadFile( name, images[ name ]) );
-                images[ name ] = m_FileManager.GetPng( name );
+                CuiHelper.DestroyUi(player, Layer);
+                CuiHelper.DestroyUi(player, LayerBlur);
             }
-            loaded = true;
-            foreach (var player in BasePlayer.activePlayerList) DrawUI( player );
+
+            SaveData();
         }
 
-        private Dictionary<string, string> images = new Dictionary<string, string>()
-        {
-            ["backpackImg"] = "http://i.imgur.com/dJs7pK3.png"
-        };
-        void Unload(BasePlayer player)
-        {
-            var keys = openedBackpacks.Keys.ToList();
-            for (int i = openedBackpacks.Count - 1; i >= 0; i--)
-                BackpackHide(keys[i]);
-            SaveBackpacks();
-            DestroyUI(player);
-        }
-
-        void OnPreServerRestart()
-        {
-            foreach (var dt in Resources.FindObjectsOfTypeAll<StashContainer>())
-                dt.Kill();
-            foreach (var ent in Resources.FindObjectsOfTypeAll<TimedExplosive>().Where(ent => ent.name == "backpack"))
-                ent.KillMessage();
-        }
-
-        void OnPlayerSleepEnded(BasePlayer player)
-        {
-            DrawUI(player);
-        }
-
-        void OnPlayerAspectChanged(BasePlayer player)
-        {
-            DrawUI(player);
-        }
         #endregion
 
-        #region FUNCTIONS
+        #region Methods
 
-        void BackpackShow(BasePlayer player)
+        public Item FindItem(BasePlayer player, int itemID, ulong skinID, int amount)
         {
-            if (BackpackHide(player.userID)) return;
+            Item item = null;
 
-            if (player.inventory.loot?.entitySource != null) return;
-            
-            timer.Once(0.1f, () =>
+            if (skinID == 0U)
             {
-                if (!player.IsOnGround())
-                {
-                    SendReply(player, "Нельзя открывать рюкзар к полёте!");
+                if (player.inventory.FindItemID(itemID) != null && player.inventory.FindItemID(itemID).amount >= amount)
+                    return player.inventory.FindItemID(itemID);
+            }
+            else
+            {
 
-                    return;
-                }
-                List<SavedItem> savedItems;
                 List<Item> items = new List<Item>();
-                if (savedBackpacks.TryGetValue(player.userID, out savedItems))
-                    items = RestoreItems(savedItems);
-                var backpackSize = GetBackpackSize(player);
-                BackpackBox box = BackpackBox.Spawn(player, backpackSize);
-                openedBackpacks.Add(player.userID, box);
-                if (items.Count > 0)
-                    box.Push(items);
-                box.StartLoot();
-            });
+
+                items.AddRange(player.inventory.FindItemIDs(itemID));
+
+                foreach (var findItem in items)
+                {
+                    if (findItem.skin == skinID && findItem.amount >= amount)
+                    {
+                        return findItem;
+                    }
+                }
+            }
+
+            return item;
         }
 
-        int GetBackpackSize(BasePlayer player)
+        public bool HaveItem(BasePlayer player, int itemID, ulong skinID, int amount)
         {
-            for (int i = permisions.Count-1; i >= 0; i--)
-                if (PermissionService.HasPermission(player, permisions[i]) && (i == 0 || PermissionService.HasPermission(player, permisions[i-1])))
-                    return i+1;
-                else if (i > 0 && PermissionService.HasPermission(player, permisions[i])) return i;
-            return 0;
-        }
-        
-
-        [HookMethod("BackpackHide")]
-        bool BackpackHide(ulong playerId)
-        {
-            BackpackBox box;
-            if (!openedBackpacks.TryGetValue(playerId, out box)) return false;
-            openedBackpacks.Remove(playerId);
-            if (box == null) return false;
-            var items = SaveItems(box.GetItems);
-            if (items.Count > 0)
+            if (skinID == 0U)
             {
-                savedBackpacks[playerId] = SaveItems(box.GetItems);
-                //SpawnVisual(BasePlayer.FindByID(player));
+                if (player.inventory.FindItemID(itemID) != null &&
+                    player.inventory.FindItemID(itemID).amount >= amount) return true;
+                return false;
             }
-            else { savedBackpacks.Remove(playerId); //RemoveVisual(BasePlayer.FindByID(player));
-            }
-            box.Close();
-            var player = BasePlayer.FindByID(playerId);
-            if (player)
-                DrawUI(player);
-            return true;
-        }
 
-
-        #endregion
-
-         #region UI
-        void DrawUI(BasePlayer player)
-        {
-            if (!loaded) return;
-            var backpackSize = GetBackpackSize( player );
-
-            List<SavedItem> savedItems;
             List<Item> items = new List<Item>();
-            if (!savedBackpacks.TryGetValue( player.userID, out savedItems ))
-                savedItems = new List<SavedItem>();
-            int backpackCount = savedItems?.Count ?? 0;
-            CuiHelper.DestroyUi(player, "backpack.btn" );
-            CuiHelper.DestroyUi(player, "backpack.text2" );
-            CuiHelper.DestroyUi(player, "backpack.text1" );
-            CuiHelper.DestroyUi(player, "backpack.image" );
-			if (backpackCount < BackpackBox.sizes[backpackSize] * 0.5){
-			CuiHelper.DestroyUi(player, "backpack.btn" );
-            CuiHelper.DestroyUi(player, "backpack.text2" );
-            CuiHelper.DestroyUi(player, "backpack.text1" );
-            CuiHelper.DestroyUi(player, "backpack.image" );
-            CuiHelper.AddUi(player, GUI0
-                .Replace("{0}", backpackCount.ToString())//text1
-                .Replace("{1}", BackpackBox.sizes[backpackSize].ToString())//text2
-                .Replace("{2}", images["backpackImg"]));
-			}
-			if (backpackCount >= BackpackBox.sizes[backpackSize] * 0.5){
-			CuiHelper.DestroyUi(player, "backpack.btn" );
-            CuiHelper.DestroyUi(player, "backpack.text2" );
-            CuiHelper.DestroyUi(player, "backpack.text1" );
-            CuiHelper.DestroyUi(player, "backpack.image" );
-            CuiHelper.AddUi(player, GUI2
-                .Replace("{0}", backpackCount.ToString())//text1
-                .Replace("{1}", BackpackBox.sizes[backpackSize].ToString())//text2
-                .Replace("{2}", images["backpackImg"]));
-			}
-			if (backpackCount >= BackpackBox.sizes[backpackSize] - BackpackBox.sizes[backpackSize] * 0.3){
-			CuiHelper.DestroyUi(player, "backpack.btn" );
-            CuiHelper.DestroyUi(player, "backpack.text2" );
-            CuiHelper.DestroyUi(player, "backpack.text1" );
-            CuiHelper.DestroyUi(player, "backpack.image" );
-            CuiHelper.AddUi(player, GUI1
-                .Replace("{0}", backpackCount.ToString())//text1
-                .Replace("{1}", BackpackBox.sizes[backpackSize].ToString())//text2
-                .Replace("{2}", images["backpackImg"]));
-			}
-					
-        }
-        void DestroyUI(BasePlayer player)
-        {
-            CuiHelper.DestroyUi(player, "backpack.btn");
-            CuiHelper.DestroyUi(player, "backpack.text2");
-            CuiHelper.DestroyUi(player, "backpack.text1");
-            CuiHelper.DestroyUi(player, "backpack.image");
-        }
-    #region Gui0
 
-        private string GUI0 = @"
-[{
-	""name"": ""backpack.image"",
-	""parent"": ""Overlay"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.RawImage"", 
-		""sprite"": ""assets/content/textures/generic/fulltransparent.tga"",
-		""color"": ""1 1 1 1"",
-		""png"": ""{2}""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.29112 0.01944441"",
-		""anchormax"": ""0.3416667 0.1027779"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}, {
-	""name"": ""backpack.text1"",
-	""parent"": ""backpack.image"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.Text"",
-		""text"": ""{0}"",
-		""fontSize"": 13,
-		""align"": ""MiddleCenter"",
-		""color"": ""0 0 0 0.7058824""
-	}, {
-		""type"": ""UnityEngine.UI.Outline"",
-		""color"": ""0.19 0.19 0.19 1.00"",
-		""distance"": ""0.5 -0.5""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.220705 0.1333331"",
-		""anchormax"": ""0.478305 0.4111103"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}, {
-	""name"": ""backpack.text2"",
-	""parent"": ""backpack.image"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.Text"",
-		""text"": ""{1}"",
-		""fontSize"": 13,
-		""align"": ""MiddleCenter"",
-		""color"": ""0 0 0 0.7061956""
-	}, {
-		""type"": ""UnityEngine.UI.Outline"",
-		""color"": ""0.19 0.19 0.19 1.00"",
-		""distance"": ""0.5 -0.5""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.513671 0.1333331"",
-		""anchormax"": ""0.7712711 0.4111103"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}, {
-	""name"": ""backpack.btn"",
-	""parent"": ""Overlay"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.Button"",
-		""command"": ""backpack.open"",
-		""color"": ""1 1 1 0""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.2937759 0.02592597"",
-		""anchormax"": ""0.3383071 0.1013889"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}]";
-        #endregion Gui0
-	#region Gui1
-	private string GUI1 = @"
-[{
-	""name"": ""backpack.image"",
-	""parent"": ""Overlay"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.RawImage"",
-		""sprite"": ""assets/content/textures/generic/fulltransparent.tga"",
-		""color"": ""1 0 0 0.7"",
-		""png"": ""{2}""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.29112 0.01944441"",
-		""anchormax"": ""0.3416667 0.1027779"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}, {
-	""name"": ""backpack.text1"",
-	""parent"": ""backpack.image"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.Text"",
-		""text"": ""{0}"",
-		""fontSize"": 13,
-		""align"": ""MiddleCenter"",
-		""color"": ""0 0 0 0.7058824""
-	}, {
-		""type"": ""UnityEngine.UI.Outline"",
-		""color"": ""0.19 0.19 0.19 1.00"",
-		""distance"": ""0.5 -0.5""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.220705 0.1333331"",
-		""anchormax"": ""0.478305 0.4111103"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}, {
-	""name"": ""backpack.text2"",
-	""parent"": ""backpack.image"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.Text"",
-		""text"": ""{1}"",
-		""fontSize"": 13,
-		""align"": ""MiddleCenter"",
-		""color"": ""0 0 0 0.7061956""
-	}, {
-		""type"": ""UnityEngine.UI.Outline"",
-		""color"": ""0.19 0.19 0.19 1.00"",
-		""distance"": ""0.5 -0.5""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.513671 0.1333331"",
-		""anchormax"": ""0.7712711 0.4111103"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}, {
-	""name"": ""backpack.btn"",
-	""parent"": ""Overlay"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.Button"",
-		""command"": ""backpack.open"",
-		""color"": ""1 1 1 0""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.2937759 0.02592597"",
-		""anchormax"": ""0.3383071 0.1013889"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}]";
-	#endregion Gui1
-	#region Gui2
-	private string GUI2 = @"
-[{
-	""name"": ""backpack.image"",
-	""parent"": ""Overlay"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.RawImage"",
-		""sprite"": ""assets/content/textures/generic/fulltransparent.tga"",
-		""color"": ""1 1 0.5 0.7"",
-		""png"": ""{2}""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.29112 0.01944441"",
-		""anchormax"": ""0.3416667 0.1027779"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}, {
-	""name"": ""backpack.text1"",
-	""parent"": ""backpack.image"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.Text"",
-		""text"": ""{0}"",
-		""fontSize"": 13,
-		""align"": ""MiddleCenter"",
-		""color"": ""0 0 0 0.7058824""
-	}, {
-		""type"": ""UnityEngine.UI.Outline"",
-		""color"": ""0.19 0.19 0.19 0.9"",
-		""distance"": ""0.5 -0.5""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.220705 0.1333331"",
-		""anchormax"": ""0.478305 0.4111103"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}, {
-	""name"": ""backpack.text2"",
-	""parent"": ""backpack.image"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.Text"",
-		""text"": ""{1}"",
-		""fontSize"": 13,
-		""align"": ""MiddleCenter"",
-		""color"": ""0 0 0 0.7061956""
-	}, {
-		""type"": ""UnityEngine.UI.Outline"",
-		""color"": ""0.19 0.19 0.19 0.9"",
-		""distance"": ""0.5 -0.5""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.513671 0.1333331"",
-		""anchormax"": ""0.7712711 0.4111103"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}, {
-	""name"": ""backpack.btn"",
-	""parent"": ""Overlay"",
-	""components"": [{
-		""type"": ""UnityEngine.UI.Button"",
-		""command"": ""backpack.open"",
-		""color"": ""1 1 1 0""
-	}, {
-		""type"": ""RectTransform"",
-		""anchormin"": ""0.2937759 0.02592597"",
-		""anchormax"": ""0.3383071 0.1013889"",
-		""offsetmin"": ""0 0"",
-		""offsetmax"": ""1 1""
-	}]
-}]";
+            items.AddRange(player.inventory.FindItemIDs(itemID));
 
-
-	#endregion Gui2
-        #endregion
-
-        #region COMMANDS
-
-        [ChatCommand("bp")]
-        void cmdBackpackShow(BasePlayer player, string command, string[] args)
-        {
-            if (player == null) return;
-            /*if (!player.IsAdmin)
+            foreach (var item in items)
             {
-                player.ChatMessage("Рюкзак на тех работах, не беспокойтесь, ваши вещи не пропадут!");
-                return;
-            }*/
-           
-            if (player == null) return;
-            if (player.inventory.loot?.entitySource != null)
-            {
-                BackpackBox bpBox;
-                if (openedBackpacks.TryGetValue(player.userID, out bpBox) &&
-                    bpBox.gameObject == player.inventory.loot.entitySource.gameObject)
+                if (item.skin == skinID && item.amount >= amount)
                 {
-                    return;
+                    return true;
                 }
-                player.EndLooting();
-                NextTick(() => BackpackShow(player));
-                return;
             }
-            else
-            {
-                BackpackShow(player);
-            }
+
+            return false;
         }
 
-        [ConsoleCommand("backpack.open")]
-        void cmdOnBackPackShowClick(ConsoleSystem.Arg arg)
+        private IEnumerator DownloadImages()
         {
-            var player = arg.Player();
-            if (player == null) return;
-            if (player.inventory.loot?.entitySource != null)
+            ImageLibrary.Call("AddImage", $"http://api.hougan.space/rust/skin/getImage/{_config.skinIdBackpack}",
+                "santabeard", _config.skinIdBackpack);
+            foreach (var item in _config.items)
             {
-                BackpackBox bpBox;
-                if (openedBackpacks.TryGetValue(player.userID, out bpBox) &&
-                    bpBox.gameObject == player.inventory.loot.entitySource.gameObject)
-                {
-                    return;
-                }
-                player.EndLooting();
-                NextTick(() => BackpackShow(player));
-                return;
+                if (item.skinID != 0U)
+                    ImageLibrary.Call("AddImage", $"http://api.hougan.space/rust/skin/getImage/{item.skinID}",
+                        item.shortname, item.skinID);
+                yield return new WaitForSeconds(0.04f);
             }
-            else
-            {
-                BackpackShow(player);
-            }
+            yield return 0;
         }
 
-        #endregion
-
-        #region ITEM EXTENSION
-
-        public class SavedItem
+        private static string HexToRGB(string hex)
         {
-            public string shortname;
-            public int itemid;
-            public float condition;
-            public float maxcondition;
-            public int amount;
-            public int ammoamount;
-            public string ammotype;
-            public int flamefuel;
-            public ulong skinid;
-            public bool weapon;
-            public List<SavedItem> mods;
+            if (string.IsNullOrEmpty(hex))
+            {
+                hex = "#FFFFFFFF";
+            }
+
+            var str = hex.Trim('#');
+
+            if (str.Length == 6)
+                str += "FF";
+
+            if (str.Length != 8)
+            {
+                throw new Exception(hex);
+                throw new InvalidOperationException("Cannot convert a wrong format.");
+            }
+
+            var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
+            var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
+            var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
+            var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
+
+            Color color = new Color32(r, g, b, a);
+            return $"{color.r:F2} {color.g:F2} {color.b:F2} {color.a:F2}";
         }
 
         List<SavedItem> SaveItems(List<Item> items) => items.Select(SaveItem).ToList();
 
-        SavedItem SaveItem(Item item)
+        bool BackpackHide(uint itemID, ulong playerId)
         {
-            SavedItem iItem = new SavedItem
+            BackpackStorage backpackStorage;
+            if (!opensBackpack.TryGetValue(playerId, out backpackStorage)) return false;
+            opensBackpack.Remove(playerId);
+            if (backpackStorage == null) return false;
+            var items = SaveItems(backpackStorage.GetItems);
+            if (items.Count > 0) storedData.backpacks[itemID] = items;
+            else storedData.backpacks.Remove(itemID);
+
+            backpackStorage.Close();
+
+            return true;
+        }
+
+        void BackpackOpen(BasePlayer player)
+        {
+            if (player.inventory.loot?.entitySource != null) return;
+
+            Item backpack = null;
+
+            foreach (var item in player.inventory.containerWear.itemList)
             {
-                shortname = item.info?.shortname,
-                amount = item.amount,
-                mods = new List<SavedItem>(),
-                skinid = item.skin
-            };
-            if (item.info == null) return iItem;
-            iItem.itemid = item.info.itemid;
-            iItem.weapon = false;
-            if (item.hasCondition)
-            {
-                iItem.condition = item.condition;
-                iItem.maxcondition = item.maxCondition;
+
+                if (item.skin == _config.skinIdBackpack)
+                {
+                    backpack = item;
+                    break;
+                }
             }
-            FlameThrower flameThrower = item.GetHeldEntity()?.GetComponent<FlameThrower>();
-            if(flameThrower != null)
-                iItem.flamefuel = flameThrower.ammo;
-            if (item.info.category.ToString() != "Weapon") return iItem;
-            BaseProjectile weapon = item.GetHeldEntity() as BaseProjectile;
-            if (weapon == null) return iItem;
-            if (weapon.primaryMagazine == null) return iItem;
-            iItem.ammoamount = weapon.primaryMagazine.contents;
-            iItem.ammotype = weapon.primaryMagazine.ammoType.shortname;
-            iItem.weapon = true;
-            if (item.contents != null)
-                foreach (var mod in item.contents.itemList)
-                    if (mod.info.itemid != 0)
-                        iItem.mods.Add(SaveItem(mod));
-            return iItem;
+
+            if (backpack == null)
+            {
+                SendReply(player, "Для того, чтобы воспользоваться рюкзаком, необходимо одеть его в слоты одежды!");
+                return;
+            }
+
+            if (Interface.Oxide.CallHook("CanBackpackOpen", player) != null) return;
+
+            timer.Once(0.1f, () =>
+            {
+                if (!player.IsOnGround())
+                {
+                    SendReply(player, "Сначала приземлитесь, а потом пробуйте открыть рюкзак!!");
+                    return;
+                }
+
+                List<SavedItem> savedItems;
+                List<Item> items = new List<Item>();
+                if (storedData.backpacks.TryGetValue(backpack.uid, out savedItems))
+                    items = RestoreItems(savedItems);
+                BackpackStorage backpackStorage = BackpackStorage.Spawn(player);
+
+                opensBackpack.Add(player.userID, backpackStorage);
+                if (items.Count > 0)
+                    backpackStorage.Push(items);
+                backpackStorage.StartLoot();
+            });
         }
 
         List<Item> RestoreItems(List<SavedItem> sItems)
@@ -694,21 +566,36 @@ namespace Oxide.Plugins
         Item BuildItem(SavedItem sItem)
         {
             if (sItem.amount < 1) sItem.amount = 1;
-            Item item = ItemManager.CreateByItemID(sItem.itemid, sItem.amount, sItem.skinid);
+            Item item = null;
+            item = ItemManager.CreateByItemID(sItem.itemid, sItem.amount, sItem.skinid);
+
             if (item.hasCondition)
             {
                 item.condition = sItem.condition;
                 item.maxCondition = sItem.maxcondition;
+                item.busyTime = sItem.busyTime;
+            }
+
+            if (sItem.name != null)
+            {
+                item.name = sItem.name;
+            }
+
+            if (sItem.OnFire)
+            {
+                item.SetFlag(global::Item.Flag.OnFire, true);
             }
             FlameThrower flameThrower = item.GetHeldEntity()?.GetComponent<FlameThrower>();
-            if(flameThrower)
+            if (flameThrower)
                 flameThrower.ammo = sItem.flamefuel;
             return item;
         }
 
         Item BuildWeapon(SavedItem sItem)
         {
-            Item item = ItemManager.CreateByItemID(sItem.itemid, 1, sItem.skinid);
+            Item item = null;
+            item = ItemManager.CreateByItemID(sItem.itemid, 1, sItem.skinid);
+
             if (item.hasCondition)
             {
                 item.condition = sItem.condition;
@@ -728,125 +615,307 @@ namespace Oxide.Plugins
             return item;
         }
 
-        #endregion
-
-        #region EXTERNAL CALLS
-
-        [PluginReference] Plugin Duel;
-
-        bool InDuel(BasePlayer player) => Duel?.Call<bool>("IsPlayerOnActiveDuel", player) ?? false;
-
-        #endregion
-        
-
-        public List<string> permisions = new List<string>()
+        SavedItem SaveItem(Item item)
         {
-            "backpack.size1",
-            "backpack.size2"
-        };
+            SavedItem iItem = new SavedItem
+            {
+                shortname = item.info?.shortname,
+                amount = item.amount,
+                mods = new List<SavedItem>(),
+                skinid = item.skin,
+                busyTime = item.busyTime,
 
+            };
+            if (item.HasFlag(global::Item.Flag.OnFire))
+            {
+                iItem.OnFire = true;
+            }
+            if (item.info == null) return iItem;
+            iItem.itemid = item.info.itemid;
+            iItem.weapon = false;
 
-
-
-        #region File Manager
-
-        private GameObject FileManagerObject;
-        private FileManager m_FileManager;
-
-        /// <summary>
-        /// Инициализация скрипта взаимодействующего с файлами сервера
-        /// </summary>
-        void InitFileManager()
-        {
-            FileManagerObject = new GameObject( "MAP_FileManagerObject" );
-            m_FileManager = FileManagerObject.AddComponent<FileManager>();
+            iItem.name = item.name;
+            if (item.hasCondition)
+            {
+                iItem.condition = item.condition;
+                iItem.maxcondition = item.maxCondition;
+            }
+            FlameThrower flameThrower = item.GetHeldEntity()?.GetComponent<FlameThrower>();
+            if (flameThrower != null)
+                iItem.flamefuel = flameThrower.ammo;
+            if (item.info.category.ToString() != "Weapon") return iItem;
+            BaseProjectile weapon = item.GetHeldEntity() as BaseProjectile;
+            if (weapon == null) return iItem;
+            if (weapon.primaryMagazine == null) return iItem;
+            iItem.ammoamount = weapon.primaryMagazine.contents;
+            iItem.ammotype = weapon.primaryMagazine.ammoType.shortname;
+            iItem.weapon = true;
+            if (item.contents != null)
+                foreach (var mod in item.contents.itemList)
+                    if (mod.info.itemid != 0)
+                        iItem.mods.Add(SaveItem(mod));
+            return iItem;
         }
 
-        class FileManager : MonoBehaviour
+        #endregion
+
+        #region Class
+
+        public class BackpackStorage : MonoBehaviour
         {
-            int loaded = 0;
-            int needed = 0;
+            public StorageContainer container;
+            public Item backpack;
+            public BasePlayer player;
 
-            public bool IsFinished => needed == loaded;
-            const ulong MaxActiveLoads = 10;
-            Dictionary<string, FileInfo> files = new Dictionary<string, FileInfo>();
-
-            DynamicConfigFile dataFile = Interface.Oxide.DataFileSystem.GetFile( "Backpack/Images" );
-
-            private class FileInfo
+            public void Initialization(StorageContainer container, Item backpack, BasePlayer player)
             {
-                public string Url;
-                public string Png;
+                this.container = container;
+                this.backpack = backpack;
+                this.player = player;
+
+                container.ItemFilter(backpack, -1);
+
+                BlockBackpackSlots(true);
             }
 
-            public void SaveData()
+            public List<Item> GetItems => container.inventory.itemList.Where(i => i != null).ToList();
+
+            public static StorageContainer CreateContainer(BasePlayer player)
             {
-                dataFile.WriteObject( files );
+                var storage =
+                    GameManager.server.CreateEntity("assets/prefabs/deployable/small stash/small_stash_deployed.prefab")
+                        as StorageContainer;
+                if (storage == null) return null;
+                storage.transform.position = new Vector3(0f, 100f, 0);
+                storage.panelName = "largewoodbox";
+                storage.name = "backpack";
+                //storage.SetFlag(BaseEntity.Flags.Reserved1, true); // = "backpack";
+
+                ItemContainer container = new ItemContainer { playerOwner = player };
+                container.ServerInitialize((Item)null, ins._config.backpackSize);
+
+                if ((int)container.uid == 0)
+                    container.GiveUID();
+
+                storage.inventory = container;
+                if (!storage) return null;
+                storage.SendMessage("SetDeployedBy", player, (SendMessageOptions)1);
+                storage.Spawn();
+
+                return storage;
             }
 
-            public string GetPng( string name ) => files[ name ].Png;
-
-            private void Awake()
+            private void PlayerStoppedLooting(BasePlayer player)
             {
-                files = dataFile.ReadObject<Dictionary<string, FileInfo>>() ?? new Dictionary<string, FileInfo>();
+                BlockBackpackSlots(false);
+
+                ins.BackpackHide(backpack.uid, player.userID);
             }
 
-            public IEnumerator LoadFile( string name, string url )
+            public void StartLoot()
             {
-                if (files.ContainsKey( name ) && files[ name ].Url == url && !string.IsNullOrEmpty( files[ name ].Png )) yield break;
-                files[ name ] = new FileInfo() { Url = url };
-                needed++;
-                yield return StartCoroutine( LoadImageCoroutine( name, url ) );
+                container.SetFlag(BaseEntity.Flags.Open, true, false);
+                player.inventory.loot.StartLootingEntity(container, false);
+                player.inventory.loot.AddContainer(container.inventory);
+                player.inventory.loot.SendImmediate();
+                player.ClientRPCPlayer(null, player, "RPC_OpenLootPanel", container.panelName);
+                container.DecayTouch();
+                container.SendNetworkUpdate();
             }
 
-            IEnumerator LoadImageCoroutine( string name, string url )
+            public static BackpackStorage Spawn(BasePlayer player)
             {
-                using (WWW www = new WWW( url ))
+                player.EndLooting();
+                var storage = CreateContainer(player);
+
+                Item backpack = null;
+
+                backpack = player.inventory.containerWear.itemList.Find(x => x.skin == ins._config.skinIdBackpack);
+
+                if (backpack == null) return null;
+
+                var box = storage.gameObject.AddComponent<BackpackStorage>();
+
+                box.Initialization(storage, backpack, player);
+
+                return box;
+            }
+
+            public void Close()
+            {
+                container.inventory.itemList.Clear();
+                container.Kill();
+            }
+
+            public void Push(List<Item> items)
+            {
+                for (int i = items.Count - 1; i >= 0; i--)
+                    items[i].MoveToContainer(container.inventory);
+            }
+
+            public void BlockBackpackSlots(bool state)
+            {
+                backpack.LockUnlock(state);
+
+                foreach (var item in player.inventory.AllItems())
+                    if (item.skin == ins._config.skinIdBackpack)
+                        item.LockUnlock(state);
+            }
+        }
+
+        #endregion
+
+        #region Data
+
+        class StoredData
+        {
+            public Dictionary<uint, List<SavedItem>> backpacks = new Dictionary<uint, List<SavedItem>>();
+        }
+
+        public class SavedItem
+        {
+            public string shortname;
+            public int itemid;
+            public float condition;
+            public float maxcondition;
+            public int amount;
+            public int ammoamount;
+            public string ammotype;
+            public int flamefuel;
+            public ulong skinid;
+            public string name;
+            public bool weapon;
+            public float busyTime;
+            public bool OnFire;
+            public List<SavedItem> mods;
+        }
+
+        void SaveData()
+        {
+            BackpackData.WriteObject(storedData);
+        }
+
+        void LoadData()
+        {
+            BackpackData = Interface.Oxide.DataFileSystem.GetFile(_config.fileName);
+            try
+            {
+                storedData =
+                    Interface.Oxide.DataFileSystem.ReadObject<StoredData>(_config.fileName);
+            }
+            catch
+            {
+                storedData = new StoredData();
+            }
+        }
+
+        StoredData storedData;
+        private DynamicConfigFile BackpackData;
+
+        #endregion
+
+        #region Configuration
+
+        public void CheckConfig()
+        {
+            if (_config.backpackSize > 30)
+                _config.backpackSize = 30;
+
+            foreach (var item in _config.items)
+            {
+                if (item.itemID != 0) continue;
+
+                var itemDef = ItemManager.FindItemDefinition(item.shortname);
+                item.itemID = itemDef.itemid;
+            }
+            ServerMgr.Instance.StartCoroutine(DownloadImages());
+        }
+
+        protected override void SaveConfig()
+        {
+            Config.WriteObject(_config);
+        }
+
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            _config = Config.ReadObject<Configuration>();
+        }
+
+        protected override void LoadDefaultConfig()
+        {
+            _config = new Configuration()
+            {
+                backpackSize = 12,
+                fileName = "Backpack/backpack",
+                skinIdBackpack = 1720637353U,
+                consoleCommand = "backpack.open",
+                chatCommandOpen = "bp",
+                chatCommand = "backpack",
+                displayName = "Рюкзак\n  <size=16>████████████████████</size>\n<size=12>   Рюкзак, позволяет переносить в себе предметы. \n   Количество слотов: 12</size>",
+                items = new List<ItemInfo>()
                 {
-                    yield return www;
-                    using (MemoryStream stream = new MemoryStream())
+                    new ItemInfo()
                     {
-                        if (string.IsNullOrEmpty( www.error ))
-                        {
-                            var entityId = CommunityEntity.ServerInstance.net.ID;
-                            var crc32 = FileStorage.server.Store(www.bytes, FileStorage.Type.png, entityId ).ToString();
-                            files[ name ].Png = crc32;
-                        }
+                        shortname = "cloth",
+                        amount = 300,
+                    },
+                    new ItemInfo()
+                    {
+                        shortname = "leather",
+                        amount = 150,
+                    },
+                    new ItemInfo()
+                    {
+                        shortname = "metal.fragments",
+                        amount = 1000,
+                    },
+                    new ItemInfo()
+                    {
+                        shortname = "metal.refined",
+                        amount = 30
                     }
                 }
-                loaded++;
-            }
+            };
+        }
+
+        public Configuration _config;
+
+        public class Configuration
+        {
+            [JsonProperty("Консольная команда для открытия рюкзака")]
+            public string consoleCommand = "";
+
+            [JsonProperty("Чат команда для открытия крафта рюкзака")]
+            public string chatCommand = "";
+
+            [JsonProperty("Чат команда для открытия самого рюкзака")]
+            public string chatCommandOpen = "bp";
+
+            [JsonProperty("Количество слотов в рюкзаке")]
+            public int backpackSize = 0;
+
+            [JsonProperty("Название для рюкзака")]
+            public string displayName = "";
+
+            [JsonProperty("СкинИД рюкзака")]
+            public ulong skinIdBackpack = 1719575499U;
+
+            [JsonProperty("Расположение Data файла")]
+            public string fileName = "Backpack/backpack";
+
+            [JsonProperty("Необходимые предметы для крафта рюкзака")]
+            public List<ItemInfo> items = new List<ItemInfo>();
+        }
+
+        public class ItemInfo
+        {
+            [JsonProperty("Шортнейм предмета")] public string shortname = "";
+            [JsonProperty("Количество предмета")] public int amount = 0;
+            [JsonProperty("СкинИД предмета")] public ulong skinID = 0U;
+            [JsonProperty("АйтемИД предмета")] public int itemID = 0;
         }
 
         #endregion
-		#region permissions
-        public static class PermissionService
-        {
-            public static Permission permission = Interface.GetMod().GetLibrary<Permission>();
-
-            public static bool HasPermission(BasePlayer player, string permissionName)
-            {
-                if(player == null || string.IsNullOrEmpty(permissionName))
-                    return false;
-
-                var uid = player.UserIDString;
-                if(permission.UserHasPermission(uid, permissionName))
-                    return true;
-
-                return false;
-            }
-
-            public static void RegisterPermissions(Plugin owner, List<string> permissions)
-            {
-                if(owner == null) throw new ArgumentNullException("owner");
-                if(permissions == null) throw new ArgumentNullException("commands");
-
-                foreach(var permissionName in permissions.Where(permissionName => !permission.PermissionExists(permissionName)))
-                {
-                    permission.RegisterPermission(permissionName, owner);
-                }
-            }
-        }
-		#endregion
     }
 }

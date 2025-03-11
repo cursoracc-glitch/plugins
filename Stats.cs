@@ -1,1310 +1,436 @@
-using Newtonsoft.Json.Linq;
-using Oxide.Core;
-using Oxide.Core.Database;
-using Oxide.Core.Plugins;
-using Oxide.Core.SQLite.Libraries;
-using Oxide.Game.Rust.Cui;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Newtonsoft.Json;
+using Oxide.Core;
+using Oxide.Core.Configuration;
+using Oxide.Core.Libraries.Covalence;
+using Oxide.Core.Plugins;
+using Oxide.Game.Rust;
+using Oxide.Game.Rust.Cui;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Stats", "VooDoo", "1.0.0")]
-    [Description("Player's stats")]
+    [Info("Stats", "Я и Я", "1.0.0")]
     public class Stats : RustPlugin
     {
-        public static Stats instance;
-        [PluginReference] Plugin XMenu;
+        #region Fields
 
-        public static SQLite SQLite = Interface.Oxide.GetLibrary<SQLite>();
-        public static Connection SQLiteConnection;
-        public static string DataBase = "Stats.db";
+        private string Layer = "UI_Stats";
+        private const int Count = 9;
 
-        #region Config
-        private PluginConfig config;
-        private class PluginConfig
+        private readonly string[] _statsName = { "Убийств", "Смертей", "Коэффициент", "Выстрелов сделано", "Попаданий", "Попаданий в голову", "Коэффицент попаданий в голову", "Коэффицент попаданий", "Добыто ресурсов" };
+
+        private Dictionary<string, string> tops = new Dictionary<string, string>()
         {
-            public ColorConfig colorConfig;
-            public class ColorConfig
-            {
-                public string menuContentHighlighting;
-                public string menuContentHighlightingalternative;
-
-                public string menuContentText;
-                public string menuContentTextAlternative;
-
-                public string gradientColor;
-            }
-        }
-
-        private void Init()
-        {
-            config = Config.ReadObject<PluginConfig>();
-        }
-
-        protected override void LoadDefaultConfig()
-        {
-            Config.WriteObject(GetDefaultConfig(), true);
-        }
-
-        private PluginConfig GetDefaultConfig()
-        {
-            return new PluginConfig
-            {
-                colorConfig = new PluginConfig.ColorConfig()
-                {
-                    menuContentHighlighting = "#0000007f",
-                    menuContentHighlightingalternative = "#FFFFFF10",
-
-                    menuContentTextAlternative = "#90BD47",
-                    menuContentText = "#FFFFFFAA",
-
-                    gradientColor = "#00000099",
-                },
-            };
-        }
+            {"Убийств", "Убийцы"},
+            {"Смертей", "Суицидники"},
+            {"Добычи", "Добытчики"},
+            {"Выстрелов", "Стрелки"},
+            {"Попаданий в голову", "Хедшотеры"},
+            {"Попаданий", "Стрелки"},
+            {"в голову", "Хедшотеры"},
+            {"попаданий", "Стрелки"}
+        };
+       
         #endregion
 
-        #region U'Mod Hook's
-        Timer TimerInitialize;
-        private void OnServerInitialized()
+        #region Commands
+
+        private void chatCmdStats(BasePlayer player, string command, string[] args)
         {
-            instance = this;
-            TimerInitialize = timer.Every(5f, () =>
-            {
-                if (XMenu.IsLoaded)
-                {
-                    XMenu.Call("API_RegisterMenu", this.Name, "Stats", "assets/icons/market.png", "RenderStats", null);
-
-                    cmd.AddChatCommand("stats", this, (p, cmd, args) => rust.RunClientCommand(p, "custommenu true Stats"));
-                    TimerInitialize.Destroy();
-                }
-            });
-
-            #region Initialize
-            try
-            {
-                SQLiteConnection = SQLite.OpenDb(DataBase, this);
-                if (SQLiteConnection == null)
-                {
-                    PrintWarning($"Couldn't open DataBase");
-                }
-                else
-                {
-                    SQLite.Insert(Core.Database.Sql.Builder.Append("CREATE TABLE IF NOT EXISTS Stats (" +
-                              "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                              "steamid BIGINT(17) UNIQUE, " +
-                              "name VARCHAR(256), " +
-                              "kills INTEGER, " +
-                              "death INTEGER, " +
-                              "suicides INTEGER, " +
-                              "killanimal INTEGER, " +
-                              "killnpc INTEGER, " +
-                              "killhelicopter INTEGER, " +
-                              "killbradley INTEGER, " +
-                              "wood INTEGER, " +
-                              "stones INTEGER, " +
-                              "metalore INTEGER, " +
-                              "sulfurore INTEGER, " +
-                              "hqmetalore INTEGER, " +
-                              "resources INTEGER);"), SQLiteConnection);
-                }
-
-                timer.Once(3f, () => { foreach (var p in BasePlayer.activePlayerList) { OnPlayerConnected(p); } });
-            }
-            catch (Exception e)
-            {
-                PrintWarning(e.Message);
-            }
-            #endregion
+            ShowStatistic(player, player.userID);
         }
 
-        void Unload()
+        private void consoleCmdStats(ConsoleSystem.Arg arg)
         {
-            SQLite.CloseDb(SQLiteConnection);
-        }
+            var player = arg.Connection?.player as BasePlayer;
 
-        void OnPlayerConnected(BasePlayer player)
-        {
-            InsertDataBase(player);
-        }
-
-        #region Insert/Update
-        void InsertDataBase(BasePlayer player)
-        {
-            try
-            {
-                string displayName = player.displayName.Replace("\'", "").Replace("\"", "").Replace("@", "");
-                SQLite.Insert(Core.Database.Sql.Builder.Append($"INSERT OR IGNORE into Stats ( steamid, name, kills, death, suicides, killanimal, killnpc, killhelicopter, killbradley, wood, stones, metalore, sulfurore, hqmetalore, resources ) values ( {player.userID}, '{Name}', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );"), SQLiteConnection);
-                SQLite.Insert(Core.Database.Sql.Builder.Append($@"UPDATE Stats SET name = '{displayName}' WHERE steamid={player.userID};"), SQLiteConnection);
-            }
-            catch (Exception e)
-            {
-                PrintWarning(e.Message);
-            }
-        }
-
-        void UpdateDataBase(BasePlayer player, string Name, int Value)
-        {
-            try
-            {
-                string ValueName = Name.Replace(".", "").Replace("@", "");
-                SQLite.Insert(Core.Database.Sql.Builder.Append($"UPDATE Stats SET {ValueName} = {ValueName} + {Value} WHERE steamid={player.userID};"), SQLiteConnection);
-            }
-            catch (Exception e)
-            {
-                PrintWarning(e.Message);
-            }
-        }
-        #endregion
-
-        #region OnEntityDeath
-        private Dictionary<uint, BasePlayer> lastHelicopterAttack = new Dictionary<uint, BasePlayer>();
-        private Dictionary<uint, BasePlayer> lastBradleyAttack = new Dictionary<uint, BasePlayer>();
-        void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
-        {
-            if (entity is BaseHelicopter && info.InitiatorPlayer != null)
-                lastHelicopterAttack[entity.net.ID] = info.InitiatorPlayer;
-
-            if (entity is BradleyAPC && info.InitiatorPlayer != null)
-                lastBradleyAttack[entity.net.ID] = info.InitiatorPlayer;
-        }
-
-        void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
-        {
-            if (info == null)
-                return;
-
-            try
-            {
-                if (entity is BaseAnimalNPC)
-                {
-                    if (info.InitiatorPlayer != null)
-                    {
-                        UpdateDataBase(info.InitiatorPlayer, "killanimal", 1);
-                    }
-                    return;
-                }
-                if (entity is HTNPlayer || entity is NPCPlayer)
-                {
-                    if (info != null && info.InitiatorPlayer != null)
-                    {
-                        UpdateDataBase(info.InitiatorPlayer, "killnpc", 1);
-                    }
-                    return;
-                }
-                if (entity is BasePlayer)
-                {
-                    if (info.InitiatorPlayer != null && !(info.InitiatorPlayer is HTNPlayer) && !(info.InitiatorPlayer is NPCPlayer))
-                    {
-                        if ((entity as BasePlayer).userID == info.InitiatorPlayer.userID)
-                        {
-                            UpdateDataBase(info.InitiatorPlayer, "suicides", 1);
-                        }
-                        else
-                        {
-                            UpdateDataBase(info.InitiatorPlayer, "kills", 1);
-                            UpdateDataBase((entity as BasePlayer), "death", 1);
-                        }
-                    }
-                    else
-                    {
-                        UpdateDataBase((entity as BasePlayer), "death", 1);
-                    }
-                    return;
-                }
-
-                if (entity is BaseHelicopter || entity is CH47Helicopter)
-                {
-                    if (info.InitiatorPlayer != null)
-                    {
-                        UpdateDataBase(info.InitiatorPlayer, "killhelicopter", 1);
-                    }
-                    else
-                    {
-                        if (lastHelicopterAttack.ContainsKey(entity.net.ID))
-                        {
-                            UpdateDataBase(lastHelicopterAttack[entity.net.ID], "killhelicopter", 1);
-                        }
-                    }
-                    return;
-                }
-
-                if (entity is BradleyAPC)
-                {
-                    if (info.InitiatorPlayer != null)
-                    {
-                        UpdateDataBase(info.InitiatorPlayer, "killbradley", 1);
-                    }
-                    else
-                    {
-                        if (lastBradleyAttack.ContainsKey(entity.net.ID))
-                        {
-                            UpdateDataBase(lastHelicopterAttack[entity.net.ID], "killbradley", 1);
-                        }
-                    }
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                PrintWarning(entity.PrefabName + "\n" + (info != null ? "info != null" : "info == null"));
-                PrintWarning(entity.PrefabName + "\n" + (info.InitiatorPlayer != null ? $"{info.InitiatorPlayer.displayName} Initiator player != null" : "initiator player == null"));
-                PrintWarning(entity.PrefabName + "\n" + ex.ToString());
-            }
-        }
-        #endregion
-
-        #region Resources
-        void OnPlayerGather(BasePlayer player, Item item)
-        {
             if (player == null) return;
 
-            switch (item.info.shortname)
+            switch (arg.GetString(0))
             {
-                case "wood": UpdateDataBase(player, "wood", item.amount); break;
-                case "stones": UpdateDataBase(player, "stones", item.amount); break;
-                case "sulfur.ore": UpdateDataBase(player, "sulfurore", item.amount); break;
-                case "metal.ore": UpdateDataBase(player, "metalore", item.amount); break;
-                case "hq.metal.ore": UpdateDataBase(player, "hqmetalore", item.amount); break;
+                case "close":
+                {
+                    CuiHelper.DestroyUi(player, Layer);
+                    break;
+                }
             }
-            UpdateDataBase(player, "resources", item.amount);
+        }
+ 
+        #endregion
+        
+        #region Hooks
+        
+        void OnServerInitialized()
+        {
+            LoadData();
+            
+            SaveData();
+            
+            cmd.AddChatCommand("stats", this, "chatCmdStats");
+            //cmd.AddChatCommand("top", this, "chatCmdTop");
+            //cmd.AddConsoleCommand("UI_Stats", this, "consoleCmdStats");
+            
+            foreach (var p in BasePlayer.activePlayerList) OnPlayerConnected(p);
+            AddImage("https://i.ibb.co/3dkM0SX/frame.png","St_frame_img");
+            AddImage("https://i.ibb.co/ykW7XrG/exit.png","Stat_exit_img");
         }
 
-        void OnDispenserGather(ResourceDispenser dispenser, BaseEntity entity, Item item) => OnPlayerGather(entity?.ToPlayer(), item);
-
-        void OnDispenserBonus(ResourceDispenser dispenser, BasePlayer player, Item item) => OnPlayerGather(player, item);
-
-        void OnGrowableGather(GrowableEntity plant, Item item, BasePlayer player) => OnPlayerGather(player, item);
-
-        void OnCollectiblePickup(Item item, BasePlayer player) => OnPlayerGather(player, item);
-        #endregion
-        #endregion
-
-        #region UI
-        #region Layers
-        public const string MenuLayer = "XMenu";
-        public const string MenuItemsLayer = "XMenu.MenuItems";
-        public const string MenuSubItemsLayer = "XMenu.MenuSubItems";
-        public const string MenuContent = "XMenu.Content";
-        #endregion
-
-        private void RenderStats(ulong userID, object[] objects)
+        object OnDispenserBonus(ResourceDispenser dispenser, BasePlayer player, Item item)
         {
-            CuiElementContainer Container = (CuiElementContainer)objects[0];
-            bool FullRender = (bool)objects[1];
-            string Name = (string)objects[2];
-            int ID = (int)objects[3];
-            int Page = (int)objects[4];
-            string StatName = string.IsNullOrEmpty((string)objects[5]) ? "Kills" : (string)objects[5];
+            if (player == null) return true;
 
-            BasePlayer player = BasePlayer.FindByID(userID);
-            Container.Add(new CuiElement
+            if (storedData.ContainsKey(player.userID)) storedData[player.userID][StatsType.Gather] += item.amount;
+
+            return null;
+        }
+        
+        object OnDispenserGather(ResourceDispenser dispenser, BaseEntity entity, Item item)
+        {
+            var player = entity.ToPlayer();
+
+            if (player == null) return true;
+
+            if (storedData.ContainsKey(player.userID)) storedData[player.userID][StatsType.Gather] += item.amount;
+
+            return null;
+        }
+        
+        object OnPlayerDeath(BasePlayer player, HitInfo info)
+        {
+            if (info == null) return null;
+            if (player == null) return null;
+            if (player.IsNpc) return null;
+            if (info.InitiatorPlayer == null) return null; 
+            if (info.InitiatorPlayer.IsNpc) return null;
+            
+            if (info.InitiatorPlayer != null)
             {
-                Name = MenuContent,
-                Parent = MenuLayer,
+                var killer = info.InitiatorPlayer;
+
+                if (killer != player) 
+                { 
+                    if (storedData.ContainsKey(killer.userID)) storedData[killer.userID][StatsType.Kill]++;
+                }
+                if(storedData.ContainsKey(player.userID)) storedData[player.userID][StatsType.Death]++;
+            }
+             
+            return null; 
+        }
+        
+        void OnWeaponFired(BaseProjectile projectile, BasePlayer player, ItemModProjectile mod, ProtoBuf.ProjectileShoot projectiles)
+        {
+            if(storedData.ContainsKey(player.userID)) storedData[player.userID][StatsType.Shot]++;
+        }
+        
+        void OnPlayerConnected(BasePlayer player)
+        {
+            if(!storedData.ContainsKey(player.userID))
+                storedData.Add(player.userID, new Dictionary<StatsType, int>
+                {
+                    {StatsType.Kill, 0},
+                    {StatsType.Death, 0},
+                    {StatsType.Shot, 0},
+                    {StatsType.Hit, 0},
+                    {StatsType.HitHead, 0},
+                    {StatsType.Gather, 0}
+                });
+        }
+        
+        object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {
+            if (entity is BasePlayer)
+            {
+                var attacker = info.InitiatorPlayer;  
+                
+                if (attacker != null)
+                {
+                    if (!attacker.IsNpc)
+                    {
+                        if (info.isHeadshot)
+                        {
+                            storedData[attacker.userID][StatsType.HitHead]++;
+                        }
+                        storedData[attacker.userID][StatsType.Hit]++;
+                    }
+                    else return null; 
+                }
+            }
+            
+            return null;
+        }
+        
+        void Unload()
+        {
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                CuiHelper.DestroyUi(player, Layer);
+            }
+            
+            SaveData();
+        }
+
+        #endregion
+
+        #region Methods
+
+        [HookMethod("ApiGetName")]
+        public string ApiGetName(ulong steamID)
+        {
+            return covalence.Players.FindPlayerById(steamID.ToString())?.Name ?? "UNKNOWN";
+        }
+
+        private void ShowStatistic(BasePlayer player, ulong userID)
+        {
+            var statPlayer = storedData[userID];
+            var name = covalence.Players.FindPlayerById(userID.ToString())?.Name.Replace('"', ' ') ?? player.UserIDString;
+            if (name.Length > 16) name = name.Substring(0, 16) + "..";
+
+            var container = new CuiElementContainer();
+
+            CuiHelper.DestroyUi(player, Layer);
+
+            container.Add(new CuiPanel
+            {
+                CursorEnabled = true,
+                Image =
+                    {
+                        FadeIn = 0.2f,
+                        Sprite = "assets/content/ui/ui.background.transparent.radial.psd",
+                        Color = "0 0 0 1"
+                    }
+            }, "Overlay", Layer);
+            container.Add(new CuiPanel
+            {
+                Image =
+                    {
+                        FadeIn = 0.2f,
+                        Color = "0.2 0.2 0.17 0.7",
+                        Material = "assets/content/ui/uibackgroundblur.mat"
+                    }
+            }, Layer);
+
+            container.Add(new CuiLabel
+            {
+                Text = { Text = "СТАТИСТИКА", Align = TextAnchor.UpperCenter, FontSize = 40, Font = "robotocondensed-bold.ttf" },
+                RectTransform = { AnchorMin = "0.3 1", AnchorMax = "0.7 1", OffsetMin = "0 -150", OffsetMax = "0 -86.6" }
+            }, Layer);
+            container.Add(new CuiLabel
+            {
+                Text = { Text = "Тут можно посмотреть статистику игрока", Align = TextAnchor.UpperCenter, FontSize = 18, Font = "robotocondensed-regular.ttf" },
+                RectTransform = { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = "0 -150", OffsetMax = "0 -128" }
+            }, Layer);
+
+            container.Add(new CuiElement
+            {
+                Parent = Layer,
                 Components =
                     {
-                        new CuiImageComponent
+                        GetImageComponent("https://i.ibb.co/ykW7XrG/exit.png","Stat_exit_img"),
+                        new CuiRectTransformComponent {AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-73.9 20", OffsetMax = "-28.6 80"},
+                    }
+            });
+            container.Add(new CuiElement
+            {
+                Parent = Layer,
+                Components =
+                    {
+                        new CuiImageComponent {Color = "0.33 0.87 0.59 0.6"},
+                        new CuiRectTransformComponent {AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-291.3 22.6", OffsetMax = "-108 25.2"}
+                    }
+            });
+            
+            container.Add(new CuiButton
+            {
+                Button =
                         {
                             Color = "0 0 0 0",
+                            Command = "UI_Stats close",
+                            Close = Layer
                         },
-                        new CuiRectTransformComponent
-                        {
-                            AnchorMin = "0.5 0.5",
-                            AnchorMax = "0.5 0.5",
-                            OffsetMin = "-430 -230",
-                            OffsetMax = "490 270"
-                        },
-                    }
-            });
-
-            #region Table
-            Container.Add(new CuiElement
+                Text = { Text = "Покинуть страницу", Align = TextAnchor.UpperCenter, FontSize = 18 },
+                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 0", OffsetMin = "-291.3 22.6", OffsetMax = "-108 49.2" },
+            }, Layer);
+            container.Add(new CuiButton
             {
-                Name = MenuContent + $".Title",
-                Parent = MenuContent,
-                Components =
-                    {
-                        new CuiTextComponent
-                        {
-                            Text = $"<color={config.colorConfig.menuContentText}><b>СТАТИСТИКА ЛУЧШИХ ИГРОКОВ </b></color>",
-                            Align = TextAnchor.MiddleCenter,
-                            FontSize = 32,
-                            Font = "robotocondensed-regular.ttf"
-                        },
-                        new CuiRectTransformComponent
-                        {
-                            AnchorMin = "0 1",
-                            AnchorMax = "0 1",
-                            OffsetMin = $"0 -50",
-                            OffsetMax = $"920 0",
-                        }
-                    }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.Name",
-                Parent = MenuContent,
-                Components =
-                            {
-                                new CuiImageComponent
-                                {
-                                    Color = HexToRustFormat(config.colorConfig.menuContentHighlighting),
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 1",
-                                    AnchorMax = "0 1",
-                                    OffsetMin = $"77.5 -85",
-                                    OffsetMax = $"190 -60"
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.NameTitle",
-                Parent = MenuContent + $".Content.Stats.Name",
-                Components =
-                            {
-                                new CuiTextComponent
-                                {
-                                    Text = $"<color={config.colorConfig.menuContentText}>Никнейм</color>",
-                                    Align = TextAnchor.MiddleCenter,
-                                    FontSize = 14,
-                                    Font = "robotocondensed-regular.ttf"
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 0",
-                                    AnchorMax = "1 1",
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.Kills",
-                Parent = MenuContent,
-                Components =
-                            {
-                                new CuiImageComponent
-                                {
-                                    Color = HexToRustFormat(config.colorConfig.menuContentHighlighting),
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 1",
-                                    AnchorMax = "0 1",
-                                    OffsetMin = $"193 -85",
-                                    OffsetMax = $"263 -60"
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.KillsTitle",
-                Parent = MenuContent + $".Content.Stats.Kills",
-                Components =
-                            {
-                                new CuiTextComponent
-                                {
-                                    Text = $"<color={config.colorConfig.menuContentText}>Убийств</color>",
-                                    Align = TextAnchor.MiddleCenter,
-                                    FontSize = 14,
-                                    Font = "robotocondensed-regular.ttf"
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 0",
-                                    AnchorMax = "1 1",
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.Deaths",
-                Parent = MenuContent,
-                Components =
-                            {
-                                new CuiImageComponent
-                                {
-                                    Color = HexToRustFormat(config.colorConfig.menuContentHighlighting),
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 1",
-                                    AnchorMax = "0 1",
-                                    OffsetMin = $"266 -85",
-                                    OffsetMax = $"336 -60"
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.DeathsTitle",
-                Parent = MenuContent + $".Content.Stats.Deaths",
-                Components =
-                            {
-                                new CuiTextComponent
-                                {
-                                    Text = $"<color={config.colorConfig.menuContentText}>Смертей</color>",
-                                    Align = TextAnchor.MiddleCenter,
-                                    FontSize = 14,
-                                    Font = "robotocondensed-regular.ttf"
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 0",
-                                    AnchorMax = "1 1",
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.KillNPC",
-                Parent = MenuContent,
-                Components =
-                            {
-                                new CuiImageComponent
-                                {
-                                    Color = HexToRustFormat(config.colorConfig.menuContentHighlighting),
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 1",
-                                    AnchorMax = "0 1",
-                                    OffsetMin = $"339 -85",
-                                    OffsetMax = $"409 -60"
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.KillNPCTitle",
-                Parent = MenuContent + $".Content.Stats.KillNPC",
-                Components =
-                            {
-                                new CuiTextComponent
-                                {
-                                    Text = $"<color={config.colorConfig.menuContentText}>Ученых</color>",
-                                    Align = TextAnchor.MiddleCenter,
-                                    FontSize = 14,
-                                    Font = "robotocondensed-regular.ttf"
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 0",
-                                    AnchorMax = "1 1",
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.KillAnimals",
-                Parent = MenuContent,
-                Components =
-                            {
-                                new CuiImageComponent
-                                {
-                                    Color = HexToRustFormat(config.colorConfig.menuContentHighlighting),
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 1",
-                                    AnchorMax = "0 1",
-                                    OffsetMin = $"412 -85",
-                                    OffsetMax = $"482 -60"
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.KillAnimalsTitle",
-                Parent = MenuContent + $".Content.Stats.KillAnimals",
-                Components =
-                            {
-                                new CuiTextComponent
-                                {
-                                    Text = $"<color={config.colorConfig.menuContentText}>Животных</color>",
-                                    Align = TextAnchor.MiddleCenter,
-                                    FontSize = 14,
-                                    Font = "robotocondensed-regular.ttf"
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 0",
-                                    AnchorMax = "1 1",
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.MetalOre",
-                Parent = MenuContent,
-                Components =
-                            {
-                                new CuiImageComponent
-                                {
-                                    Color = HexToRustFormat(config.colorConfig.menuContentHighlighting),
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 1",
-                                    AnchorMax = "0 1",
-                                    OffsetMin = $"485 -85",
-                                    OffsetMax = $"555 -60"
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.MetalOreTitle",
-                Parent = MenuContent + $".Content.Stats.MetalOre",
-                Components =
-                            {
-                                new CuiTextComponent
-                                {
-                                    Text = $"<color={config.colorConfig.menuContentText}>Металл</color>",
-                                    Align = TextAnchor.MiddleCenter,
-                                    FontSize = 14,
-                                    Font = "robotocondensed-regular.ttf"
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 0",
-                                    AnchorMax = "1 1",
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.SulfurOre",
-                Parent = MenuContent,
-                Components =
-                            {
-                                new CuiImageComponent
-                                {
-                                    Color = HexToRustFormat(config.colorConfig.menuContentHighlighting),
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 1",
-                                    AnchorMax = "0 1",
-                                    OffsetMin = $"558 -85",
-                                    OffsetMax = $"628 -60"
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.SulfurOreTitle",
-                Parent = MenuContent + $".Content.Stats.SulfurOre",
-                Components =
-                            {
-                                new CuiTextComponent
-                                {
-                                    Text = $"<color={config.colorConfig.menuContentText}>Сера</color>",
-                                    Align = TextAnchor.MiddleCenter,
-                                    FontSize = 14,
-                                    Font = "robotocondensed-regular.ttf"
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 0",
-                                    AnchorMax = "1 1",
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.HQMetal",
-                Parent = MenuContent,
-                Components =
-                            {
-                                new CuiImageComponent
-                                {
-                                    Color = HexToRustFormat(config.colorConfig.menuContentHighlighting),
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 1",
-                                    AnchorMax = "0 1",
-                                    OffsetMin = $"631 -85",
-                                    OffsetMax = $"701 -60"
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.HQMetalTitle",
-                Parent = MenuContent + $".Content.Stats.HQMetal",
-                Components =
-                            {
-                                new CuiTextComponent
-                                {
-                                    Text = $"<color={config.colorConfig.menuContentText}>МВК</color>",
-                                    Align = TextAnchor.MiddleCenter,
-                                    FontSize = 14,
-                                    Font = "robotocondensed-regular.ttf"
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 0",
-                                    AnchorMax = "1 1",
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.Res",
-                Parent = MenuContent,
-                Components =
-                            {
-                                new CuiImageComponent
-                                {
-                                    Color = HexToRustFormat(config.colorConfig.menuContentHighlighting),
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 1",
-                                    AnchorMax = "0 1",
-                                    OffsetMin = $"704 -85",
-                                    OffsetMax = $"822.5 -60"
-                                }
-                            }
-            });
-            Container.Add(new CuiElement
-            {
-                Name = MenuContent + $".Content.Stats.ResTitle",
-                Parent = MenuContent + $".Content.Stats.Res",
-                Components =
-                            {
-                                new CuiTextComponent
-                                {
-                                    Text = $"<color={config.colorConfig.menuContentText}>Всего ресурсов</color>",
-                                    Align = TextAnchor.MiddleCenter,
-                                    FontSize = 14,
-                                    Font = "robotocondensed-regular.ttf"
-                                },
-                                new CuiRectTransformComponent
-                                {
-                                    AnchorMin = "0 0",
-                                    AnchorMax = "1 1",
-                                }
-                            }
-            });
-            #endregion
-
-            #region Buttons
-            int y = 0;
-            Container.Add(new CuiButton
-            {
-                Button = { Color = "0 0 0 0", Command = $"" },
-                RectTransform = {   AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"77.5 {-85 - y * 35}",
-                                        OffsetMax = $"190 {-60 - y * 35}" },
-                Text = { Text = "", Align = TextAnchor.MiddleCenter }
-            }, MenuContent, MenuContent + $".Content.Stats.Btn.Name");
-            Container.Add(new CuiButton
-            {
-                Button = { Color = "0 0 0 0", Command = $"custommenu false Stats 0 0 kills" },
-                RectTransform = {   AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"193 {-85 - y * 35}",
-                                        OffsetMax = $"263 {-60 - y * 35}" },
-                Text = { Text = "", Align = TextAnchor.MiddleCenter }
-            }, MenuContent, MenuContent + $".Content.Stats.Btn.Kills");
-            Container.Add(new CuiButton
-            {
-                Button = { Color = "0 0 0 0", Command = $"custommenu false Stats 0 0 death" },
-                RectTransform = {   AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"266 {-85 - y * 35}",
-                                        OffsetMax = $"336 {-60 - y * 35}" },
-                Text = { Text = "", Align = TextAnchor.MiddleCenter }
-            }, MenuContent, MenuContent + $".Content.Stats.Btn.Deaths");
-            Container.Add(new CuiButton
-            {
-                Button = { Color = "0 0 0 0", Command = $"custommenu false Stats 0 0 killnpc" },
-                RectTransform = {   AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"339 {-85 - y * 35}",
-                                        OffsetMax = $"409 {-60 - y * 35}" },
-                Text = { Text = "", Align = TextAnchor.MiddleCenter }
-            }, MenuContent, MenuContent + $".Content.Stats.Btn.KillNPC");
-            Container.Add(new CuiButton
-            {
-                Button = { Color = "0 0 0 0", Command = $"custommenu false Stats 0 0 killanimal" },
-                RectTransform = {   AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"412 {-85 - y * 35}",
-                                        OffsetMax = $"482 {-60 - y * 35}" },
-                Text = { Text = "", Align = TextAnchor.MiddleCenter }
-            }, MenuContent, MenuContent + $".Content.Stats.Btn.KillAnimals");
-            Container.Add(new CuiButton
-            {
-                Button = { Color = "0 0 0 0", Command = $"custommenu false Stats 0 0 metalore" },
-                RectTransform = {   AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"485 {-85 - y * 35}",
-                                        OffsetMax = $"555 {-60 - y * 35}" },
-                Text = { Text = "", Align = TextAnchor.MiddleCenter }
-            }, MenuContent, MenuContent + $".Content.Stats.Btn.MetalOre");
-            Container.Add(new CuiButton
-            {
-                Button = { Color = "0 0 0 0", Command = $"custommenu false Stats 0 0 sulfurore" },
-                RectTransform = {   AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"558 {-85 - y * 35}",
-                                        OffsetMax = $"628 {-60 - y * 35}" },
-                Text = { Text = "", Align = TextAnchor.MiddleCenter }
-            }, MenuContent, MenuContent + $".Content.Stats.Btn.SulfurOre");
-            Container.Add(new CuiButton
-            {
-                Button = { Color = "0 0 0 0", Command = $"custommenu false Stats 0 0 hqmetalore" },
-                RectTransform = {   AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"631 {-85 - y * 35}",
-                                        OffsetMax = $"701 {-60 - y * 35}" },
-                Text = { Text = "", Align = TextAnchor.MiddleCenter }
-            }, MenuContent, MenuContent + $".Content.Stats.Btn.HQMetal");
-            Container.Add(new CuiButton
-            {
-                Button = { Color = "0 0 0 0", Command = $"custommenu false Stats 0 0 resources" },
-                RectTransform = {   AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"704 {-85 - y * 35}",
-                                        OffsetMax = $"822.5 {-60 - y * 35}" },
-                Text = { Text = "", Align = TextAnchor.MiddleCenter }
-            }, MenuContent, MenuContent + $".Content.Stats.Btn.Res");
-            #endregion
-
-            SelectDataBase(player, StatName, 12, 0);
-            SelectPlayer(player);
-        }
-
-        public void SelectDataBase(BasePlayer player, string Name, int count, int offset)
-        {
-            try
-            {
-                CuiElementContainer Container = new CuiElementContainer();
-                string ValueName = Name.Replace(".", "");
-                var SQLString = Core.Database.Sql.Builder.Append($"SELECT * FROM Stats ORDER BY {ValueName} DESC LIMIT {count} OFFSET {offset};");
-                SQLite.Query(SQLString, SQLiteConnection, obj =>
+                Button =
                 {
-                    if (obj != null)
+                    Color = "0 0 0 0",
+                    Command = "UI_Stats close",
+                    Close = Layer
+                },
+                Text = { Text = "" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+            }, Layer);
+
+            container.Add(new CuiPanel
+            {
+                Image = null,
+                RawImage = GetAvatarImageComponent(userID),
+                RectTransform = {AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-395.3 -96", OffsetMax = "-155.3 144"}
+            }, Layer);
+
+            container.Add(new CuiElement
+            {
+                Parent = Layer,
+                Components =
+                {
+                    GetImageComponent("https://i.ibb.co/3dkM0SX/frame.png","St_frame_img", "0.33 0.87 0.59 0.3"),
+                    new CuiRectTransformComponent
                     {
-                        for (int i = 0, y = 0; i < obj.Count; i++, y++)
-                        {
-                            string color = HexToRustFormat(config.colorConfig.menuContentHighlighting);
-                            if (instance.IsEven(y)) color = HexToRustFormat(config.colorConfig.menuContentHighlightingalternative);
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuLayer + $".Content.Stats.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiImageComponent
-                                    {
-                                        Color = color,
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"77.5 {-120 - y * 30}",
-                                        OffsetMax = $"822.5 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuContent + $".Content.Stats.Name.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentText}>{obj.ElementAt(i)["name"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 10,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"77.5 {-120 - y * 30}",
-                                        OffsetMax = $"190 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuContent + $".Content.Stats.Kills.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentText}>{obj.ElementAt(i)["kills"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"193 {-120 - y * 30}",
-                                        OffsetMax = $"263 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuContent + $".Content.Stats.Deaths.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentText}>{obj.ElementAt(i)["death"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"266 {-120 - y * 30}",
-                                        OffsetMax = $"336 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuContent + $".Content.Stats.KillNPC.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentText}>{obj.ElementAt(i)["killnpc"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"339 {-120 - y * 30}",
-                                        OffsetMax = $"409 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuContent + $".Content.Stats.KillAnimals.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentText}>{obj.ElementAt(i)["killanimal"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"412 {-120 - y * 30}",
-                                        OffsetMax = $"482 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuContent + $".Content.Stats.MetalOre.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentText}>{obj.ElementAt(i)["metalore"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"485 {-120 - y * 30}",
-                                        OffsetMax = $"555 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuContent + $".Content.Stats.SulfurOre.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentText}>{obj.ElementAt(i)["sulfurore"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"558 {-120 - y * 30}",
-                                        OffsetMax = $"628 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuContent + $".Content.Stats.HQMeta;.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentText}>{obj.ElementAt(i)["hqmetalore"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"631 {-120 - y * 30}",
-                                        OffsetMax = $"701 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                            Container.Add(new CuiElement
-                            {
-                                Name = MenuContent + $".Content.Stats.Res.{i}",
-                                Parent = MenuContent,
-                                Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentText}>{obj.ElementAt(i)["resources"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"704 {-120 - y * 30}",
-                                        OffsetMax = $"822.5 {-95 - y * 30}"
-                                    }
-                                }
-                            });
-                        }
-                        CuiHelper.AddUi(player, Container);
+                        AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-395.3 -143.9",
+                        OffsetMax = "-155.3 -100.6"
+                    }
+                }
+            });
+
+            container.Add(new CuiLabel
+            {
+                Text = { Text = name, Align = TextAnchor.MiddleCenter, FontSize = 26, Font = "robotocondensed-bold.ttf" },
+                RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-395.3 -143.9", OffsetMax = "-155.3 -100.6" }
+            }, Layer);
+
+            var stats = new[]
+            {
+                statPlayer[StatsType.Kill].ToString(), statPlayer[StatsType.Death].ToString(),
+                statPlayer[StatsType.Death]==0?"0":(statPlayer[StatsType.Kill] / (float) statPlayer[StatsType.Death]).ToString("N2"),
+                statPlayer[StatsType.Shot].ToString(), statPlayer[StatsType.Hit].ToString(),
+                statPlayer[StatsType.HitHead].ToString(),
+                statPlayer[StatsType.Shot]==0?"0":(statPlayer[StatsType.Hit] / (float) statPlayer[StatsType.Shot]).ToString("N2"),
+                statPlayer[StatsType.Shot]==0?"0":(statPlayer[StatsType.HitHead] / (float) statPlayer[StatsType.Shot]).ToString("N2"),
+                statPlayer[StatsType.Gather].ToString()
+            };
+            var posY = 144f;
+            var sizeY = 32f;
+
+            for (var i = 0; i < 9; i++)
+            {
+                container.Add(new CuiElement
+                {
+                    Name = Layer + $".Stats{i}",
+                    Parent = Layer,
+                    Components =
+                    {
+                        new CuiImageComponent {Color = ((i + 2) % 2 == 0 ? "0.33 0.87 0.59 0.6" : "0 0 0 0")},
+                        new CuiRectTransformComponent {AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = $"-146 {posY - sizeY}", OffsetMax = $"394.6 {posY}"}
                     }
                 });
-            }
-            catch (Exception e)
-            {
-                instance.PrintWarning(e.Message);
-            }
-        }
-
-        public void SelectPlayer(BasePlayer player)
-        {
-            try
-            {
-                CuiElementContainer Container = new CuiElementContainer();
-                string ValueName = instance.Name.Replace(".", "");
-                var SQLString = Core.Database.Sql.Builder.Append($"SELECT * FROM Stats WHERE steamid='{player.userID}';");
-                SQLite.Query(SQLString, SQLiteConnection, obj =>
+                container.Add(new CuiLabel
                 {
-                    if (obj == null) return;
-                    for (int i = 0, y = 12; i < obj.Count; i++, y++)
-                    {
-                        string color = HexToRustFormat(config.colorConfig.menuContentHighlighting);
-                        if (instance.IsEven(y)) color = HexToRustFormat(config.colorConfig.menuContentHighlightingalternative);
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiImageComponent
-                                    {
-                                        Color = color,
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"77.5 {-120 - y * 30}",
-                                        OffsetMax = $"822.5 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.Name.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentTextAlternative}>Ваша статистика:</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"77.5 {-120 - y * 30}",
-                                        OffsetMax = $"190 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.Kills.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentTextAlternative}>{obj.ElementAt(i)["kills"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"193 {-120 - y * 30}",
-                                        OffsetMax = $"263 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.Deaths.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentTextAlternative}>{obj.ElementAt(i)["death"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"266 {-120 - y * 30}",
-                                        OffsetMax = $"336 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.KillNPC.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentTextAlternative}>{obj.ElementAt(i)["killnpc"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"339 {-120 - y * 30}",
-                                        OffsetMax = $"409 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.KillAnimals.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentTextAlternative}>{obj.ElementAt(i)["killanimal"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"412 {-120 - y * 30}",
-                                        OffsetMax = $"482 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.MetalOre.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentTextAlternative}>{obj.ElementAt(i)["metalore"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"485 {-120 - y * 30}",
-                                        OffsetMax = $"555 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.SulfurOre.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentTextAlternative}>{obj.ElementAt(i)["sulfurore"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"558 {-120 - y * 30}",
-                                        OffsetMax = $"628 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.HQMeta;.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentTextAlternative}>{obj.ElementAt(i)["hqmetalore"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"631 {-120 - y * 30}",
-                                        OffsetMax = $"701 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                        Container.Add(new CuiElement
-                        {
-                            Name = MenuContent + $".Content.Stats.Res.{i}",
-                            Parent = MenuContent,
-                            Components =
-                                {
-                                    new CuiTextComponent
-                                    {
-                                        Text = $"<color={config.colorConfig.menuContentTextAlternative}>{obj.ElementAt(i)["resources"]}</color>",
-                                        Align = TextAnchor.MiddleCenter,
-                                        FontSize = 14,
-                                        Font = "robotocondensed-regular.ttf"
-                                    },
-                                    new CuiRectTransformComponent
-                                    {
-                                        AnchorMin = "0 1",
-                                        AnchorMax = "0 1",
-                                        OffsetMin = $"704 {-120 - y * 30}",
-                                        OffsetMax = $"822.5 {-95 - y * 30}"
-                                    }
-                                }
-                        });
-                    }
-                    CuiHelper.AddUi(player, Container);
-                });
+                    Text = { Text = _statsName[i], Align = TextAnchor.MiddleLeft, FontSize = 24, Font = "robotocondensed-bold.ttf" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "5 0" }
+                }, Layer + $".Stats{i}");
+                container.Add(new CuiLabel
+                {
+                    Text = { Text = stats[i], Align = TextAnchor.MiddleRight, FontSize = 24, Font = "robotocondensed-bold.ttf" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "-5 0" }
+                }, Layer + $".Stats{i}");
+                posY -= sizeY;
             }
-            catch (Exception e)
-            {
-                instance.PrintWarning(e.Message);
-            }
+            CuiHelper.AddUi(player, container);
         }
-        #endregion
-
-        #region Helpers
-        private static string HexToRustFormat(string hex)
+        
+        private static string HexToRGB(string hex)
         {
             if (string.IsNullOrEmpty(hex))
             {
                 hex = "#FFFFFFFF";
             }
-
-            var str = hex.Trim('#');
-
+          
+            var str = hex.Trim('#'); 
+          
             if (str.Length == 6)
                 str += "FF";
-
+          
             if (str.Length != 8)
             {
                 throw new Exception(hex);
                 throw new InvalidOperationException("Cannot convert a wrong format.");
             }
-
+          
             var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
             var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
             var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
             var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
-
+          
             Color color = new Color32(r, g, b, a);
-
             return $"{color.r:F2} {color.g:F2} {color.b:F2} {color.a:F2}";
+        }    
+
+        #endregion
+
+        #region Data
+
+        private enum StatsType
+        {
+            Kill,
+            Death,
+            Shot,
+            Hit,
+            HitHead,
+            Gather
         }
 
-        private bool IsEven(int a)
+        void SaveData()
         {
-            return (a % 2) == 0;
+            StatData.WriteObject(storedData);
         }
+
+        void LoadData()
+        {
+            StatData = Interface.Oxide.DataFileSystem.GetFile("Stats/stats");
+            try
+            {
+                storedData = StatData.ReadObject<Dictionary<ulong, Dictionary<StatsType, int>>>();
+            }
+            catch
+            {
+                storedData = new Dictionary<ulong, Dictionary<StatsType, int>>();
+            } 
+        }
+
+        Dictionary<ulong, Dictionary<StatsType, int>> storedData;
+        private DynamicConfigFile StatData;
+
         #endregion
+
+		public CuiRawImageComponent GetAvatarImageComponent(ulong user_id, string color = "1.0 1.0 1.0 1.0"){
+			
+			if (plugins.Find("ImageLoader")) return plugins.Find("ImageLoader").Call("BuildAvatarImageComponent",user_id) as CuiRawImageComponent;
+			if (plugins.Find("ImageLibrary")) {
+				return new CuiRawImageComponent { Png = (string)plugins.Find("ImageLibrary").Call("GetImage", user_id.ToString()), Color = color, Sprite = "assets/content/textures/generic/fulltransparent.tga" };
+			}
+			return new CuiRawImageComponent {Url = "https://image.flaticon.com/icons/png/512/37/37943.png", Color = color, Sprite = "assets/content/textures/generic/fulltransparent.tga"};
+		}
+		public CuiRawImageComponent GetImageComponent(string url, string shortName="", string color = "1.0 1.0 1.0 1.0"){
+			
+			if (plugins.Find("ImageLoader")) return plugins.Find("ImageLoader").Call("BuildImageComponent",url) as CuiRawImageComponent;
+			if (plugins.Find("ImageLibrary")) {
+				if (!string.IsNullOrEmpty(shortName)) url = shortName;
+				return new CuiRawImageComponent { Png = (string)plugins.Find("ImageLibrary").Call("GetImage", url), Color = color, Sprite = "assets/content/textures/generic/fulltransparent.tga" };
+			}
+			return new CuiRawImageComponent {Url = url, Color = color, Sprite = "assets/content/textures/generic/fulltransparent.tga"};
+		}
+		
+		public CuiRawImageComponent GetItemImageComponent(string shortName){
+			string itemUrl = shortName;
+			if (plugins.Find("ImageLoader")) {itemUrl = $"https://static.moscow.ovh/images/games/rust/icons/{shortName}.png";}
+            return GetImageComponent(itemUrl);
+		}
+		public bool AddImage(string url,string shortName=""){
+			if (plugins.Find("ImageLoader")){				
+				plugins.Find("ImageLoader").Call("CheckCachedOrCache", url);
+				return true;
+			}else
+			if (plugins.Find("ImageLibrary")){
+				if (string.IsNullOrEmpty(shortName)) shortName=url;
+				plugins.Find("ImageLibrary").Call("AddImage", url, shortName);
+				return true;
+			}	
+			return false;		
+		}
     }
 }

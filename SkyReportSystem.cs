@@ -10,9 +10,11 @@ using Oxide.Core.Libraries;
 using ConVar;
 using Newtonsoft.Json.Linq;
 
+// https://server-rust.ru/resources/skyreportsystem.863/
+
 namespace Oxide.Plugins
 {
-    [Info("SkyReportSystem", "BlackPlugin.ru", "3.2.1")]
+    [Info("SkyReportSystem", "DezLife", "3.2.0")]
     [Description("Report system for rust")]
     public class SkyReportSystem : RustPlugin
     {
@@ -37,82 +39,82 @@ namespace Oxide.Plugins
             [JsonProperty(PropertyName = "Setting:", Order = 2)]
             public Setting setting;
 
-            [JsonProperty(PropertyName = "Checking AFK:", Order = 3)]
+            [JsonProperty(PropertyName = "Проверка на AFK:", Order = 3)]
             public IsAfk isafk;
 
-            [JsonProperty(PropertyName = "Reasons for the ban:", Order = 4)]
+            [JsonProperty(PropertyName = "Причины бана:", Order = 4)]
             public List<BanReasons> banReasons;
 
-            [JsonProperty("Plugin settings", Order = 5)]
+            [JsonProperty("Настройки плагина", Order = 5)]
             public List<string> Reasonsforcomplaint;
         }
 
         public class BanReasons
         {
-            [JsonProperty(PropertyName = "Reason for the ban:", Order = 0)]
+            [JsonProperty(PropertyName = "Причина бана:", Order = 0)]
             public string BanReason;
 
-            [JsonProperty(PropertyName = "Command for the ban:", Order = 1)]
+            [JsonProperty(PropertyName = "Команда для бана:", Order = 1)]
             public string BanReasonCommand;
         }
 
         public class IsAfk
         {
-            [JsonProperty(PropertyName = "Turn on the AFK check ?", Order = 0)]
+            [JsonProperty(PropertyName = "Включить проверку на AFK ?", Order = 0)]
             public bool usecheckafk;
 
-            [JsonProperty(PropertyName = "Time between AFK checks", Order = 2)]
+            [JsonProperty(PropertyName = "Время между проверками на AFK", Order = 2)]
             public float timecheckisafk;
         }
 
 
         public class Setting
         {
-            [JsonProperty(PropertyName = "Avatar for messages(To work with IQChat )", Order = 0)]
+            [JsonProperty(PropertyName = "Аватар для сообщений(Для работы с IQChat )", Order = 0)]
             public ulong avatarid;
 
-            [JsonProperty(PropertyName = "Prefix(To work with IQChat )", Order = 1)]
+            [JsonProperty(PropertyName = "Префикс(Для работы с IQChat )", Order = 1)]
             public string prefix;
 
-            [JsonProperty(PropertyName = "Number of reports to call for verification", Order = 3)]
+            [JsonProperty(PropertyName = "Колличевство репортов для вызова на проверку", Order = 3)]
             public int maxreportcall;
 
-            [JsonProperty(PropertyName = "Send a message to the moderators in the chat room that the player exceeded the number of reports (Permission required SkyReportSystem.moderator)", Order = 4)]
+            [JsonProperty(PropertyName = "Отправлять сообщения модераторам в чат о том что игрок превысил количевство репортов (Требуется разрешения SkyReportSystem.moderator)", Order = 4)]
             public bool usemodercall;
 
-            [JsonProperty(PropertyName = "Turn on logging ?", Order = 5)]
+            [JsonProperty(PropertyName = "Включить логирование ?", Order = 5)]
             public bool uselog;
 
-            [JsonProperty(PropertyName = "Cd on sending reports", Order = 6)]
+            [JsonProperty(PropertyName = "Кд на отправку репортов", Order = 6)]
             public int Cooldown;
 
-            [JsonProperty(PropertyName = "Server names", Order = 7)]
+            [JsonProperty(PropertyName = "Названия сервера", Order = 7)]
             public string servername;
 
-            [JsonProperty(PropertyName = "Command to open the report menu", Order = 8)]
+            [JsonProperty(PropertyName = "Команда для открытия репорт меню", Order = 8)]
             public string comandplayer;
 
-            [JsonProperty(PropertyName = "Command to open the moderation menu", Order = 9)]
+            [JsonProperty(PropertyName = "Команда для открытия модер меню", Order = 9)]
             public string comandmoder;
 
-            [JsonProperty(PropertyName = "Messages in the title bar", Order = 10)]
+            [JsonProperty(PropertyName = "Сообщения в титле", Order = 10)]
             public string teatletxt;
         }
 
         public class VKontakte
         {
-            [JsonProperty(PropertyName = "We use Vkontakte:", Order = 0)]
+            [JsonProperty(PropertyName = "Используем Вконтакте:", Order = 0)]
             public bool UseVK;
 
-            [JsonProperty(PropertyName = "ID Use Vkontakte:VK conversations for the bot:", Order = 1)]
+            [JsonProperty(PropertyName = "ID Беседы ВК для бота:", Order = 1)]
             public string VK_ChatID;
 
-            [JsonProperty(PropertyName = "Token Groups VK:", Order = 2)]
+            [JsonProperty(PropertyName = "Token Группы ВК:", Order = 2)]
             public string VK_Token;
         }
         public class Discord
         {
-            [JsonProperty(PropertyName = "Using Discord:", Order = 0)]
+            [JsonProperty(PropertyName = "Используем Discord:", Order = 0)]
             public bool UseDiscord;
 
             [JsonProperty(PropertyName = "Webhook Discrod:", Order = 1)]
@@ -145,7 +147,7 @@ namespace Oxide.Plugins
                     servername = "Server Name",
                     comandplayer = "report",
                     comandmoder = "reportm",
-                    teatletxt = "ReportSystem by BlackPlugin.ru"
+                    teatletxt = "ReportSystem by DezLife"
 
                 },
                 isafk = new IsAfk()
@@ -157,40 +159,40 @@ namespace Oxide.Plugins
                 {
                     new BanReasons
                     {
-                         BanReason = "Cheats",
+                         BanReason = "Читы",
                          BanReasonCommand = "ban {0} 999d Soft",
                     },
                     new BanReasons
                     {
-                         BanReason = "Macros",
+                         BanReason = "Макросы",
                          BanReasonCommand = "ban {0} 30d Macros",
                     },
                     new BanReasons
                     {
-                         BanReason = "Exceeding the maximum number of players on the team",
+                         BanReason = "Превышение максимальной численности игроков в команде",
                          BanReasonCommand = "ban {0} 14d 3+",
                     },
                     new BanReasons
                     {
-                         BanReason = "Waiting of verification",
+                         BanReason = "Отказ от проверки",
                          BanReasonCommand = "ban {0} 7d Otkaz",
                     },
                     new BanReasons
                     {
-                         BanReason = "Other",
+                         BanReason = "Другое",
                          BanReasonCommand = "ban {0} 999d 5",
                     },
                 },
                 Reasonsforcomplaint = new List<string>
                 {
                     "3+",
-                    "Suspicion of Cheats",
-                    "Macros",
-                    "Advertising in nickname",
-                    "Chat spam",
-                    "Cheating players",
-                    "Buggery",
-                    "Toxic",
+                    "Подозрения в читах",
+                    "Макросы",
+                    "Реклама в нике",
+                    "Спам в чат",
+                    "Обман игроков",
+                    "Багоюз",
+                    "Токсик",
                 }
 
             };
@@ -228,64 +230,66 @@ namespace Oxide.Plugins
         {
             Dictionary<string, string> Lang = new Dictionary<string, string>
             {
-                ["SKY_REPORT_REPORTING"] = "You successfully sent a report on a player {0}",
-                ["SKY_REPORT_REPORTING_VK_DISCORD"] = "=====================================================\nServer : {0}\nPlayer : {1} complained about {2} [{3}]\nReason : {4}",
-                ["SKY_REPORT_MAXIMUM_REPORT"] = "Player: {0} " + " Exceeded the maximum number of reports!" + "His number {1}",
-                ["SKY_COLDOWN"] = "You recently sent a complaint, wait a little longer",
-                ["SKY_ERROR_PLAYER"] = "You are complaining about yourself!",
-                ["SKY_PLAYER_PERMISSION_IS_FOUND"] = "You do not have enough permissions to use this command!",
-                ["SKY_NO_CHECK_MODERATION_OR_CHECKING"] = "You cannot summon a player {0} to be checked, because it is checked by another moderator",
-                ["SKY_ACESS_CHECKING"] = "You have summoned a player {0} for verification",
-                ["SKY_MODER_CHECK_PLAYER_GOING"] = "=====================================================\nModerator {0} Called a player to the test {1}[{2}]",
-                ["SKY_MODER_CHECK_PLAYER_GOING_CONSOLE"] = "=====================================================\nPlayer {1}[{2}] was called using the console",
-                ["SKY_PLAYER_IS_AFK_VK_DISCORD_OK"] = "=====================================================\nPlayer: {0}  has moved since the last check on the AFK",
-                ["SKY_PLAYER_IS_AFK_VK_DISCORD_NO"] = "=====================================================\nPlayer: {0} has not moved since the last check for AFK",
-                ["SKY_PLAYER_IS_AFK_OK"] = "Player: <color=orange>{0}</color> has moved since the last check on the AFK",
-                ["SKY_PLAYER_IS_AFK_NO"] = "Player: <color=orange>{0}</color> has not moved since the last check for AFK",
-                ["SKY_MODERATOR_STOPID_CHEKING"] = "You have successfully completed a check on a player : {0} !",
-                ["SKY_PLAYER_STOPID_CHEKING"] = "The test is successfully completed. \nChecked by a moderator {0} !",
-                ["SKY_PLAYER_CHECKING_MODER_MENU_MODERATION"] = "Player moderator verified",
-                ["SKY_PLAYER_NOTHING_MESSAGE_SKYPE_DISCORD"] = "You didn't put anything in!",
-                ["SKY_MODER_CHECK_P_SKYPE"] = "You provided your Skype : {0}",
-                ["SKY_MODER_CHECK_P_DISCORD"] = "You have provided your Discord : {0}",
-                ["SKY_Menu_Info"] = "In this window you need to select a player from the list or enter his nickname in the field below to leave a complaint about him",
+                ["SKY_REPORT_REPORTING"] = "Вы успешно отправили репорт на игрока {0}",
+                ["SKY_REPORT_REPORTING_VK_DISCORD"] = "=====================================================\nСервер : {0}\nИгрок : {1} пожаловался на {2} [{3}]\nПричина : {4}",
+                ["SKY_REPORT_MAXIMUM_REPORT"] = "Игрок: {0} " +
+                " Превысил максимальное количевство репортов!" +
+                "Его колличевство {1}",
+                ["SKY_COLDOWN"] = "Вы недавно отправляли жалобу,подождите еще немного",
+                ["SKY_ERROR_PLAYER"] = "Вы жалуетесь сами на себя!",
+                ["SKY_PLAYER_PERMISSION_IS_FOUND"] = "У вас недостаточно прав для использования данной команды!",
+                ["SKY_NO_CHECK_MODERATION_OR_CHECKING"] = "Вы не можете вызвать игрока {0} на проверку,т.к его проверяет другой модератор",
+                ["SKY_ACESS_CHECKING"] = "Вы вызвали игрока {0} на проверку",
+                ["SKY_MODER_CHECK_PLAYER_GOING"] = "=====================================================\nМодератор {0} вызвал на проверку игрока {1}[{2}]",
+                ["SKY_MODER_CHECK_PLAYER_GOING_CONSOLE"] = "=====================================================\nИгрок {1}[{2}] был вызван с помощью консоли",
+                ["SKY_PLAYER_IS_AFK_VK_DISCORD_OK"] = "=====================================================\nИгрок: {0}  двигался с момента последней проверки на AFK",
+                ["SKY_PLAYER_IS_AFK_VK_DISCORD_NO"] = "=====================================================\nИгрок: {0} не двигался с момента последней проверки на AFK",
+                ["SKY_PLAYER_IS_AFK_OK"] = "Игрок: <color=orange>{0}</color> двигался с момента последней проверки на AFK",
+                ["SKY_PLAYER_IS_AFK_NO"] = "Игрок: <color=orange>{0}</color> не двигался с момента последней проверки на AFK",
+                ["SKY_MODERATOR_STOPID_CHEKING"] = "Вы успешно закончили проверку над игроком : {0} !",
+                ["SKY_PLAYER_STOPID_CHEKING"] = "Проверка успешно окончена. \nПроверял модератор {0} !",
+                ["SKY_PLAYER_CHECKING_MODER_MENU_MODERATION"] = "Игрок проверяется модератором",
+                ["SKY_PLAYER_NOTHING_MESSAGE_SKYPE_DISCORD"] = "Вы ничего не ввели!",
+                ["SKY_MODER_CHECK_P_SKYPE"] = "Вы предоставили свой Skype : {0}",
+                ["SKY_MODER_CHECK_P_DISCORD"] = "Вы предоставили свой Discord : {0}",
+                ["SKY_Menu_Info"] = "В данном окне вам нужно выбрать игрока из списка или ввести его ник в поле ниже что бы оставить на него жалобу",
                 ["SKY_SKYPE_MESSAGE"] =
                                            "=====================================================\n" +
-                                           "Server : {0}\n" +
-                                           "Game nickname: {1}\n" +
+                                           "Сервер : {0}\n" +
+                                           "Игровой ник: {1}\n" +
                                            "Steam ID: {2}\n" +
-                                           "Submitted Skype for verification : {3}",
+                                           "Предоставил Skype на проверку : {3}",
                 ["SKY_DISCORD_MESSAGE"] =
                                            "=====================================================\n" +
-                                           "Server : {0}\n" +
-                                           "Game nickname: {1}\n" +
+                                           "Сервер : {0}\n" +
+                                           "Игровой ник: {1}\n" +
                                            "Steam ID: {2}\n" +
-                                           "Provided by Discord for verification : {3}",
-                ["SKY_SKYPE_DISCORD_ERROR"] = "You should be called for a background check before you send the data",
+                                           "Предоставил Discord на проверку : {3}",
+                ["SKY_SKYPE_DISCORD_ERROR"] = "Вас должны вызвать на проверку,перед тем,как отправлять данные",
                 ["SKY_REPORT_VK_DISCORD_MAXIMUM_BLACK"] =
                                            "=====================================================\n" +
-                                           "Server : {0}\n" +
-                                           "The limit of player complaints has been reached!\n" +
-                                           "Game nickname: {1}\n" +
+                                           "Сервер : {0}\n" +
+                                           "Достигнут предел жалоб на игрока!\n" +
+                                           "Игровой ник: {1}\n" +
                                            "Steam ID: {2}\n" +
-                                           "Information about the suspicious player:\n" +
-                                           "The player was checked: {3} раз(-а)\n" +
-                                           "Steam: https://steamcommunity.com/profiles/{4}",
+                                           "Информация о подозрительном игроке:\n" +
+                                           "Игрок проверялся: {3} раз(-а)\n" +
+                                           "Стим: https://steamcommunity.com/profiles/{4}",
                 ["SKY_CHECK_STOP"] =
                                            "=====================================================\n" +
-                                           "Server : {0}\n" +
-                                           "Moderator {1} completed a check on a player {2} [{3}]\n",
+                                           "Сервер : {0}\n" +
+                                           "Модератор {1} окончил проверку над игроком {2} [{3}]\n",
                 ["SKY_CHECK_STOP_CONSOLE"] =
                                            "=====================================================\n" +
-                                           "Server : {0}\n" +
-                                           "Check is complete on player {2} [{3}]\n",
+                                           "Сервер : {0}\n" +
+                                           "Проверка окончена над игроком {2} [{3}]\n",
                 ["BAN_USER_VK_DISCORD"] =
                                            "=====================================================\n" +
-                                           "Player :{0}({1})\n" +
-                                           "Was banned from the server({2}) on account of {3} Moderated by {4}\n",
+                                           "Игрок :{0}({1})\n" +
+                                           "Был забанен на сервере({2}) по причине {3} Модератором {4}\n",
             };
             lang.RegisterMessages(Lang, this);
-            PrintWarning("Language file downloaded successfully");
+            PrintWarning("Языковой файл загружен успешно");
 
         }
         #endregion
@@ -297,7 +301,7 @@ namespace Oxide.Plugins
             LoadConfigVars();
             if (!ImageLibrary)
             {
-                PrintError("ImageLibrary not found, plugin will not work!");
+                PrintError("Не найден ImageLibrary, плагин не будет работать!");
                 return;
             }
             #region Permission
@@ -318,12 +322,12 @@ namespace Oxide.Plugins
 
             if (config.setting.servername == "Server Name")
             {
-                PrintWarning("You did not specify the name of the server, the plugin will not work correctly!");
+                PrintWarning("Вы не указали названия сервера, плагин будет работать некорректно!");
             }
 
             PrintError($"-----------------------------------");
             PrintError($"           SkyReportSystem         ");
-            PrintError($"          Author = BlackPlugin.ru");
+            PrintError($"          Author = DezLife         ");
             PrintError($"          Version = {Version}      ");
             PrintError($"-----------------------------------");
         }
@@ -345,11 +349,11 @@ namespace Oxide.Plugins
                 BasePlayer players = BasePlayer.FindByID(CheckPlayerModeration[player.userID]);
                 if (players != null)
                 {
-                    SendChat(players, "The called player has left the server!");
+                    SendChat(players, "Вызываемый игрок покинул сервер!");
                 }
                 else
                 {
-                    PrintWarning("The called player has left the server!");
+                    PrintWarning("Вызываемый игрок покинул сервер!");
                 }
                 BanPlayer.Remove(player.userID);
             }
@@ -383,8 +387,8 @@ namespace Oxide.Plugins
             }
             if (config.setting.uselog == true && ReportData[target.userID].ReportCount >= config.setting.maxreportcall && target.userID != reportplayer.userID)
             {
-                LogToFile("SkyReportSystemLOG", $"On a player <color=#816AD0>{target.displayName}</color> complained <color=#816AD0>{reportplayer.displayName}</color>\n" +
-                            $"<size=12>Reason: {reason} </size>", this);
+                LogToFile("SkyReportSystemLOG", $"На игрока <color=#816AD0>{target.displayName}</color> пожаловался <color=#816AD0>{reportplayer.displayName}</color>\n" +
+                            $"<size=12>Причина: {reason} </size>", this);
             }
         }
 
@@ -415,19 +419,19 @@ namespace Oxide.Plugins
         {
             if (args.Args == null || args.Args.Length == 0 || args.Args.Length < 2)
             {
-                PrintWarning($"Wrong syntax, use players check/uncheck StemId64");
+                PrintWarning($"Неверный синтаксис, используйте players check/uncheck StemId64");
                 return;
             }
 
             BasePlayer player = BasePlayer.FindByID(ulong.Parse(args.Args[1]));
-            if (player == null) { PrintWarning("The player is not on the server!"); return; };
+            if (player == null) { PrintWarning("Игрока нет на сервере!"); return; };
 
             switch (args.Args[0].ToLower())
             {
                 case "check":
                     {
                         CheckPlayerModeration.Add(player.userID, player.userID);
-                        PrintWarning($"You have summoned a player {player.displayName} for verification");
+                        PrintWarning($"Вы вызвали игрока {player.displayName} на проверку");
                         SendDiscordMsg("SKY_MODER_CHECK_PLAYER_GOING_CONSOLE", player.displayName, player.userID);
                         SendChatMessage("SKY_MODER_CHECK_PLAYER_GOING_CONSOLE", player.displayName, player.userID);
 
@@ -472,7 +476,7 @@ namespace Oxide.Plugins
                         }
                         else
                         {
-                            PrintWarning("This player has not been called for inspection!");
+                            PrintWarning("Этого игрока не вызывали на проверку!");
                         }
                         break;
                     }
@@ -742,7 +746,7 @@ namespace Oxide.Plugins
                         }
                         if (config.setting.uselog == true)
                         {
-                            LogToFile("SkyReportSystemLOG", $"Игрок {target} exceeded the maximum number of reports! [{ReportData[target.userID].ReportCount}]", this);
+                            LogToFile("SkyReportSystemLOG", $"Игрок {target} превысил максимальное количество репортов! [{ReportData[target.userID].ReportCount}]", this);
                         }
                         return;
                     }
@@ -823,7 +827,7 @@ namespace Oxide.Plugins
             {
                 FadeOut = 0.1f,
                 RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                Text = { Text = $"Player: {target.displayName}\nExceeded the maximum number of complaints! ", FontSize = 18, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter, FadeIn = 0.3f }
+                Text = { Text = $"Игрок: {target.displayName}\nПревысил максимальное количевство жалоб! ", FontSize = 18, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter, FadeIn = 0.3f }
             }, "AlerModer");
 
             CuiHelper.AddUi(player, container);
@@ -855,13 +859,13 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = "0 0.7644448", AnchorMax = "1 1", OffsetMax = "0 0" },
-                Text = { Text = "You were summoned for an inspection", FontSize = 19, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
+                Text = { Text = "Вас вызвали на проверку", FontSize = 19, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
             }, "MainAlert");
 
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = "0 0.6311106", AnchorMax = "1 0.7422219", OffsetMax = "0 0.764444" },
-                Text = { Text = "You are required to provide Skype or Discord!", FontSize = 15, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
+                Text = { Text = "Вы обязаны предоставить Skype или Discord!", FontSize = 15, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
             }, "MainAlert");
 
             if (player.userID == moderinformation.userID)
@@ -869,7 +873,7 @@ namespace Oxide.Plugins
                 container.Add(new CuiLabel
                 {
                     RectTransform = { AnchorMin = "0.0684208 0.05777803", AnchorMax = "0.9087719 0.6266667", OffsetMax = "0 0" },
-                    Text = { Text = $"Commands :\n<color=orange>/skype</color> \n<color=orange>/discord</color>\nCalled moderator : UNKNOWN", FontSize = 17, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
+                    Text = { Text = $"Kоманды :\n<color=orange>/skype</color> \n<color=orange>/discord</color>\nВызвавший модератор : НЕИЗВЕСТНО", FontSize = 17, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
                 }, "MainAlert");
             }
             else
@@ -877,7 +881,7 @@ namespace Oxide.Plugins
                 container.Add(new CuiLabel
                 {
                     RectTransform = { AnchorMin = "0.0684208 0.057778234", AnchorMax = "0.9087719 0.6266667", OffsetMax = "0 0" },
-                    Text = { Text = $"Commands :\n<color=orange>/skype</color> \n<color=orange>/discord</color>\nCalled moderator : {moderinformation.displayName}", FontSize = 17, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
+                    Text = { Text = $"Kоманды :\n<color=orange>/skype</color> \n<color=orange>/discord</color>\nВызвавший модератор : {moderinformation.displayName}", FontSize = 17, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
                 }, "MainAlert");
             }
 
@@ -923,7 +927,7 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                Text = { Text = "Moderator Menu!", FontSize = 18, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
+                Text = { Text = "Меню Модератора!", FontSize = 18, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
             }, "TitlePanel");
 
             #endregion
@@ -1031,13 +1035,13 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = "0.3203125 0.7574074", AnchorMax = "0.5020834 0.8037037" },
-                Text = { Text = $"Number of reports: {ReportData[targetinfocheck.userID].ReportCount}", FontSize = 15, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleLeft }
+                Text = { Text = $"Количевство репортов: {ReportData[targetinfocheck.userID].ReportCount}", FontSize = 15, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleLeft }
             }, "InfoPlayerSky");
 
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = "0.3203126 0.7101846", AnchorMax = "0.4828126 0.7564811" },
-                Text = { Text = $"Number of inspections: {ReportData[targetinfocheck.userID].CheckCount}", FontSize = 15, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleLeft }
+                Text = { Text = $"Количевство проверок: {ReportData[targetinfocheck.userID].CheckCount}", FontSize = 15, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleLeft }
             }, "InfoPlayerSky");
 
             container.Add(new CuiPanel
@@ -1061,7 +1065,7 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = "0.03468214 0.8995634", AnchorMax = "0.9624277 0.9825329" },
-                Text = { Text = "Recent complaints", FontSize = 16, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
+                Text = { Text = "Последнии жалобы", FontSize = 16, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
             }, "captain");
 
             int i = 0;
@@ -1102,7 +1106,7 @@ namespace Oxide.Plugins
                 {
                     RectTransform = { AnchorMin = "0.16875 0.5018519", AnchorMax = "0.315625 0.5722228" },
                     Button = { Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat", Color = HexToCuiColor("#33302F98"), Command = $"openinfoplayer checkinplayer {targetinfocheck.userID}" },
-                    Text = { Text = "To call for an inspection", FontSize = 14, Align = TextAnchor.MiddleCenter }
+                    Text = { Text = "Bызвать на проверку", FontSize = 14, Align = TextAnchor.MiddleCenter }
                 }, "InfoPlayerSky", "CheckPlayerBtn");
             }
             else if (CheckPlayerModeration.ContainsKey(targetinfocheck.userID) && CheckPlayerModeration.ContainsValue(player.userID) || player.IsAdmin)
@@ -1112,14 +1116,14 @@ namespace Oxide.Plugins
                 {
                     RectTransform = { AnchorMin = "0.1686849 0.427109", AnchorMax = "0.315625 0.4972244" },
                     Button = { Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat", Color = HexToCuiColor("#33302F98"), Command = $"openinfoplayer stopcheckingplayers {targetinfocheck.userID}" },
-                    Text = { Text = "Finish checking", FontSize = 14, Align = TextAnchor.MiddleCenter }
+                    Text = { Text = "Закончить проверку", FontSize = 14, Align = TextAnchor.MiddleCenter }
                 }, "InfoPlayerSky", "StopPlayerBtn");
 
                 container.Add(new CuiButton
                 {
                     RectTransform = { AnchorMin = "0.1686849 0.351852", AnchorMax = "0.3156251 0.4224281" },
                     Button = { Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat", Color = HexToCuiColor("#33302F98"), Command = $"openinfoplayer moderatorcheckbanreason {targetinfocheck.userID}" },
-                    Text = { Text = "Issue a lockout", FontSize = 14, Align = TextAnchor.MiddleCenter }
+                    Text = { Text = "Выдать блокировку", FontSize = 14, Align = TextAnchor.MiddleCenter }
                 }, "InfoPlayerSky", "GoBanned");
             }
             else
@@ -1285,7 +1289,7 @@ namespace Oxide.Plugins
                     container.Add(new CuiLabel
                     {
                         RectTransform = { AnchorMin = "0.2333325 0.2203703", AnchorMax = "0.75 0.2648149" },
-                        Text = { Text = "Next, you need to select the reason for complaining about this player, or enter your", FontSize = 17, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
+                        Text = { Text = "Далее вам нужно выбрать причину жалобы на данного игрока, или ввести свою", FontSize = 17, Font = "robotocondensed-bold.ttf", Align = TextAnchor.MiddleCenter }
                     }, mainskymenu, "infotxt2");
 
                     for (int x = 0, y = 0, i = 0, t = 0; i < config.Reasonsforcomplaint.Count; i++)
