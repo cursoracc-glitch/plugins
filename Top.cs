@@ -1,34 +1,27 @@
+using Oxide.Core;
+using Oxide.Game.Rust.Cui;
 using System;
 using System.Collections.Generic;
-using Oxide.Core;
-using Oxide.Core.Configuration;
-using System.Globalization;
-using UnityEngine;
-using Oxide.Game.Rust.Cui;
 using System.Linq;
+using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Top", "RustPlugin.ru", "1.0.9")]
-    [Description("Топ игроков для сервера")]
+    [Info("Top", "RustPlugin.ru", "1.1.0")]
 
     class Top : RustPlugin
     {
-        //ID Сообщения в чат
         private int MessageNum = 0;
-        //Создаем конфиг 
         protected override void LoadDefaultConfig()
         {
             PrintWarning("Создание конфига");
             Config.Clear();
-            Config["ЦветПанели"] = "0.0 0.0 0.0 0.8";
-            //Config["КлавишаДляБинда"] = "P";
-            Config["ВремяМеждуСообщениями"] = 300f;
-            Config["ЦветОповещаний"] = "#ffa500";
+            Config["Цвет Панели"] = "0.0 0.0 0.0 0.8";
+            Config["Время Между Сообщениями"] = 300f;
+            Config["Цвет Оповещаний"] = "#ffa500";
             SaveConfig();
         }
 
-        //Создаем чат команды
         [ChatCommand("rank")]
         void TurboRankCommand(BasePlayer player, string command)
         {
@@ -36,27 +29,27 @@ namespace Oxide.Plugins
             player.ChatMessage($"<size=15>Статистика игрока <color=#ffa500>{player.displayName}</color></size>");
             foreach (var top in TopPlayer)
             {
-                rust.SendChatMessage(player, $"<size=14><color=#ffffff>Убийств игроков: <color=#ffa500>{top.УбийствPVP}</color> | Смертей: <color=#ffa500>{top.Смертей}</color></color></size>", null, "0");
-                rust.SendChatMessage(player, $"<size=14><color=#ffffff>Ракет выпущено: <color=#ffa500>{top.РакетВыпущено}</color> | Взрывчаток использовано: <color=#ffa500>{top.ВзрывчатокИспользовано}</color></color></size>", null, "0");
-                rust.SendChatMessage(player, $"<size=14><color=#ffffff>Ресурсов собрано: <color=#ffa500>{top.РесурсовСобрано}</color> | Животных убито: <color=#ffa500>{top.УбийствЖивотных}</color></color></size>", null, "0");
-                rust.SendChatMessage(player, $"<size=14><color=#ffffff>Пуль выпущено: <color=#ffa500>{top.ПульВыпущено}</color> | Стрел выпущено: <color=#ffa500>{top.СтрелВыпущено}</color></color></size>", null, "0");
-                rust.SendChatMessage(player, $"<size=14><color=#ffffff>Предметов скрафчено: <color=#ffa500>{top.ПредметовСкрафчено}</color> | Вертолетов сбито: <color=#ffa500>{top.ВертолётовУничтожено}</color></color></size>", null, "0");
-                rust.SendChatMessage(player, $"<size=14><color=#ffffff>NPC убито: <color=#ffa500>{top.NPCУбито}</color> | Танков уничтожено: <color=#ffa500>{top.ТанковУничтожено}</color></color></size>", null, "0");
+                SendReply(player, $"<size=14><color=#ffffff>Убийств игроков: <color=#ffa500>{top.УбийствPVP}</color> | Смертей: <color=#ffa500>{top.Смертей}</color></color></size>");
+                SendReply(player, $"<size=14><color=#ffffff>Ракет выпущено: <color=#ffa500>{top.РакетВыпущено}</color> | Взрывчаток использовано: <color=#ffa500>{top.ВзрывчатокИспользовано}</color></color></size>");
+                SendReply(player, $"<size=14><color=#ffffff>Ресурсов собрано: <color=#ffa500>{top.РесурсовСобрано}</color> | Животных убито: <color=#ffa500>{top.УбийствЖивотных}</color></color></size>");
+                SendReply(player, $"<size=14><color=#ffffff>Пуль выпущено: <color=#ffa500>{top.ПульВыпущено}</color> | Стрел выпущено: <color=#ffa500>{top.СтрелВыпущено}</color></color></size>");
+                SendReply(player, $"<size=14><color=#ffffff>Предметов скрафчено: <color=#ffa500>{top.ПредметовСкрафчено}</color> | Вертолетов сбито: <color=#ffa500>{top.ВертолётовУничтожено}</color></color></size>");
+                SendReply(player, $"<size=14><color=#ffffff>NPC убито: <color=#ffa500>{top.NPCУбито}</color> | Танков уничтожено: <color=#ffa500>{top.ТанковУничтожено}</color></color></size>");
             }
             return;
         }
+
         [ChatCommand("top")]
         void TurboTopCommand(BasePlayer player, string command, string[] args)
         {
             if (args.Length == 1)
             {
                 int n = 0;
-                // Очистка статистики игроков
                 if (args[0] == "reset")
                 {
                     if (!player.IsAdmin)
                     {
-                        rust.SendChatMessage(player, $"<size=14><color=#FFA500>Ты кто такой? Давай досвиданье!</color></size>", null, "0");
+                        SendReply(player, $"<size=14><color=#FFA500>Ты кто такой? Давай досвиданье!</color></size>");
                         return;
                     }
                     var TopPlayer = (from x in Tops select x);
@@ -65,7 +58,7 @@ namespace Oxide.Plugins
                         top.Reset();
                         Saved();
                     }
-                    rust.SendChatMessage(player, $"<size=14><color=#FFA500>Статистика игроков обнулена!</color></size>", null, "0");
+                    SendReply(player, $"<size=14><color=#FFA500>Статистика игроков обнулена!</color></size>");
                     return;
                 }
                 if (args[0] == "farm")
@@ -78,7 +71,7 @@ namespace Oxide.Plugins
                         n++;
                         if (n <= 5)
                         {
-                            rust.SendChatMessage(player, $"<size=14><color=#FFA500>{n}.</color> <color=#FF8C00>{top.Ник}</color> ({top.РесурсовСобрано})</size>", null, top.UID);
+                            player.SendConsoleCommand("chat.add", top.UID, $"<size=14><color=#FFA500>{n}.</color> <color=#FF8C00>{top.Ник}</color> ({top.РесурсовСобрано})</size>");
                             if (top.UID == player.UserIDString)
                             {
                                 prov = true;
@@ -94,7 +87,7 @@ namespace Oxide.Plugins
                             i++;
                             if (top.UID == player.UserIDString)
                             {
-                                rust.SendChatMessage(player, $"<size=14><color=#FFA500>{i}.</color> <color=#FF8C00>{top.Ник}</color> ({top.РесурсовСобрано})</size>", null, player.UserIDString);
+                                player.SendConsoleCommand("chat.add", player.UserIDString, $"<size=14><color=#FFA500>{i}.</color> <color=#FF8C00>{top.Ник}</color> ({top.РесурсовСобрано})</size>");
                             }
                         }
                     }
@@ -110,7 +103,7 @@ namespace Oxide.Plugins
                         n++;
                         if (n <= 5)
                         {
-                            rust.SendChatMessage(player, $"<size=14><color=#FFA500>{n}.</color> <color=#FF8C00>{top.Ник}</color> ({top.УбийствPVP})</size>", null, top.UID);
+                            player.SendConsoleCommand("chat.add", top.UID, $"<size=14><color=#FFA500>{n}.</color> <color=#FF8C00>{top.Ник}</color> ({top.УбийствPVP})</size>");
                             if (top.UID == player.UserIDString)
                             {
                                 prov = true;
@@ -126,7 +119,7 @@ namespace Oxide.Plugins
                             i++;
                             if (top.UID == player.UserIDString)
                             {
-                                rust.SendChatMessage(player, $"<size=14><color=#FFA500>{i}.</color> <color=#FF8C00>{top.Ник}</color> ({top.УбийствPVP})</size>", null, player.UserIDString);
+                                player.SendConsoleCommand("chat.add", player.UserIDString, $"<size=14><color=#FFA500>{i}.</color> <color=#FF8C00>{top.Ник}</color> ({top.УбийствPVP})</size>");
                             }
                         }
                     }
@@ -142,7 +135,7 @@ namespace Oxide.Plugins
                         n++;
                         if (n <= 5)
                         {
-                            rust.SendChatMessage(player, $"<size=14><color=#FFA500>{n}.</color> <color=#FF8C00>{top.Ник}</color> ({top.РакетВыпущено + top.ВзрывчатокИспользовано})</size>", null, top.UID);
+                            player.SendConsoleCommand("chat.add", top.UID, $"<size=14><color=#FFA500>{n}.</color> <color=#FF8C00>{top.Ник}</color> ({top.РакетВыпущено + top.ВзрывчатокИспользовано})</size>");
                             if (top.UID == player.UserIDString)
                             {
                                 prov = true;
@@ -158,7 +151,7 @@ namespace Oxide.Plugins
                             i++;
                             if (top.UID == player.UserIDString)
                             {
-                                rust.SendChatMessage(player, $"<size=14><color=#FFA500>{i}.</color> <color=#FF8C00>{top.Ник}</color> ({top.РакетВыпущено + top.ВзрывчатокИспользовано})</size>", null, player.UserIDString);
+                                player.SendConsoleCommand("chat.add", player.UserIDString, $"<size=14><color=#FFA500>{i}.</color> <color=#FF8C00>{top.Ник}</color> ({top.РакетВыпущено + top.ВзрывчатокИспользовано})</size>");
                             }
                         }
                     }
@@ -172,7 +165,7 @@ namespace Oxide.Plugins
                 CuiHelper.AddUi(player, elements);
             }
         }
-        // GUI панелька
+
         [ConsoleCommand("top.show")]
         private void TopShowOpenCmd2(ConsoleSystem.Arg arg)
         {
@@ -185,9 +178,10 @@ namespace Oxide.Plugins
             CuiHelper.AddUi(player, elements);
             return;
         }
+
         CuiElementContainer CreatePanel(string number)
         {
-            string cvet = Convert.ToString(Config["ЦветПанели"]);
+            string cvet = Convert.ToString(Config["Цвет Панели"]);
             var elements = new CuiElementContainer();
             var panel = elements.Add(new CuiPanel
             {
@@ -212,7 +206,6 @@ namespace Oxide.Plugins
                 RectTransform = { AnchorMin = "0.9 0.90", AnchorMax = "1 1" },
                 Text = { Text = "<color=#ffa500>X</color>", FontSize = 18, Align = TextAnchor.MiddleCenter }
             }, panel);
-
 
             elements.Add(new CuiPanel
             {
@@ -328,7 +321,6 @@ namespace Oxide.Plugins
             return elements;
         }
 
-        // Выход с панельки
         [ConsoleCommand("top.exit")]
         private void MagazineOpenCmd2(ConsoleSystem.Arg arg)
         {
@@ -337,12 +329,15 @@ namespace Oxide.Plugins
             BasePlayer player = arg.Player();
             CommunityEntity.ServerInstance.ClientRPCEx(new Network.SendInfo() { connection = player.net.connection }, null, "DestroyUI", "Панелька");
         }
+
         private Dictionary<uint, string> LastHeliHit = new Dictionary<uint, string>();
+
         void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
         {
             if (entity is BaseHelicopter && info.Initiator is BasePlayer)
                 LastHeliHit[entity.net.ID] = info.InitiatorPlayer.UserIDString;
         }
+
         void OnEntityDeath(BaseCombatEntity victim, HitInfo info)
         {
             if (victim == null || info == null) return;
@@ -353,7 +348,6 @@ namespace Oxide.Plugins
                 string death = victimBP.UserIDString;
                 TopData con = (from x in Tops where x.UID == death select x).FirstOrDefault();
                 con.Смертей += 1;
-                Saved();
             }
             if (initiator == null)
             {
@@ -375,46 +369,42 @@ namespace Oxide.Plugins
                 if (IsNPC(victimBP))
                 {
                     con2.NPCУбито++;
-                    Saved();
                     return;
                 }
                 if (victim is BaseAnimalNPC)
                 {
                     con2.УбийствЖивотных += 1;
-                    Saved();
                     return;
                 }
                 if (victim is BradleyAPC)
                 {
                     con2.ТанковУничтожено++;
-                    Saved();
                     return;
                 }
                 if (victimBP != null && victimBP != initiator)
                 {
                     con2.УбийствPVP += 1;
-                    Saved();
                     return;
                 }
             }
             return;
         }
+
         void OnExplosiveThrown(BasePlayer player, BaseEntity entity)
         {
             TopData con = (from x in Tops where x.UID == Convert.ToString(player.userID) select x).FirstOrDefault();
             con.ВзрывчатокИспользовано += 1;
-            Saved();
         }
+
         void OnRocketLaunched(BasePlayer player, BaseEntity entity)
         {
             TopData con = (from x in Tops where x.UID == Convert.ToString(player.userID) select x).FirstOrDefault();
             con.РакетВыпущено += 1;
-            Saved();
         }
+
         void OnWeaponFired(BaseProjectile projectile, BasePlayer player, ItemModProjectile mod, ProtoBuf.ProjectileShoot projectiles)
         {
             TopData con = (from x in Tops where x.UID == Convert.ToString(player.userID) select x).FirstOrDefault();
-            //if (projectile.primaryMagazine.ammoType.itemid == -420273765 || projectile.primaryMagazine.ammoType.itemid == -1280058093)
             if (projectile.primaryMagazine.definition.ammoTypes == Rust.AmmoTypes.BOW_ARROW)
             {
                 con.СтрелВыпущено += 1;
@@ -423,16 +413,29 @@ namespace Oxide.Plugins
             {
                 con.ПульВыпущено += 1;
             }
-            Saved();
         }
+
         void OnItemCraftFinished(ItemCraftTask task, Item item)
         {
             if (task.owner is BasePlayer)
             {
                 TopData con = (from x in Tops where x.UID == Convert.ToString(task.owner.userID) select x).FirstOrDefault();
                 con.ПредметовСкрафчено += 1;
-                Saved();
             }
+        }
+
+        void OnServerSave()
+        {
+            Saved();
+        }
+
+        void Unload()
+        {
+            foreach(var player in BasePlayer.activePlayerList)
+            {
+                CommunityEntity.ServerInstance.ClientRPCEx(new Network.SendInfo() { connection = player.net.connection }, null, "DestroyUI", "Панелька");
+            }
+            Saved();
         }
 
         void OnCollectiblePickup(Item item, BasePlayer player)
@@ -447,14 +450,11 @@ namespace Oxide.Plugins
                 DoGather(entity.ToPlayer(), item);
         }
 
-        //Подсчитываем количество собраных ресурсов
         void DoGather(BasePlayer player, Item item)
         {
             if (player == null) return;
-            //item.amount = (int)(item.amount);
             TopData con = (from x in Tops where x.UID == Convert.ToString(player.userID) select x).FirstOrDefault();
             con.РесурсовСобрано += item.amount;
-            Saved();
             return;
         }
 
@@ -462,25 +462,16 @@ namespace Oxide.Plugins
         {
             if (player == null) return;
             Tops.Add(new TopData(player.displayName, player.UserIDString));
-            Saved();
         }
 
-        //Добавляем игрока в Базу Данных и Биндим клавишу
         void OnPlayerInit(BasePlayer player)
         {
-            //timer.Once(2f, () =>
-            //{
-            //    player.SendConsoleCommand($"bind {Convert.ToString(Config["КлавишаДляБинда"])} top.show");
-            //});
             var check = (from x in Tops where x.UID == player.UserIDString select x).Count();
             if (check == 0) CreateInfo(player);
-            //Обновляем игровой ник
             TopData con = (from x in Tops where x.UID == Convert.ToString(player.userID) select x).FirstOrDefault();
             con.Ник = (string)player.displayName;
-            Saved();
         }
 
-        //Загружаем TopData.json и проверяем есть ли все игроки в Базе Данных
         void Loaded()
         {
             Tops = Interface.Oxide.DataFileSystem.ReadObject<List<TopData>>("TopData");
@@ -489,8 +480,7 @@ namespace Oxide.Plugins
                 var check = (from x in Tops where x.UID == player.UserIDString select x).Count();
                 if (check == 0) CreateInfo(player);
             }
-            //что то делаем
-            timer.Repeat(Convert.ToInt32(Config["ВремяМеждуСообщениями"]), 0, () =>
+            timer.Repeat(Convert.ToInt32(Config["Время Между Сообщениями"]), 0, () =>
             {
                 MessageNum++;
                 TopData data = null;
@@ -499,80 +489,80 @@ namespace Oxide.Plugins
                     case 1:
                         data = Tops.OrderByDescending(p => p.УбийствPVP).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Киллер</color> - {data.Ник} ({data.УбийствPVP})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Киллер</color> - {data.Ник} ({data.УбийствPVP})</size>");
                         break;
                     case 2:
                         data = Tops.OrderByDescending(p => p.ВзрывчатокИспользовано + p.РакетВыпущено).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Рейдер</color> - {data.Ник} ({data.ВзрывчатокИспользовано + data.РакетВыпущено})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Рейдер</color> - {data.Ник} ({data.ВзрывчатокИспользовано + data.РакетВыпущено})</size>");
                         break;
                     case 3:
                         data = Tops.OrderByDescending(p => p.УбийствЖивотных).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Убийца животных</color> - {data.Ник} ({data.УбийствЖивотных})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Убийца животных</color> - {data.Ник} ({data.УбийствЖивотных})</size>");
                         break;
                     case 4:
                         data = Tops.OrderByDescending(p => p.ПульВыпущено).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Выпустил пуль</color> - {data.Ник} ({data.ПульВыпущено})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Выпустил пуль</color> - {data.Ник} ({data.ПульВыпущено})</size>");
                         break;
                     case 5:
                         data = Tops.OrderByDescending(p => p.СтрелВыпущено).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Выпустил стрел</color> - {data.Ник} ({data.СтрелВыпущено})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Выпустил стрел</color> - {data.Ник} ({data.СтрелВыпущено})</size>");
                         break;
                     case 6:
                         data = Tops.OrderByDescending(p => p.Смертей).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Смертей</color> - {data.Ник} ({data.Смертей})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Смертей</color> - {data.Ник} ({data.Смертей})</size>");
                         break;
                     case 7:
                         data = Tops.OrderByDescending(p => p.ПредметовСкрафчено).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Крафтер</color> - {data.Ник} ({data.ПредметовСкрафчено})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Крафтер</color> - {data.Ник} ({data.ПредметовСкрафчено})</size>");
                         break;
                     case 8:
                         data = Tops.OrderByDescending(p => p.РесурсовСобрано).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Добытчик</color> - {data.Ник} ({data.РесурсовСобрано})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Добытчик</color> - {data.Ник} ({data.РесурсовСобрано})</size>");
                         break;
                     case 9:
                         data = Tops.OrderByDescending(p => p.ВертолётовУничтожено).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Убийца вертолётов</color> - {data.Ник} ({data.ВертолётовУничтожено})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Убийца вертолётов</color> - {data.Ник} ({data.ВертолётовУничтожено})</size>");
                         break;
                     case 10:
                         data = Tops.OrderByDescending(p => p.NPCУбито).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Убийца NPC</color> - {data.Ник} ({data.NPCУбито})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Убийца NPC</color> - {data.Ник} ({data.NPCУбито})</size>");
                         break;
                     case 11:
                         data = Tops.OrderByDescending(p => p.ТанковУничтожено).FirstOrDefault();
                         if (data != null)
-                            rust.BroadcastChat($"<size=16><color={Convert.ToString(Config["ЦветОповещаний"])}>TOP Убийца танков</color> - {data.Ник} ({data.ТанковУничтожено})</size>");
+                            Server.Broadcast($"<size=16><color={Convert.ToString(Config["Цвет Оповещаний"])}>TOP Убийца танков</color> - {data.Ник} ({data.ТанковУничтожено})</size>");
                         MessageNum = 0;
                         break;
                 }
             });
         }
 
-        //Сохраняем инфу в TopData
         void Saved()
         {
             Interface.Oxide.DataFileSystem.WriteObject("TopData", Tops);
         }
+
         private bool IsNPC(BasePlayer player)
         {
             if (player == null) return false;
-            //BotSpawn
             if (player is NPCPlayer)
                 return true;
-            //HumanNPC
             if (!(player.userID >= 76560000000000000L || player.userID <= 0L))
                 return true;
             return false;
         }
+
         public List<TopData> Tops = new List<TopData>();
+
         public class TopData
         {
             public TopData(string Ник, string UID)

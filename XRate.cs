@@ -11,7 +11,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("XRate", "fermens", "0.2.51")]
+    [Info("XRate", "Menevt", "1.0.03")]
     [Description("НАСТРОЙКА РЕЙТОВ ДОБЫЧИ (ОПТИМИЗИРОВАНО)")]
     public class XRate : RustPlugin
     {
@@ -84,6 +84,9 @@ namespace Oxide.Plugins
             [JsonProperty("Экспериментально. Не трогать!")]
             public bool exp;
 
+            [JsonProperty("Отключить ускоренную плавку")]
+            public bool speed;
+
             [JsonProperty("Рейты у обычных игроков")]
             public rateset rates;
 
@@ -103,6 +106,7 @@ namespace Oxide.Plugins
             {
                 return new PluginConfig()
                 {
+                    speed = false,
                     privilige = new Dictionary<string, rateset>()
                     {
                         { "xrate.x3", new rateset{ box = 3f, carier = 3f, gather = 3f, grab = 3f, npc = 3f, speed = 4f, sulfur = 2.5f } },
@@ -142,6 +146,8 @@ namespace Oxide.Plugins
         void Init()
         {
             ins = this;
+            Unsubscribe(nameof(OnEntitySpawned));
+            Unsubscribe(nameof(OnOvenToggle));
         }
 
         bool skip;
@@ -297,8 +303,15 @@ namespace Oxide.Plugins
         float nighttime;
         float upnight;
         TOD_Time comp;
+
         void OnServerInitialized()
         {
+            PrintWarning("\n-----------------------------\n" +
+            "     Author - Menevt/\n" +
+            "     Site - https://oxide-russia.ru/\n" +
+            "     Site - https://oxide-russia.ru/\n" +
+            "-----------------------------");
+            SaveConfig();
             if(config.blacklist == null || config.blacklist.Length == 0)
             {
                 config.blacklist = new string[]
@@ -352,20 +365,26 @@ namespace Oxide.Plugins
                 else OnSunset();
             }
 
-            var ovens = UnityEngine.Object.FindObjectsOfType<BaseOven>();
-            for (var i = 0; i < ovens.Length; i++)
+            if (!config.speed)
             {
-                OnEntitySpawned(ovens[i]);
-            }
-            timer.Once(1f, () =>
-            {
-                foreach (BaseOven oven in ovens)
+                Subscribe(nameof(OnEntitySpawned));
+                Subscribe(nameof(OnOvenToggle));
+                var ovens = UnityEngine.Object.FindObjectsOfType<BaseOven>();
+                for (var i = 0; i < ovens.Length; i++)
                 {
-                    var component = oven.GetComponent<FurnaceController>();
-                    if (oven == null || oven.IsDestroyed || !oven.IsOn()) continue;
-                    component.StartCooking();
+                    OnEntitySpawned(ovens[i]);
                 }
-            });
+                timer.Once(1f, () =>
+                {
+                    foreach (BaseOven oven in ovens)
+                    {
+                        var component = oven.GetComponent<FurnaceController>();
+                        if (oven == null || oven.IsDestroyed || !oven.IsOn()) continue;
+                        component.StartCooking();
+                    }
+                });
+            }
+
             foreach (string perm in config.privilige.Keys) permission.RegisterPermission(perm, this);
             foreach (BasePlayer player in BasePlayer.activePlayerList) getuserrate(player.UserIDString);
         }
@@ -424,7 +443,7 @@ namespace Oxide.Plugins
             player.ChatMessage(config.messages[2].Replace("{name}", player.displayName).Replace("{0}", cash[player.UserIDString].grab.ToString()).Replace("{1}", cash[player.UserIDString].gather.ToString()).Replace("{2}", cash[player.UserIDString].carier.ToString()).Replace("{3}", cash[player.UserIDString].box.ToString()).Replace("{4}", cash[player.UserIDString].npc.ToString()).Replace("{5}", cash[player.UserIDString].speed.ToString()).Replace("{6}", cash[player.UserIDString].sulfur.ToString()));
         }
 
-        [PluginReference] private Plugin ZREWARDME;
+        [PluginReference] private Plugin ZREWARDME, FROre;
 
         void getuserrate(string id, float bonus = 0f)
         {
@@ -558,8 +577,9 @@ namespace Oxide.Plugins
         {
             LootContainer lootcont = container.entityOwner as LootContainer;
             if (lootcont == null || lootcont.OwnerID != 0) return;
+            uint ID = lootcont.net.ID;
+            if (CHECKED.Contains(ID)) return;
             var player = lootcont?.lastAttacker?.ToPlayer();
-            if (lootcont.HasFlag(BaseEntity.Flags.Reserved7) || lootcont.HasFlag(BaseEntity.Flags.Reserved8)) return;
             
             if (player != null && cash.ContainsKey(player.UserIDString))
             {
@@ -592,33 +612,44 @@ namespace Oxide.Plugins
             }
         }
 
-        private void OnLootEntity(BasePlayer player, BaseEntity entity)
+        List<uint> CHECKED = new List<uint>();
+
+        private void OnLootEntity(BasePlayer player, object entity)
         {
             if (player == null || entity == null) return;
             if (entity is NPCPlayerCorpse)
             {
-                if (entity.HasFlag(BaseEntity.Flags.Reserved7) || entity.HasFlag(BaseEntity.Flags.Reserved8)) return;
-                ItemContainer cont = entity.GetComponent<NPCPlayerCorpse>().containers.FirstOrDefault();
+                NPCPlayerCorpse nPCPlayerCorpse = (NPCPlayerCorpse) entity;
+                if (nPCPlayerCorpse == null) return;
+                uint ID = nPCPlayerCorpse.net.ID;
+                if (CHECKED.Contains(ID)) return;
+                rateset rateset;
+                if (!cash.TryGetValue(player.UserIDString, out rateset)) return;
+                ItemContainer cont = nPCPlayerCorpse.containers.FirstOrDefault();
                 foreach (var item in cont.itemList.Where(x => x.info.stackable > 1))
                 {
                     int maxstack = item.MaxStackable();
                     if (maxstack == 1 || config.blacklist.Contains(item.info.shortname) || item.IsBlueprint()) continue;
-                    item.amount = (int)(item.amount * cash[player.UserIDString].npc);
+                    item.amount = (int)(item.amount * rateset.npc);
                     if (item.amount > maxstack) item.amount = maxstack;
                 }
-                entity.SetFlag(BaseEntity.Flags.Reserved7, true);
+                CHECKED.Add(ID);
             }
             else if (entity is LootContainer)
             {
-                LootContainer lootcont = entity.GetComponent<LootContainer>();
-                if (lootcont == null || lootcont.HasFlag(BaseEntity.Flags.Reserved7) || lootcont.HasFlag(BaseEntity.Flags.Reserved8)) return;
+                LootContainer lootcont = (LootContainer)entity;
+                if (lootcont == null || lootcont.OwnerID != 0) return;
+                uint ID = lootcont.net.ID;
+                if (CHECKED.Contains(ID)) return;
+                rateset rateset;
+                if (!cash.TryGetValue(player.UserIDString, out rateset)) return;
                 if (entity is HackableLockedCrate)
                 {
                     foreach (var item in lootcont.inventory.itemList.Where(x => x.info.stackable > 1))
                     {
                         int maxstack = item.MaxStackable();
                         if (maxstack == 1 || config.blacklist.Contains(item.info.shortname) || item.IsBlueprint()) continue;
-                        item.amount = (int)(item.amount * cash[player.UserIDString].lockbox);
+                        item.amount = (int)(item.amount * rateset.lockbox);
                         if (item.amount > maxstack) item.amount = maxstack;
                     }
                 }
@@ -628,11 +659,11 @@ namespace Oxide.Plugins
                     {
                         int maxstack = item.MaxStackable();
                         if (maxstack == 1 || config.blacklist.Contains(item.info.shortname) || item.IsBlueprint()) continue;
-                        item.amount = (int)(item.amount * cash[player.UserIDString].box);
+                        item.amount = (int)(item.amount * rateset.box);
                         if (item.amount > maxstack) item.amount = maxstack;
                     }
                 }
-                lootcont.SetFlag(BaseEntity.Flags.Reserved7, true);
+                CHECKED.Add(ID);
             }
         }
         #endregion
@@ -776,6 +807,14 @@ namespace Oxide.Plugins
                 fuel.MarkDirty();
             }
             private Dictionary<Item, float> cook = new Dictionary<Item, float>();
+            class CREAP
+            {
+                public string prefabname;
+                public string name;
+                public ulong skin;
+                public int amount;
+            }
+
             private void SmeltItems()
             {
                 for (var i = 0; i < Furnace.inventory.itemList.Count; i++)
@@ -803,7 +842,8 @@ namespace Oxide.Plugins
                         item.SetFlag(global::Item.Flag.Cooking, true);
                         item.MarkDirty();
                     }
-                    int position = item.position;
+                    // int position = item.position;
+                    bool stop = false;
                     int amount2 = item.amount;
                     if (amount2 > amount)
                     {
@@ -813,15 +853,55 @@ namespace Oxide.Plugins
                     else
                     {
                         item.Remove();
+                        stop = true;
                     }
 
                     if (cookable.becomeOnCooked == null) continue;
-                    int newamount = cookable.amountOfBecome * amount;
-                    var item2 = ItemManager.Create(cookable.becomeOnCooked, amount2 < newamount ? amount2 : newamount);
 
-                    if (item2 == null || item2.MoveToContainer(item.parent, position) || item2.MoveToContainer(item.parent)) continue;
-                    item2.Drop(item.parent.dropPosition, item.parent.dropVelocity);
-                    if (!item.parent.entityOwner) continue;
+                    List<Item> cREAPs = null;
+                    if (item.skin != 0 && ins.FROre != null)
+                    {
+                        cREAPs = ins.FROre.Call<List<Item>>("GetMelt", item.info.shortname, item.skin);
+                    }
+
+                    if (cREAPs != null && cREAPs.Count > 0)
+                    {
+                        float radiation = 0f;
+                        float radius = 0f;
+                        bool check = false;
+                        foreach(var item2 in cREAPs)
+                        {
+                            if (!check && !string.IsNullOrEmpty(item2.text))
+                            {
+                                string[] args = item2.text.Split(' ');
+                                radiation = float.Parse(args[0]);
+                                radius = float.Parse(args[0]);
+                                check = true;
+                            }
+                            if (item2.MoveToContainer(item.parent)) continue;
+                            item2.Drop(item.parent.dropPosition, item.parent.dropVelocity);
+                            StopCooking();
+                        }
+
+                        if (radiation > 0f)
+                        {
+                            List<BasePlayer> basePlayers = new List<BasePlayer>();
+                            Vis.Entities<BasePlayer>(Furnace.transform.position, radius, basePlayers);
+                            foreach (var z in basePlayers)
+                            {
+                                z.UpdateRadiation(radiation);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        int newamount = cookable.amountOfBecome * amount;
+                        var item2 = ItemManager.Create(cookable.becomeOnCooked, amount2 < newamount ? amount2 : newamount);
+                        if (item2 == null /*|| item2.MoveToContainer(item.parent, position) */|| item2.MoveToContainer(item.parent)) continue;
+                        item2.Drop(item.parent.dropPosition, item.parent.dropVelocity);
+                        StopCooking();
+                    }
+                    if (!stop) continue;
                     StopCooking();
                 }
             }

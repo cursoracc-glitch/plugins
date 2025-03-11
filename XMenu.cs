@@ -2,24 +2,20 @@ using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
 using Oxide.Game.Rust.Cui;
-using Newtonsoft.Json; 
-using Oxide.Core.Plugins;  
+using Newtonsoft.Json;
+using Oxide.Core.Plugins;
  
-namespace Oxide.Plugins 
+namespace Oxide.Plugins
 {
-    [Info("XMenu", "SkuliDropek", "1.0.804")]
+    [Info("XMenu", "Monster", "1.0.804")]
     class XMenu : RustPlugin
     {
-		public Dictionary<string, bool> _activeevents = new Dictionary<string, bool>
-		{
-			["CargoPlane"] = false,
-			["BaseHelicopter"] = false,
-			["CargoShip"] = false,
-			["CH47Helicopter"] = false,
-			["BradleyAPC"] = false
-		};
+		public bool eCargoShip; 
+		public bool eCargoPlane;
+		public bool eBradleyAPC;
+		public bool eBaseHelicopter;
+		public bool eCH47Helicopter;
 		
-		public List<BaseNetworkable> _events = new List<BaseNetworkable>();
 		public List<BasePlayer> players = new List<BasePlayer>();
 		
 		#region Reference
@@ -54,7 +50,7 @@ namespace Oxide.Plugins
                 [JsonProperty("Обновлять меню [ Обновляется только открытое меню ]")] public bool Reload;
                 [JsonProperty("Обновлять информацию других плагинов [ Обновляется только при открытом меню ]")] public bool ReloadPluginsInfo;
                 [JsonProperty("Интервал обновления открытого меню")] public float IReload;
-                [JsonProperty("Фейк онлайн от плагина - [ Default - 0 | IQFakeActive - 1 | FGS - 2]")] public int FakeOnline;
+                [JsonProperty("Фейк онлайн от плагина - [ Default - 0 | FGS - 1 | IQFakeActive - 2]")] public int FakeOnline;
 			}			   
 
             internal class LogoSetting
@@ -80,15 +76,10 @@ namespace Oxide.Plugins
 				[JsonProperty("Цвет текста кнопок")] public string ButtonTextColor;
 				[JsonProperty("Размер текста кнопок")] public int ButtonSize;
 				[JsonProperty("Закрывать меню после нажатия одной из кнопок")] public bool CloseMenu;
-				[JsonProperty("Сдвинуть меню при активной мисси")] public bool Mission;
 				[JsonProperty("Меню - AnchorMin")] public string MAnchorMin;
                 [JsonProperty("Меню - AnchorMax")] public string MAnchorMax;
                 [JsonProperty("Меню - OffsetMin")] public string MOffsetMin;
                 [JsonProperty("Меню - OffsetMax")] public string MOffsetMax;				
-				[JsonProperty("Сдвинуть меню - AnchorMin")] public string MMAnchorMin;
-                [JsonProperty("Сдвинуть меню - AnchorMax")] public string MMAnchorMax;
-                [JsonProperty("Сдвинуть меню - OffsetMin")] public string MMOffsetMin;
-                [JsonProperty("Сдвинуть меню - OffsetMax")] public string MMOffsetMax;				
 				[JsonProperty("Инфа плагинов - AnchorMin")] public string PAnchorMin;
                 [JsonProperty("Инфа плагинов - AnchorMax")] public string PAnchorMax;
                 [JsonProperty("Инфа плагинов - OffsetMin")] public string POffsetMin;
@@ -162,28 +153,23 @@ namespace Oxide.Plugins
 						AnchorMax = "0 1",
 						OffsetMin = "10 -78",
 						OffsetMax = "80 -8",						
-						MAnchorMin = "0 1", 
+						MAnchorMin = "0 1",
 						MAnchorMax = "0 1",
 						MOffsetMin = "-35 -65.5",
 						MOffsetMax = "35 4.5"
 					},
                     Menu = new MenuSetting
                     {
-						MenuColor = "1 0.2701530 0 0.501530",
+						MenuColor = "1 0.27 0 0.5",
 						MenuMaterial = "assets/icons/greyout.mat",
-						ButtonColor = "0.21701530 0.22101530 0.20901530 0.7501530",
+						ButtonColor = "0.217 0.221 0.209 0.75",
 						ButtonTextColor = "1 1 1 1",
 						ButtonSize = 9,
-						Mission = false,
 						CloseMenu = false,
 						MAnchorMin = "0 1",
 						MAnchorMax = "0 1",
 						MOffsetMin = "45 -72.5",
 						MOffsetMax = "400 -12.5",						
-						MMAnchorMin = "0 1",
-						MMAnchorMax = "0 1",
-						MMOffsetMin = "45 -72.5",
-						MMOffsetMax = "400 -12.5",						
 						PAnchorMin = "0 1",
 						PAnchorMax = "0 1",
 						POffsetMin = "357.5 -60",
@@ -205,7 +191,7 @@ namespace Oxide.Plugins
 					},
 					Event = new EventsSetting 
 					{
-						EMenuColor = "1 0.2701530 0 0.501530",
+						EMenuColor = "1 0.27 0 0.5",
 						EMenuMaterial = "assets/icons/greyout.mat",
 						EBackgroundColor = "0.217 0.221 0.209 0.75",
 						Events = new Dictionary<string, EventSetting>
@@ -272,18 +258,15 @@ namespace Oxide.Plugins
 
         #endregion
 		
-		public int maxplayers, online, joining, sleeping;
-		public string time;
-		
 		#region Hooks
 		
 		private void OnServerInitialized()
 		{
 			PrintWarning("\n-----------------------------\n" +
-			"     Author - SkuliDropek\n" +
+			"     Author - Monster\n" +
 			"     VK - vk.com/idannopol\n" +
-			"    Discord - Skuli Dropek#4816 - KINGSkuliDropek#4837\n" +
-			"     Config - v.1530\n" + 
+			"     Discord - Monster#4837\n" +
+			"     Config - v.2850\n" + 
 			"-----------------------------");
 			
 			ImageLibrary.Call("AddImage", config.Logo.LogoURL, ".LogoIMG");
@@ -292,39 +275,22 @@ namespace Oxide.Plugins
 			
 			foreach (var entity in BaseNetworkable.serverEntities)
 			{
-				if (entity is CargoShip)
-				{
-					_activeevents["CargoShip"] = true;
-					_events.Add(entity);
-				}
-				
+				if (entity is CargoShip) 
+					eCargoShip = true;				
 				if (entity is CargoPlane)
-				{
-					_activeevents["CargoPlane"] = true;
-					_events.Add(entity);
-				}
+					eCargoPlane = true;				
 				if (entity is BradleyAPC)
-				{
-					_activeevents["BradleyAPC"] = true;
-					_events.Add(entity);
-				}
+					eBradleyAPC = true;				
 				if (entity is BaseHelicopter)
-				{
-					_activeevents["BaseHelicopter"] = true;
-					_events.Add(entity);
-				}
+					eBaseHelicopter = true;				
 				if (entity is CH47Helicopter)
-				{
-					_activeevents["CH47Helicopter"] = true;
-					_events.Add(entity);
-				}
+					eCH47Helicopter = true;
 			}
 			
-			Update();
 			BasePlayer.activePlayerList.ToList().ForEach(OnPlayerConnected);
 			
 			if (config.Setting.Reload)
-			    timer.Every(config.Setting.IReload, () => {
+			    timer.Every(config.Setting.IReload, () => { 
 			        foreach(var i in players)
 				    {
 					    GUIMenuInfo(i);
@@ -345,17 +311,6 @@ namespace Oxide.Plugins
 			    CuiHelper.DestroyUi(player, ".LogoGUI");
 			    CuiHelper.DestroyUi(player, ".MenuGUI");
 			}
-		}
-		
-		private void Update()
-		{
-			maxplayers = ConVar.Server.maxplayers;
-			online = config.Setting.FakeOnline == 1 && IQFakeActive ? FakeOnline : config.Setting.FakeOnline == 2 && FGS ? BasePlayer.activePlayerList.Count + (int)FGS?.CallHook("getFakes") : BasePlayer.activePlayerList.Count;
-			joining = ServerMgr.Instance.connectionQueue.Joining;
-			sleeping = BasePlayer.sleepingPlayerList.Count;
-			time = TOD_Sky.Instance.Cycle.DateTime.ToString("HH:mm");
-			
-			timer.Once(config.Setting.IReload, () => Update());
 		}
 		
 		private void OnPlayerConnected(BasePlayer player)
@@ -387,69 +342,29 @@ namespace Oxide.Plugins
 		private void OnEntitySpawned(BaseNetworkable entity)
 		{
 			if (entity is CargoShip)
-			{
-				_activeevents["CargoShip"] = true;
-				_events.Add(entity);
-			}
+				eCargoShip = true;				
 			if (entity is CargoPlane)
-			{
-				_activeevents["CargoPlane"] = true;
-				_events.Add(entity);
-			}
+				eCargoPlane = true;				
 			if (entity is BradleyAPC)
-			{
-				_activeevents["BradleyAPC"] = true;
-				_events.Add(entity);
-			}
+				eBradleyAPC = true;				
 			if (entity is BaseHelicopter)
-			{
-				_activeevents["BaseHelicopter"] = true;
-				_events.Add(entity);
-			}
+				eBaseHelicopter = true;				
 			if (entity is CH47Helicopter)
-			{
-				_activeevents["CH47Helicopter"] = true;
-				_events.Add(entity);
-			}
-		}
+				eCH47Helicopter = true;
+		}		
 		
 		private void OnEntityKill(BaseNetworkable entity)
 		{
 			if (entity is CargoShip)
-			{
-				_events.Remove(entity);
-				
-				if(_events.Where(x => x is CargoShip).Count() == 0)
-					_activeevents["CargoShip"] = false;
-			}
+				eCargoShip = false;				
 			if (entity is CargoPlane)
-			{
-				_events.Remove(entity);
-				
-				if(_events.Where(x => x is CargoPlane).Count() == 0)
-					_activeevents["CargoPlane"] = false;
-			}
+				eCargoPlane = false;				
 			if (entity is BradleyAPC)
-			{
-				_events.Remove(entity);
-				
-				if(_events.Where(x => x is BradleyAPC).Count() == 0)
-					_activeevents["BradleyAPC"] = false;
-			}
+				eBradleyAPC = false;				
 			if (entity is BaseHelicopter)
-			{
-				_events.Remove(entity);
-				
-				if(_events.Where(x => x is BaseHelicopter).Count() == 0)
-					_activeevents["BaseHelicopter"] = false;
-			}
+				eBaseHelicopter = false;				
 			if (entity is CH47Helicopter)
-			{
-				_events.Remove(entity);
-				
-				if(_events.Where(x => x is CH47Helicopter).Count() == 0)
-					_activeevents["CH47Helicopter"] = false;
-			}
+				eCH47Helicopter = false;
 		}
 		
 		#endregion
@@ -481,27 +396,13 @@ namespace Oxide.Plugins
 			}
 			
 			EffectNetwork.Send(x, player.Connection);
-		}		
-		
-		[ConsoleCommand("ui_menu_b")]
-		void cmdCloseGUI(ConsoleSystem.Arg args)
-		{
-			BasePlayer player = args.Player();
-
-			player.SendConsoleCommand(args.Args[0].Replace("'", ""));
-			
-			if(config.Menu.CloseMenu)
-			{
-				CuiHelper.DestroyUi(player, ".MenuGUI");
-				players.Remove(player); 
-			}				
 		}
 		
 		#endregion
-		 
+		
 		#region GUI 
 		
-		private void GUILogo(BasePlayer player) 
+		private void GUILogo(BasePlayer player)
 		{
 			CuiHelper.DestroyUi(player, ".LogoGUI");
             CuiElementContainer container = new CuiElementContainer();
@@ -527,16 +428,14 @@ namespace Oxide.Plugins
 		private void GUIMenu(BasePlayer player)
 		{	
 			CuiHelper.DestroyUi(player, ".MenuGUI");
-            CuiElementContainer container = new CuiElementContainer(); 
+            CuiElementContainer container = new CuiElementContainer();
 			
-			MenuConfig.MenuSetting menu = config.Menu; 
+			MenuConfig.MenuSetting menu = config.Menu;
 			MenuConfig.LogoSetting logo = config.Logo;
-			
-			bool activemission = player.HasActiveMission() && menu.Mission;
 			
 			container.Add(new CuiPanel
             {
-                RectTransform = { AnchorMin = activemission ? menu.MMAnchorMin : menu.MAnchorMin, AnchorMax = activemission ? menu.MMAnchorMax : menu.MAnchorMax, OffsetMin = activemission ? menu.MMOffsetMin : menu.MOffsetMin, OffsetMax = activemission ? menu.MMOffsetMax : menu.MOffsetMax },
+                RectTransform = { AnchorMin = menu.MAnchorMin, AnchorMax = menu.MAnchorMax, OffsetMin = menu.MOffsetMin, OffsetMax = menu.MOffsetMax },
                 Image = { Color = menu.MenuColor, Material = menu.MenuMaterial }
             }, "Overlay", ".MenuGUI");			
 			
@@ -550,7 +449,7 @@ namespace Oxide.Plugins
             {
                 RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = "-35 -64.5", OffsetMax = "35 4.5" },
                 Button = { Color = "0 0 0 0", Close = ".MenuGUI", Command = "ui_menu close" },
-                Text = { Text = "" } 
+                Text = { Text = "" }
             }, ".MenuGUI");							
 			
 			container.Add(new CuiPanel  
@@ -568,13 +467,13 @@ namespace Oxide.Plugins
 			int count = config.Button.Count, count1 = config.ButtonP.Count;
 			
 			foreach(var i in config.Button)
-			{ 
+			{
 				double offset = -(26 * count--) - (1.25 * count--);
 				
 				container.Add(new CuiButton
                 {
                     RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = $"{offset + 5} -25", OffsetMax = $"{offset + 57} -10" },
-                    Button = { Color = menu.ButtonColor, Command = $"ui_menu_b '{i.Value}'" },
+                    Button = { Color = menu.ButtonColor, Command = i.Value, Close = menu.CloseMenu ? ".MenuGUI" : "" },
                     Text = { Text = "" }
                 }, ".MenuGUI", ".BUTTON");
 				
@@ -592,7 +491,7 @@ namespace Oxide.Plugins
 				container.Add(new CuiButton
                 {
                     RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = $"155 {offset - 14.25}", OffsetMax = $"170 {offset + 0.75}" },
-                    Button = { Color = "1 1 1 1", Sprite = i.Value, Command = $"ui_menu_b '{i.Key}'" },
+                    Button = { Color = "1 1 1 1", Sprite = i.Value, Command = i.Key, Close = menu.CloseMenu ? ".MenuGUI" : "" },
                     Text = { Text = "" }
                 }, ".MenuGUI", ".BUTTON");
 			}
@@ -611,10 +510,12 @@ namespace Oxide.Plugins
 			CuiHelper.DestroyUi(player, ".MenuInfoGUI");
             CuiElementContainer container = new CuiElementContainer();
 			
+			int online = config.Setting.FakeOnline == 1 && IQFakeActive ? FakeOnline : config.Setting.FakeOnline == 2 && FGS ? BasePlayer.activePlayerList.Count + (int)FGS?.CallHook("getFakes") : BasePlayer.activePlayerList.Count;
+			
 			container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = "47.5 -40", OffsetMax = "318 -5" },
-                Text = { Text = string.Format(lang.GetMessage("TITLE", this, player.UserIDString), online, maxplayers, joining, sleeping, time), Align = TextAnchor.UpperCenter, FontSize = 13, Color = "1 1 1 1" }
+                Text = { Text = string.Format(lang.GetMessage("TITLE", this, player.UserIDString), online, ConVar.Server.maxplayers, ServerMgr.Instance.connectionQueue.Joining, BasePlayer.sleepingPlayerList.Count, TOD_Sky.Instance.Cycle.DateTime.ToString("HH:mm")), Align = TextAnchor.UpperCenter, FontSize = 13, Color = "1 1 1 1" }
             }, ".MenuGUI", ".MenuInfoGUI");
 			
 			CuiHelper.AddUi(player, container);
@@ -642,13 +543,42 @@ namespace Oxide.Plugins
                     RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = $"{offset} -11.25", OffsetMax = $"{offset + 22.5} 11.25" },
                     Image = { Color = config.Event.EBackgroundColor }
                 }, ".EventGUI", $".{i.Key}");
-				
-				container.Add(new CuiPanel 
-				{
-					RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "2.5 2.5", OffsetMax = "-2.5 -2.5" },
-					Image = { Png = (string) ImageLibrary.Call("GetImage", $".{i.Key}"), Color = _activeevents[i.Key] ? i.Value.EventAColor : i.Value.EventDColor }
-				}, $".{i.Key}");
 			}  
+			
+			if(config.Event.Events.ContainsKey("CargoShip"))
+			    container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "1.75 1.75", OffsetMax = "-1.75 -1.75" },
+                    Image = { Png = (string) ImageLibrary.Call("GetImage", ".CargoShip"), Color = eCargoShip ? config.Event.Events["CargoShip"].EventAColor : config.Event.Events["CargoShip"].EventDColor }
+                }, ".CargoShip");			
+			
+			if(config.Event.Events.ContainsKey("CargoPlane"))
+			    container.Add(new CuiPanel 
+                {
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "1.75 1.75", OffsetMax = "-1.75 -1.75" },
+                    Image = { Png = (string) ImageLibrary.Call("GetImage", ".CargoPlane"), Color = eCargoPlane ? config.Event.Events["CargoPlane"].EventAColor : config.Event.Events["CargoPlane"].EventDColor }
+                }, ".CargoPlane");			
+			
+			if(config.Event.Events.ContainsKey("BradleyAPC"))
+			    container.Add(new CuiPanel
+                { 
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "1.75 1.75", OffsetMax = "-1.75 -1.75" },
+                    Image = { Png = (string) ImageLibrary.Call("GetImage", ".BradleyAPC"), Color = eBradleyAPC ? config.Event.Events["BradleyAPC"].EventAColor : config.Event.Events["BradleyAPC"].EventDColor }
+                }, ".BradleyAPC");		 	 	
+			
+			if(config.Event.Events.ContainsKey("BaseHelicopter"))
+			    container.Add(new CuiPanel  
+                {
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "1.75 1.75", OffsetMax = "-1.75 -1.75" },
+                    Image = { Png = (string) ImageLibrary.Call("GetImage", ".BaseHelicopter"), Color = eBaseHelicopter ? config.Event.Events["BaseHelicopter"].EventAColor : config.Event.Events["BaseHelicopter"].EventDColor }
+                }, ".BaseHelicopter");				
+			
+			if(config.Event.Events.ContainsKey("CH47Helicopter"))
+			    container.Add(new CuiPanel 
+                {
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "1.75 1.75", OffsetMax = "-1.75 -1.75" },
+                    Image = { Png = (string) ImageLibrary.Call("GetImage", ".CH47Helicopter"), Color = eCH47Helicopter ? config.Event.Events["CH47Helicopter"].EventAColor : config.Event.Events["CH47Helicopter"].EventDColor }
+                }, ".CH47Helicopter");	 
 			
 			CuiHelper.AddUi(player, container); 
 		}

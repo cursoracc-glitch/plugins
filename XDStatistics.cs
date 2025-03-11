@@ -11,12 +11,9 @@ using Rust;
 using System.Text;
 using System.Globalization;
 
-///Скачано с дискорд сервера Rust Edit [PRO+]
-///discord.gg/9vyTXsJyKR
-
 namespace Oxide.Plugins
 {
-    [Info("XDStatistics", "discord.gg/9vyTXsJyKR", "1.9.33")]
+    [Info("XDStatistics", "DezLife", "1.9.33")]
     [Description("Multifunctional statistics for your server!")]
     class XDStatistics : RustPlugin
     {
@@ -40,7 +37,7 @@ namespace Oxide.Plugins
         {
             if (Friends)
                 return (bool)Friends?.Call("HasFriend", userID, targetID);
-            else if (RelationshipManager.Instance.playerToTeam.ContainsKey(userID) && RelationshipManager.Instance.playerToTeam[userID].members.Contains(targetID))
+            else if (RelationshipManager.ServerInstance.playerToTeam.ContainsKey(userID) && RelationshipManager.ServerInstance.playerToTeam[userID].members.Contains(targetID))
                 return true;
             else
                 return false;
@@ -925,7 +922,7 @@ namespace Oxide.Plugins
                     return;
                 PlayerInfo Playerstat2 = PlayerInfo.Find(player.userID);
 
-                if (entity is NPCPlayer || entity is Zombie)
+                if (entity is NPCPlayer || entity is ScarecrowNPC || entity is Zombie)
                 {
                     Playerstat2.pVP.KillsNpc++;
                     Playerstat2.Score += config.settingsScore.NpcScore;
@@ -1205,7 +1202,7 @@ namespace Oxide.Plugins
                 Name = "BACKGROUND",
                 Parent = UI_INTERFACE,
                 Components = {
-                    new CuiImageComponent { Color = "0.117 0.121 0.109 0.95" /* Material = ""*/},
+                    new CuiRawImageComponent { Color = "1 1 1 1", Png = background },
                     new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1"}
                 }
             });
@@ -3142,7 +3139,7 @@ namespace Oxide.Plugins
         }
         private void ExplosionProgressAdd(BasePlayer player, BaseEntity entity, string shortname = "")
         {
-            string WeaponName = string.IsNullOrEmpty(shortname) == true ? string.Empty : shortname;
+            string WeaponName = string.IsNullOrWhiteSpace(shortname) == true ? string.Empty : shortname;
             if (entity != null)
             {
                 if (prefabID2Item.TryGetValue(entity.prefabID, out WeaponName) == false)
