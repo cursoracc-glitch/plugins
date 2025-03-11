@@ -9,13 +9,10 @@ using Steamworks.ServerList;
 using UnityEngine;
 using Color = UnityEngine.Color;
 
-///Скачано с дискорд сервера Rust Edit [PRO+]
-///discord.gg/9vyTXsJyKR
-
 namespace Oxide.Plugins
 {
-    [Info("UItemSort", "discord.gg/9vyTXsJyKR", "1.0.2")]
-    [Description("Universal Item Sort")]
+    [Info("UItemSort", "Scrooge", "1.0.2")]
+    [Description("Плагин был куплен на keepshop.ru")]
     class UItemSort : RustPlugin
     {
         #region Classes
@@ -112,9 +109,9 @@ namespace Oxide.Plugins
             {
                 useImages = false,
                 pluginReply = true,
-                sortBttnColor = "0.968627453 0.921568632 0.882352948 0.2",
-                similarBttnColor = "0.968627453 0.921568632 0.882352948 0.2",
-                allBttnColor = "0.968627453 0.921568632 0.882352948 0.2",
+                sortBttnColor = "0.969 0.921 0.882 0.2",
+                similarBttnColor = "0.968 0.921 0.882 0.2",
+                allBttnColor = "0.968 0.921 0.882 0.2",
                 sortImg = "https://i.imgur.com/uEiuf3N.png",
                 similarImg = "https://i.imgur.com/3PkbAH8.png",
                 allImg = "https://i.imgur.com/beKBAl3.png",

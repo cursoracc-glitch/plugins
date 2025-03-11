@@ -3,11 +3,12 @@ using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Plugins;
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
 namespace Oxide.Plugins
 {
-    [Info("Trade", "OxideBro", "2.1.0")]
+    [Info("Trade", "KACAT КОРМИТ", "2.3.3")]
     public class Trade : RustPlugin
     {
         private static Trade ins;
@@ -18,7 +19,7 @@ namespace Oxide.Plugins
 
         protected override void LoadDefaultConfig()
         {
-            PrintWarning("Благодарим за покупку плагина на сайте RustPlugin.ru. Если вы передадите этот плагин сторонним лицам знайте - это лишает вас гарантированных обновлений!");
+            PrintWarning("Благодарим за покупку плагина на сайте oxide-russia.ru. Если вы передадите этот плагин сторонним лицам знайте - это лишает вас гарантированных обновлений!");
             config = PluginConfig.DefaultConfig();
         }
 
@@ -34,9 +35,27 @@ namespace Oxide.Plugins
         private void UpdateConfigValues()
         {
             PluginConfig baseConfig = PluginConfig.DefaultConfig();
-            if (config.PluginVersion < new VersionNumber(1, 1, 0))
+            if (config.PluginVersion < new VersionNumber(2, 2, 0))
             {
                 PrintWarning("Config update detected! Updating config values...");
+                config.mainSettings.permsNum = new Dictionary<string, PermissionTrade>()
+                {
+                    ["trade.one"] = new PermissionTrade()
+                    {
+                        GetCapacity = 4,
+                        GetCooldown = 50,
+                    },
+                    ["trade.two"] = new PermissionTrade()
+                    {
+                        GetCapacity = 5,
+                        GetCooldown = 40,
+                    },
+                    ["trade.three"] = new PermissionTrade()
+                    {
+                        GetCapacity = 6,
+                        GetCooldown = 30,
+                    },
+                };
                 PrintWarning("Config update completed!");
             }
             config.PluginVersion = Version;
@@ -61,6 +80,9 @@ namespace Oxide.Plugins
             [JsonProperty("Запретить использовать трейд в воде")]
             public bool getSwim = true;
 
+            [JsonProperty("Запретить обмениватся игрокам если игроки не в тиме (Стандартная система друзей)")]
+            public bool enabledTeamate = false;
+
             [JsonProperty("Запретить использовать трейд в предсмертном состоянии")]
             public bool getWound = true;
 
@@ -68,16 +90,30 @@ namespace Oxide.Plugins
             public int getTime = 15;
 
             [JsonProperty("Задержка использования трейда (Cooldown - секунд)")]
-            public double CooldownTrade = 60f;
+            public double CooldownTrade = 60.0;
+
+            [JsonProperty("Разрешить трейд если между игроками если их дистанция больше указанной (-1 - отключение)")]
+            public double TradeDistance = 50;
 
             [JsonProperty("Количество активных слотов при обмене")]
             public int getInt = 8;
 
-            [JsonProperty("ривилегия на использование команды trade")]
+            [JsonProperty("Список привилегий и размера слотов при обмене")]
+            public Dictionary<string, PermissionTrade> permsNum = new Dictionary<string, PermissionTrade>();
+
+            [JsonProperty("Привилегия на использование команды trade")]
             public string Permission = "trade.use";
 
             [JsonProperty("Разрешить использование трейда только если игрок имеет привилегию указаную в конфиге")]
             public bool UsePermission = false;
+        }
+
+        public class PermissionTrade
+        {
+            [JsonProperty("Размер слотов у данной привилегии")]
+            public int GetCapacity = 0;
+            [JsonProperty("Задержка после обмена у данной привилегии")]
+            public int GetCooldown = 0;
         }
 
         class PluginConfig
@@ -88,11 +124,36 @@ namespace Oxide.Plugins
             [JsonProperty("Версия конфигурации")]
             public VersionNumber PluginVersion = new VersionNumber();
 
+
+            [JsonIgnore]
+            [JsonProperty("Инициализация плагина")]
+            public bool Init;
+
             public static PluginConfig DefaultConfig()
             {
                 return new PluginConfig()
                 {
-                    mainSettings = new MainSettings(),
+                    mainSettings = new MainSettings()
+                    {
+                        permsNum = new Dictionary<string, PermissionTrade>()
+                        {
+                            ["trade.one"] = new PermissionTrade()
+                            {
+                                GetCapacity = 4,
+                                GetCooldown = 50,
+                            },
+                            ["trade.two"] = new PermissionTrade()
+                            {
+                                GetCapacity = 5,
+                                GetCooldown = 40,
+                            },
+                            ["trade.three"] = new PermissionTrade()
+                            {
+                                GetCapacity = 6,
+                                GetCooldown = 30,
+                            },
+                        }
+                    },
                     PluginVersion = new VersionNumber(),
 
                 };
@@ -108,33 +169,41 @@ namespace Oxide.Plugins
             return false;
         }
 
-
-/*        public bool IsTeamate(ulong playerId, ulong targetId)
+        private bool IsTeamate(BasePlayer player, BasePlayer target)
         {
-            RelationshipManager.PlayerTeam team1;
-            if (!RelationshipManager.Instance.playerToTeam.TryGetValue(playerId, out team1))
+            if (!config.mainSettings.enabledTeamate) return true;
+            if (player.currentTeam == 0 || target.currentTeam == 0) return false;
+            return player.currentTeam == target.currentTeam;
+        }
+
+        int GetTradeSize(string UserID)
+        {
+            int size = config.mainSettings.getInt;
+            foreach (var num in config.mainSettings.permsNum)
             {
-                return false;
+                if (permission.UserHasPermission(UserID, num.Key))
+                    if (num.Value.GetCapacity > size) size = num.Value.GetCapacity;
             }
+            return size;
+        }
 
-            RelationshipManager.PlayerTeam team2;
-            if (!RelationshipManager.Instance.playerToTeam.TryGetValue(targetId, out team2))
+        double GetPlayerCooldown(string UserID)
+        {
+            var cd = config.mainSettings.CooldownTrade;
+            foreach (var num in config.mainSettings.permsNum)
             {
-                return false;
+                if (permission.UserHasPermission(UserID, num.Key))
+                    if (num.Value.GetCooldown < cd)
+                        cd = num.Value.GetCooldown;
             }
-
-            return team1.teamID == team2.teamID;
-        }*/
-
-
+            return cd;
+        }
 
         void Reply(BasePlayer player, string langKey, params object[] args) => SendReply(player, Messages[langKey], args);
 
         bool CanPlayerTrade(BasePlayer player)
         {
-            var reply = 2516;
-            if (reply == 0) { }
-            if (!Init) return false;
+            if (!config.Init) return false;
             if (config.mainSettings.getSwim)
             {
                 if (player.IsSwimming())
@@ -143,9 +212,6 @@ namespace Oxide.Plugins
                     return false;
                 }
             }
-
-
-
             if (config.mainSettings.getCupSend || config.mainSettings.getCupAuth)
             {
                 if (!player.CanBuild())
@@ -227,7 +293,7 @@ namespace Oxide.Plugins
                 "DENIED.PERMISSION", "Недоступно, вы в зоне Building Blocked!"
             }
             , {
-                "TRADE.HELP", "Trade by RustPlugin.ru\nИспользуйте комманду <color=orange>/trade \"НИК\"</color> для обмена\nЧто бы принять обмен, введите: <color=orange>/trade yes</color> (или /trade accept)\nЧто бы отказаться от обмена введите: <color=orange>/trade no </color> (или /trade cancel)"
+                "TRADE.HELP", "Trade by oxide-russia.ru\nИспользуйте комманду <color=orange>/trade \"НИК\"</color> для обмена\nЧто бы принять обмен, введите: <color=orange>/trade yes</color> (или /trade accept)\nЧто бы отказаться от обмена введите: <color=orange>/trade no </color> (или /trade cancel)"
             }
             , {
                 "PLAYER.NOT.FOUND", "Игрок '{0}' не найден!"
@@ -265,15 +331,18 @@ namespace Oxide.Plugins
             }
             , {
                 "PENDING.CANCEL.SENDER", "Trade отменён! Причина: игрок '{0}' отказался"
-            }
-            , {
+            },
+            {
                 "COOLDOWN", "Вы только недавно обменивались, подождите - {0:0} сек."
-            }
+            },
+            {
+                "GET.FRIENDS", "Вы не состоите в одной тиме с игроком {0}, трейд запрещен"
+            },
+            {
+                "GET.DISTANCE", "Трейд запрещен на малых дистанциях между вами игроком"
+            },
         };
 
-
-        [JsonProperty("Инициализация плагина⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠")]
-        public bool Init;
 
         private void Loaded()
         {
@@ -281,7 +350,16 @@ namespace Oxide.Plugins
             lang.RegisterMessages(Messages, this);
             Messages = lang.GetMessages("en", this);
             permission.RegisterPermission(config.mainSettings.Permission, this);
-            Init = true;
+            var perms = config.mainSettings.permsNum.Where(p => p.Key.StartsWith("trade."));
+            foreach (var perm in perms)
+            {
+                if (!permission.PermissionExists(perm.Key))
+                    permission.RegisterPermission(perm.Key, this);
+
+            }
+            if (!permission.PermissionExists(config.mainSettings.Permission))
+                permission.RegisterPermission(config.mainSettings.Permission, this);
+            config.Init = true;
         }
 
         void OnServerInitialized()
@@ -300,6 +378,7 @@ namespace Oxide.Plugins
                 this.target = target;
                 this.player = player;
                 seconds = Seconds;
+
             }
         }
 
@@ -339,7 +418,7 @@ namespace Oxide.Plugins
 
         private void OnItemSplit(Item item, int amount)
         {
-            if (!Init) return;
+            if (!config.Init) return;
             if (item == null) return;
             if (item.GetRootContainer() == null || item.GetRootContainer()?.entityOwner == null || item.GetRootContainer()?.entityOwner?.GetComponent<ShopFront>() == null) return;
             var container = item.GetRootContainer().entityOwner?.GetComponent<ShopFront>();
@@ -352,9 +431,21 @@ namespace Oxide.Plugins
                 }
         }
 
-        object CanMoveItem(Item item, PlayerInventory playerLoot, uint targetContainer)
+        [PluginReference] Plugin SkinBox;
+
+        bool isSkinBox(ulong playerID)
         {
-            if (!Init) return null;
+            if (!SkinBox) return false;
+
+            var result = SkinBox?.Call("IsSkinBoxPlayer", playerID);
+            if (result != null)
+                return (bool)SkinBox?.Call("IsSkinBoxPlayer", playerID);
+            return false;
+        }
+
+        object CanMoveItem(Item item, PlayerInventory playerLoot, ItemContainerId targetContainer)
+        {
+            if (!config.Init) return null;
             if (playerLoot == null) return null;
             var container = playerLoot.FindContainer(targetContainer);
             if (container == null) return null;
@@ -377,12 +468,22 @@ namespace Oxide.Plugins
             }
             else
             {
-                if (item.contents != null && item.contents.IsLocked())
+                if (item.contents != null && item.contents.IsLocked() && !isSkinBox(player.userID))
                 {
                     item.contents.SetLocked(false);
                     item.MarkDirty();
                 }
             }
+            return null;
+        }
+
+        object OnItemAction(Item item, string action, BasePlayer player)
+        {
+            if (player == null || item == null) return null;
+            if (item.GetRootContainer() == null) return null;
+            var container = item.GetRootContainer();
+            if (container.entityOwner != null && container.entityOwner is ShopFront && container.entityOwner.GetComponent<TradeBox>() != null)
+                return false;
             return null;
         }
 
@@ -400,7 +501,7 @@ namespace Oxide.Plugins
 
         object OnEntityVisibilityCheck(ShopFront shop, BasePlayer player, uint rpcId, string debugName, float maximumDistance)
         {
-            if (!Init) return null;
+            if (!config.Init) return null;
             if (shop == null || shop?.net.ID == null || player == null) return null;
             if (shop.GetComponent<TradeBox>() != null)
             {
@@ -425,7 +526,7 @@ namespace Oxide.Plugins
             return null;
         }
 
-        public BasePlayer FindOnline(string nameOrUserId, ulong playerid = 2576384)
+        public BasePlayer FindOnline(string nameOrUserId, ulong playerid = 4356096)
         {
             nameOrUserId = nameOrUserId.ToLower();
             foreach (BasePlayer activePlayer in BasePlayer.activePlayerList)
@@ -450,7 +551,7 @@ namespace Oxide.Plugins
         [ChatCommand("trade")]
         void CmdChatTrade(BasePlayer player, string command, string[] args)
         {
-            if (!Init) return;
+            if (!config.Init) return;
             if (player == null) return;
             if (args.Length == 0 || args == null)
             {
@@ -471,6 +572,7 @@ namespace Oxide.Plugins
                     return;
                 }
             }
+
             switch (args[0])
             {
                 default:
@@ -488,40 +590,38 @@ namespace Oxide.Plugins
                         Reply(player, "TRADE.TOYOU");
                         return;
                     }
-
-/*                    if (!IsTeamate(target.userID, player.userID))
-                    {
-                        SendReply(player, $"Игрок не является вашим сокланом или другом. Трейд запрещён");
-                        return;
-                    }*/
-
-
-                        var tradeTargetpend = pendings.Find(p => p.player == target || p.target == target);
-                    if (tradeTargetpend != null)
-                    {
-                        Reply(player, "TRADE.TARGET.ALREADY.PENDING");
-                        return;
-                    }
                     if (config.mainSettings.UsePermission && !permission.UserHasPermission(target.UserIDString, config.mainSettings.Permission))
                     {
                         Reply(player, "DENIED.PERMISSIOONTARGETN", target.displayName);
                         return;
                     }
-                    if (config.mainSettings.getCupSend)
-                    {
-                        if (!player.CanBuild())
-                        {
-                            Reply(player, "DENIED.PRIVILEGE");
-                            return;
-                        }
-                    }
-
-                    var tradepend = pendings.Find(p => p.player == player || p.target == player);
-                    if (tradepend != null)
+                    var findPLayerPendings = pendings.Find(p => p.player == player || p.target == player);
+                    if (findPLayerPendings != null)
                     {
                         Reply(player, "TRADE.ALREADY.PENDING");
                         return;
                     }
+
+                    var tradeTargetpend = pendings.Find(p => p.target == target || p.player == target);
+                    if (tradeTargetpend != null)
+                    {
+                        Reply(player, "TRADE.TARGET.ALREADY.PENDING");
+                        return;
+                    }
+
+                    if (!IsTeamate(player, target))
+                    {
+                        Reply(player, "GET.FRIENDS", target.displayName);
+                        return;
+                    }
+
+                    if (config.mainSettings.TradeDistance > 0 && Vector3.Distance(player.transform.position, target.transform.position) < config.mainSettings.TradeDistance)
+                    {
+                        Reply(player, "GET.DISTANCE", target.displayName);
+                        return;
+                    }
+
+
                     pendings.Add(new TradePendings(player, config.mainSettings.getTime, target));
                     Reply(player, "PENDING.SENDER.FORMAT", target.displayName);
                     Reply(target, "PENDING.RECIEVER.FORMAT", player.displayName);
@@ -556,7 +656,7 @@ namespace Oxide.Plugins
                     break;
                 case "cancel":
                 case "no":
-                    var pend = pendings.Find(p => p.player == player || p.target == player);
+                    var pend = pendings.Find(p => p.target == player);
                     if (pend == null)
                     {
                         Reply(player, "TRADE.ACCEPT.PENDING.EMPTY");
@@ -593,8 +693,8 @@ namespace Oxide.Plugins
                 ShopFront shopFront = GameManager.server.CreateEntity("assets/prefabs/building/wall.frame.shopfront/wall.frame.shopfront.metal.prefab", position, new Quaternion(), true) as ShopFront;
                 if (shopFront == null) return null;
                 shopFront.Spawn();
-                shopFront.vendorInventory.capacity = ins.config.mainSettings.getInt;
-                shopFront.customerInventory.capacity = ins.config.mainSettings.getInt;
+                shopFront.vendorInventory.capacity = 1;
+                shopFront.customerInventory.capacity = 1;
                 UnityEngine.Object.Destroy(shopFront.GetComponent<DestroyOnGroundMissing>());
                 UnityEngine.Object.Destroy(shopFront.GetComponent<GroundWatch>());
                 return shopFront;
@@ -609,6 +709,8 @@ namespace Oxide.Plugins
                 }
                 player1 = player;
                 player2 = target;
+                shopFront.vendorInventory.capacity = ins.GetTradeSize(player.UserIDString);
+                shopFront.customerInventory.capacity = ins.GetTradeSize(target.UserIDString);
                 player.EndLooting();
                 target.EndLooting();
                 shopFront.vendorPlayer = player1;
@@ -626,25 +728,22 @@ namespace Oxide.Plugins
                 shopFront.ResetTrade();
                 shopFront.UpdatePlayers();
                 enabled = true;
-
             }
 
-            public void SendEntity(BasePlayer a, BaseEntity b, string reason = "{RIPD}")
+            public void SendEntity(BasePlayer a, BaseEntity b, string reason = "")
             {
-                if (Net.sv.write.Start())
+                a.net.connection.validate.entityUpdates++;
+                BaseNetworkable.SaveInfo c = new BaseNetworkable.SaveInfo
                 {
-                    a.net.connection.validate.entityUpdates++;
-                    BaseNetworkable.SaveInfo c = new BaseNetworkable.SaveInfo
-                    {
-                        forConnection = a.net.connection,
-                        forDisk = false
-                    }
-                    ;
-                    Net.sv.write.PacketID(Message.Type.Entities);
-                    Net.sv.write.UInt32(a.net.connection.validate.entityUpdates);
-                    b.ToStreamForNetwork(Net.sv.write, c);
-                    Net.sv.write.Send(new SendInfo(a.net.connection));
-                }
+                    forConnection = a.net.connection,
+                    forDisk = false
+                };
+
+                NetWrite netWrite = Net.sv.StartWrite();
+                netWrite.PacketID(Message.Type.Entities);
+                netWrite.UInt32(a.net.connection.validate.entityUpdates);
+                b.ToStreamForNetwork(netWrite, c);
+                netWrite.Send(new SendInfo(a.net.connection));
             }
 
             public void StartLooting(BasePlayer player)
@@ -687,37 +786,49 @@ namespace Oxide.Plugins
                 }
             }
 
-
             public void CustomCompleteTrade()
             {
-                if (shopFront.vendorPlayer != null && shopFront.customerPlayer != null && shopFront.HasFlag(global::BaseEntity.Flags.Reserved1) && shopFront.HasFlag(global::BaseEntity.Flags.Reserved2))
+                if (shopFront.vendorPlayer == null || shopFront.customerPlayer == null) return;
+                var player = shopFront.vendorPlayer;
+                var buyer = shopFront.customerPlayer;
+
+                if (player != null && buyer != null && shopFront.HasFlag(global::BaseEntity.Flags.Reserved1) && shopFront.HasFlag(global::BaseEntity.Flags.Reserved2))
                 {
                     for (int i = shopFront.vendorInventory.capacity - 1; i >= 0; i--)
                     {
                         Item slot = shopFront.vendorInventory.GetSlot(i);
                         Item slot2 = shopFront.customerInventory.GetSlot(i);
-                        if (shopFront.customerPlayer && slot != null)
+                        if (buyer != null && slot != null)
                         {
-                            player2.GiveItem(slot, global::BaseEntity.GiveItemReason.Generic);
+                            if (!buyer.inventory.GiveItem(slot))
+                                slot.Drop(buyer.inventory.containerMain.dropPosition, buyer.inventory.containerMain.dropVelocity, new Quaternion());
                         }
-                        if (shopFront.vendorPlayer && slot2 != null)
+                        if (player != null && slot2 != null)
                         {
-                            player1.GiveItem(slot2, global::BaseEntity.GiveItemReason.Generic);
+                            if (!player.inventory.GiveItem(slot2))
+                                slot.Drop(player.inventory.containerMain.dropPosition, player.inventory.containerMain.dropVelocity, new Quaternion());
                         }
                     }
-                    global::Effect.server.Run(shopFront.transactionCompleteEffect.resourcePath, player1, 0u, new Vector3(0f, 1f, 0f), Vector3.zero, null, false);
-                    global::Effect.server.Run(shopFront.transactionCompleteEffect.resourcePath, player2, 0u, new Vector3(0f, 1f, 0f), Vector3.zero, null, false);
-                    ins.Reply(player1, "TRADE.SUCCESS");
-                    ins.Reply(player2, "TRADE.SUCCESS");
-                    ins.Cooldowns[player1] = DateTime.Now.AddSeconds(ins.config.mainSettings.CooldownTrade);
-                    ins.Cooldowns[player2] = DateTime.Now.AddSeconds(ins.config.mainSettings.CooldownTrade);
+                    global::Effect.server.Run(shopFront.transactionCompleteEffect.resourcePath, player, 0u, new Vector3(0f, 1f, 0f), Vector3.zero, null, false);
+                    global::Effect.server.Run(shopFront.transactionCompleteEffect.resourcePath, buyer, 0u, new Vector3(0f, 1f, 0f), Vector3.zero, null, false);
+                    ins.Reply(player, "TRADE.SUCCESS");
+                    ins.Reply(buyer, "TRADE.SUCCESS");
+
+                    if (ins.Cooldowns.ContainsKey(player))
+                        ins.Cooldowns[player] = DateTime.Now.AddSeconds(ins.GetPlayerCooldown(player.UserIDString));
+                    else ins.Cooldowns.Add(player, DateTime.Now.AddSeconds(ins.GetPlayerCooldown(player.UserIDString)));
+
+                    if (ins.Cooldowns.ContainsKey(buyer))
+                        ins.Cooldowns[buyer] = DateTime.Now.AddSeconds(ins.GetPlayerCooldown(buyer.UserIDString));
+                    else ins.Cooldowns.Add(buyer, DateTime.Now.AddSeconds(ins.GetPlayerCooldown(buyer.UserIDString)));
+
                     ins.tradeBoxes.Remove(this);
                     Destroy(this);
                 }
             }
         }
 
-        bool PlayerGetActiveTrade(BasePlayer player)
+        private bool PlayerGetActiveTrade(BasePlayer player)
         {
             var contains = pendings.Find(p => p.target == player);
             return contains != null;

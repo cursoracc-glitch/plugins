@@ -21,9 +21,13 @@ using Time = UnityEngine.Time;
 
 namespace Oxide.Plugins
 {
-	/*ПЛАГИН БЫЛ ПОФИКШЕН С ПОМОЩЬЮ ПРОГРАММЫ СКАЧАНОЙ С https://discord.gg/dNGbxafuJn */ [Info("RaidBlock", "https://discord.gg/dNGbxafuJn", "1.3.5")]
+	[Info("RaidBlock", "Mercury", "1.1.24")]
 	public class RaidBlock : RustPlugin
 	{
+        /// <summary>
+        /// - Исправлена проблема с блокировкой комманд. Нужно заного заполнить команды в конфигурации. без слэша в нижнем регистре
+        /// - Добавлена поддержка плагина RaidableBases - настраивается в конфигурации.
+        /// </summary>
         
         #region ReferencePlugins
 
@@ -32,7 +36,7 @@ namespace Oxide.Plugins
         #region IQChat
 
         private List<BasePlayer> playerInCache = new();
-        private void SendChat(string message, BasePlayer player, float timeout = 0f, Chat.ChatChannel channel = Chat.ChatChannel.Global)
+        private void SendChat(string message, BasePlayer player, Single timeout = 0f, Chat.ChatChannel channel = Chat.ChatChannel.Global)
         {
             if (playerInCache.Contains(player)) return;
             if (timeout != 0)
@@ -52,35 +56,29 @@ namespace Oxide.Plugins
         
         private bool IsFriends(BasePlayer player, ulong targetID)
         {
-            List<ulong> friendList = GetFriendList(player);
-            bool isFriend = friendList != null && friendList.Contains(targetID);
-    
-            Pool.FreeUnmanaged(ref friendList);
-
-            return isFriend;
+            ulong[] friendList = GetFriendList(player);
+            return friendList != null && friendList.Contains(targetID);
         }
-
-        private List<ulong> GetFriendList(BasePlayer targetPlayer)
+        
+        private ulong[] GetFriendList(BasePlayer targetPlayer)
         {
-            List<ulong> friendList = Pool.Get<List<ulong>>();
-
+            List<ulong> friendList = new();
             if (Friends)
             {
-                if (Friends.Call("GetFriends", targetPlayer.userID.Get()) is ulong[] friends)
+                if (Friends.Call("GetFriends", targetPlayer.userID) is ulong[] friends)
                     friendList.AddRange(friends);
             }
-
+            
             if (Clans)
             {
                 if (Clans.Call("GetClanMembers", targetPlayer.UserIDString) is ulong[] clanMembers)
                     friendList.AddRange(clanMembers);
             }
 
-            if (targetPlayer.Team != null)
+            if(targetPlayer.Team != null)
                 friendList.AddRange(targetPlayer.Team.members);
 
-            return friendList;
-
+            return friendList.ToArray();
         }
 
         #endregion
@@ -92,7 +90,7 @@ namespace Oxide.Plugins
         private static InterfaceBuilder _interface;
         private List<RaidableZone> _raidZoneComponents = new(); 
         private static ImageUI _imageUI;
-        private const Boolean LanguageEn = false;
+        private const Boolean LanguageEn = true;
         
         private const string GENERIC_MAP_MARKER_PREFAB = "assets/prefabs/tools/map/genericradiusmarker.prefab";
         private const string EXPLOSION_MAP_MARKER_PREFAB = "assets/prefabs/tools/map/explosionmarker.prefab";
@@ -111,30 +109,7 @@ namespace Oxide.Plugins
         private readonly string _permIgnoreRaid = ".ignore";
         private readonly string _permHelperToolGun = ".toolgun";
 
-        private Dictionary<uint, string> _prefabID2Item = new();
-        private Dictionary<string, string> _prefabNameItem = new()
-        {
-            ["40mm_grenade_he"] = "multiplegrenadelauncher",
-            ["grenade.beancan.deployed"] = "grenade.beancan",
-            ["grenade.f1.deployed"] = "grenade.f1",
-            ["explosive.satchel.deployed"] = "explosive.satchel",
-            ["explosive.timed.deployed"] = "explosive.timed",
-            ["rocket_basic"] = "ammo.rocket.basic",
-            ["rocket_hv"] = "ammo.rocket.hv",
-            ["rocket_fire"] = "ammo.rocket.fire",
-            ["survey_charge.deployed"] = "surveycharge"
-        };
 
-        private bool IsRaidDamage (DamageType dt) => config.BlockDetect.RaidBlockOnTakeDamageHook._damageTypes.Contains(dt);
-        private bool IsRaidDamage (DamageTypeList dtList)
-        {
-            for (int index = 0; index < dtList.types.Length; ++index) {
-                if (dtList.types [index] > 0 && IsRaidDamage ((DamageType)index)) {
-                    return true;
-                }
-            }
-            return false;
-        }
         #endregion
 
         #region Types
@@ -201,15 +176,13 @@ namespace Oxide.Plugins
                 public bool CanDemolishObjects = true;
                 [JsonProperty(LanguageEn ? "Forbid teleportation" : "Запретить телепортацию")]
                 public bool CanUseTeleport = true;
-                [JsonProperty(LanguageEn ? "Forbid the use of BGrade" : "Запретить использования BGrade")]
-                public bool CanUseBGrade = true;
                 [JsonProperty(LanguageEn ? "Forbid the use of kits" : "Запретить использование китов")]
                 public bool CanUseKit = true;
                 [JsonProperty(LanguageEn ? "Forbid the use of trade" : "Запретить использование обмена (Trade)")]
                 public bool CanUseTrade = true;
-                [JsonProperty(LanguageEn ? "Forbid building" : "Запретить строение")] 
+                [JsonProperty(LanguageEn ? "Allow building" : "Запретить строение")] 
                 public bool CanBuildTwig = true;
-                [JsonProperty(LanguageEn ? "Forbid object placement (furnaces, boxes, etc.)" : "Запретить размещение объектов (Печки, ящики и другое)")]
+                [JsonProperty(LanguageEn ? "Allow object placement (furnaces, boxes, etc.)" : "Запретить размещение объектов (Печки, ящики и другое)")]
                 public bool CanDeployObjects = false;
                 [JsonProperty(LanguageEn ? "List of objects allowed to build/place during the raidblock (shortname)" : "Список объектов, которые разрешено строить/размещать во время рейдблока (PrefabName)", ObjectCreationHandling = ObjectCreationHandling.Replace)]
                 public List<string> RbDeployWhiteList = new()
@@ -241,39 +214,6 @@ namespace Oxide.Plugins
                 public bool RaidYourself = false;
                 [JsonProperty(LanguageEn ? "Activate raidblock if there is no tool cupboard in the building" : "Активировать рейдблок если в строении нет шкафа")]
                 public bool CanRaidIfNotCupboard = false;
-                
-                [JsonProperty(LanguageEn ? "Setting the activation of the raid block when dealing damage to structures" : "Настройка активации рейд блока при нанесении урона строениям")]
-                public RaidBlockOnTakeDamage RaidBlockOnTakeDamageHook = new();
-                
-                public class RaidBlockOnTakeDamage
-                {
-                    [JsonProperty(LanguageEn ? "Activate raid block when dealing damage to structures? (true - yes/false - no)" : "Активировать рейд блок при нанесении урона строениям (true - да/false - нет)")]
-                    public bool ActivateBlockOnTakeDamage = false;
-                    [JsonProperty(LanguageEn ? "Extend raid block upon subsequent damage to structures? (true - yes/false - no)" : "Продлить рейд блок при повторном нанесении урона строениям (true - да/false - нет)")]
-                    public bool UpdateBlockOnTakeDamage = false; 
-                    [JsonProperty(LanguageEn ? "Blacklist of items for which raid block will not activate or extend upon damage (ShortName)" : "Черный список предметов за которые при нанесении урона не будет активироваться и продлеваться рейд блок (ShortName)", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-                    public HashSet<string> RbOnTakeDamageBlackList = new()
-                    {
-                        "torch",
-                    };
-                    [JsonProperty(LanguageEn ? "Specify the types of damage caused for which the raid block will be activated and extended when damage is inflicted" : "Укажите типы нанесенного урона за которые при нанесении урона будет активироваться и продлеваться рейд блок", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-                    public List<string> RaidDamageTypes = new()
-                    {
-                        "Bullet",
-                        "Blunt",
-                        "Stab",
-                        "Slash",
-                        "Explosion",
-                        "Heat",
-                    };
-                    
-                    [JsonIgnore]
-                    public List<DamageType> _damageTypes = new();
-
-                    [JsonProperty(LanguageEn ? "The condition of a structure before blocking will start (percentage)" : "Состояние структуры перед началом блокировки (Процент)")]
-                    public float RbOnTakeDamageMinCondition = 100;
-                }
-                
             }
 
             public class RaidBlock
@@ -356,40 +296,40 @@ namespace Oxide.Plugins
                 [JsonProperty(LanguageEn ? "Interface settings for variant 0" : "Настройки интерфейса для варианта 0")]
                 public RaidBlockUiSettings InterfaceSettingsVariant0 = new()
                 {
-                    BackgroundColor = "0.1921569 0.1921569 0.1921569 1",
-                    IconColor = "0 0.7764706 1 1",
+                    BackgroundColor = "0.19 0.19 0.19 1",
+                    IconColor = "0 0.77 1 1",
                     AdditionalElementsColor = "",
                     MainTextColor = "1 1 1 1",
-                    SecondaryTextColor = "1 1 1 0.5019608",
-                    ProgressBarMainColor = "0.3411765 0.5490196 0.9607843 1",
-                    ProgressBarBackgroundColor = "1 1 1 0.1019608",
-                    SmoothTransition = 0.222f,
+                    SecondaryTextColor = "1 1 1 0.50",
+                    ProgressBarMainColor = "0.34 0.54 0.96 1",
+                    ProgressBarBackgroundColor = "1 1 1 0.10",
+                    SmoothTransition = 0.22f,
                 };
                 
                 [JsonProperty(LanguageEn ? "Interface settings for variant 1" : "Настройки интерфейса для варианта 1")]
                 public RaidBlockUiSettings InterfaceSettingsVariant1 = new()
                 {
-                    BackgroundColor = "0.9607843 0.772549 0.7333333 0.7019608",
+                    BackgroundColor = "0.96 0.77 0.73 0.70",
                     IconColor = "1 1 1 1",
-                    AdditionalElementsColor = "0.9215686 0.3058824 0.172549 1",
-                    MainTextColor = "0.1921569 0.1923232 0.1921569 1",
-                    SecondaryTextColor = "0.1320755 0.1320755 0.1320755 1",
-                    ProgressBarMainColor = "0.9215686 0.3058824 0.172549 1",
-                    ProgressBarBackgroundColor = "1 1 1 0.4117647",
-                    SmoothTransition = 0.222f
+                    AdditionalElementsColor = "0.92 0.30 0.17 1",
+                    MainTextColor = "0.19 0.19 0.19 1",
+                    SecondaryTextColor = "0.13 0.13 0.13 1",
+                    ProgressBarMainColor = "0.92 0.30 0.17 1",
+                    ProgressBarBackgroundColor = "1 1 1 0.41",
+                    SmoothTransition = 0.22f
                 };
                 
                 [JsonProperty(LanguageEn ? "Interface settings for variant 2" : "Настройки интерфейса для варианта 2")]
                 public RaidBlockUiSettings InterfaceSettingsVariant2 = new()
                 {
-                    BackgroundColor = "0.1921569 0.1921569 0.1921569 1",
-                    IconColor = "0.9411765 0.3137255 0.2863232 1",
-                    AdditionalElementsColor = "0.9568627 0.3607843 0.2623232 1",
+                    BackgroundColor = "0.19 0.19 0.19 1",
+                    IconColor = "0.94 0.31 0.28 1",
+                    AdditionalElementsColor = "0.95 0.36 0.26 1",
                     MainTextColor = "1 1 1 1",
-                    SecondaryTextColor = "1 1 1 0.5019608",
+                    SecondaryTextColor = "1 1 1 0.50",
                     ProgressBarMainColor = "1 1 1 1",
-                    ProgressBarBackgroundColor = "1 1 1 0.4117647",
-                    SmoothTransition = 0.222f
+                    ProgressBarBackgroundColor = "1 1 1 0.41",
+                    SmoothTransition = 0.22f
                 };
                 
                 public class RaidBlockUiSettings
@@ -457,25 +397,6 @@ namespace Oxide.Plugins
             {
                 config.RaidBlockMain.RaidZoneSphereSettings.DomeTransparencyLevel = 3;
             }
-
-            if (config.BlockDetect.RaidBlockOnTakeDamageHook.ActivateBlockOnTakeDamage)
-            {
-                if (config.BlockDetect.RaidBlockOnTakeDamageHook.RaidDamageTypes.Count > 0)
-                {
-                    foreach (string damageTypeString in config.BlockDetect.RaidBlockOnTakeDamageHook.RaidDamageTypes)
-                    {
-                        if (Enum.TryParse(damageTypeString, out DamageType damageType))
-                        {
-                            config.BlockDetect.RaidBlockOnTakeDamageHook._damageTypes.Add(damageType);
-                        }
-                        else
-                        {
-                           PrintError($"[Configuration] Invalid damage type: {damageTypeString}. Removing from list. Available types: {string.Join(", ", Enum.GetNames(typeof(DamageType)))}");
-                        }
-                    }
-                    config.BlockDetect.RaidBlockOnTakeDamageHook.RaidDamageTypes.RemoveAll(damageTypeString => !Enum.TryParse(damageTypeString, out DamageType _));
-                }
-            }
         }
 
         protected override void SaveConfig()
@@ -496,7 +417,6 @@ namespace Oxide.Plugins
 			lang.RegisterMessages(new Dictionary<string, string>
 			{
                 ["RAIDBLOCK_ACTION_BLOCKED"] = "You are not allowed to perform this action during a raid. Please wait {0}.",
-                ["RAIDBLOCK_ACTION_BLOCKED_ZONE"] = "You cannot teleport to an area with a raid block. Please wait {0}.",
                 ["RAIDBLOCK_ENTER_RAID_ZONE"] = "You have entered the raid zone! Some features will be restricted for {0}.",
                 ["RAIDBLOCK_EXIT_RAID_ZONE"] = "You have exited the raid zone! Features are now unlocked.",
                 ["RAIDBLOCK_END_RAID"] = "The block has been deactivated. Features are now unlocked.",
@@ -523,7 +443,6 @@ namespace Oxide.Plugins
             lang.RegisterMessages(new Dictionary<string, string>
             {
                 ["RAIDBLOCK_ACTION_BLOCKED"] = "Вам запрещено совершать это действие во время рейда. Подождите {0}.",
-                ["RAIDBLOCK_ACTION_BLOCKED_ZONE"] = "Вы не можете телепортироваться в зону с рейд блоком. Подождите {0}.",
                 ["RAIDBLOCK_ENTER_RAID_ZONE"] = "Вы вошли в зону рейда! Некоторые функции будут ограничены в течение {0}.",
                 ["RAIDBLOCK_EXIT_RAID_ZONE"] = "Вы вышли из зоны рейда! Функции разблокированы.",
                 ["RAIDBLOCK_END_RAID"] = "Блок деактивирован. Функции разблокированы.",
@@ -585,76 +504,8 @@ namespace Oxide.Plugins
             _imageUI.DownloadImage();
             
             SubscribeHook(true, false);
-            
-            foreach (ItemDefinition itemDef in ItemManager.GetItemDefinitions())
-            {
-                Item newItem = ItemManager.CreateByName(itemDef.shortname);
-                
-                BaseEntity heldEntity = newItem.GetHeldEntity();
-                if (heldEntity != null)
-                {
-                    _prefabID2Item[heldEntity.prefabID] = itemDef.shortname;
-                }
-                
-                if (itemDef.TryGetComponent(out ItemModDeployable itemModDeployable) && itemModDeployable.entityPrefab != null)
-                {
-                    string deployablePrefab = itemModDeployable.entityPrefab.resourcePath;
-
-                    if (!string.IsNullOrEmpty(deployablePrefab))
-                    {
-                        GameObject prefab = GameManager.server.FindPrefab(deployablePrefab);
-                        if (prefab != null && prefab.TryGetComponent(out BaseEntity baseEntity))
-                        {
-                            string shortPrefabName = baseEntity.ShortPrefabName;
-
-                            if (!string.IsNullOrEmpty(shortPrefabName))
-                            {
-                                _prefabNameItem.TryAdd(shortPrefabName, itemDef.shortname);
-                            }
-                        }
-                    }
-                }
-
-                newItem.Remove();
-            }
         }
-
-        private void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
-        {
-            if (info == null || entity == null) return;
-            DamageType majorityDamageType = info.damageTypes.GetMajorityDamageType();
-            
-            if (majorityDamageType == DamageType.Decay)
-                return;
-            
-            if (!IsRaidDamage(info.damageTypes))
-                return;
-            
-            BasePlayer raider = info.InitiatorPlayer != null ? info.InitiatorPlayer : entity.lastAttacker as BasePlayer;
-            if (raider == null) return;
-
-            Configuration.RaidBlockDetect.RaidBlockOnTakeDamage damageRaidBlock = config.BlockDetect.RaidBlockOnTakeDamageHook;
-
-            if (IsRaidBlocked(raider) && !damageRaidBlock.UpdateBlockOnTakeDamage) return;
-            
-            string shortnameWeapon = string.Empty;
-
-            if (info.WeaponPrefab != null)
-            {
-                if (!_prefabID2Item.TryGetValue(info.WeaponPrefab.prefabID, out shortnameWeapon))
-                    _prefabNameItem.TryGetValue(info.WeaponPrefab.ShortPrefabName, out shortnameWeapon);
-            }
-
-            if (!string.IsNullOrWhiteSpace(shortnameWeapon) && damageRaidBlock.RbOnTakeDamageBlackList.Contains(shortnameWeapon))
-                return;
-            
-            if (GetHealthPercent(entity, info.damageTypes.Total()) >
-                config.BlockDetect.RaidBlockOnTakeDamageHook.RbOnTakeDamageMinCondition) 
-                return;
-            
-            OnEntCheck(entity, info);
-        }
-
+        
         private void OnEntityDeath(BaseCombatEntity entity, HitInfo info) => OnEntCheck(entity, info);
         
         private void OnPlayerConnected(BasePlayer player)
@@ -663,11 +514,10 @@ namespace Oxide.Plugins
                 rp.CrateUI();
         }
 
-        private void OnPlayerSleepEnded(BasePlayer player)
+        void OnPlayerSleepEnded(BasePlayer player)
         {
             if (player == null || player.IsDead() || !player.IsConnected) return;
             RaidableZone rbZone = GetRbZone(player.transform.position);
-            
             if (rbZone == null) return;
             rbZone.AddPlayer(player);
         }
@@ -736,14 +586,14 @@ namespace Oxide.Plugins
             return CanActions(player);
         }
         
-        private object OnPlayerCommand(BasePlayer player, string command, string[] args)
+        private object OnPlayerCommand(BasePlayer player, String command, String[] args)
         {
             if (player == null) return null;
             
             if (args != null && args.Length != 0)
-                command += " " + string.Join(" ", args);
+                command += " " + String.Join(" ", args);
             
-            string onlyCommand = !string.IsNullOrWhiteSpace(command) && command.Contains(" ") ? command.Substring(0, command.IndexOf(" ", StringComparison.Ordinal)) : command;
+            String onlyCommand = !String.IsNullOrWhiteSpace(command) && command.Contains(" ") ? command.Substring(0, command.IndexOf(" ", StringComparison.Ordinal)) : command;
             
             return config.ActionsBlocked.RbBlackListCommand.Contains(onlyCommand.ToLower()) ? CanActions(player) : null;
         }
@@ -753,17 +603,17 @@ namespace Oxide.Plugins
             BasePlayer player = arg.Player();
             if (player == null || arg.cmd.FullName == "chat.say") return null;
 			
-            string command = arg.cmd.Name;
+            String command = arg.cmd.Name;
             if (arg.Args != null && arg.Args.Length != 0)
-                command += " " + string.Join(" ", arg.Args);
+                command += " " + String.Join(" ", arg.Args);
             
-            string onlyCommand = !string.IsNullOrWhiteSpace(command) && command.Contains(" ") ? command.Substring(0, command.IndexOf(" ", StringComparison.Ordinal)) : command;
+            String onlyCommand = !String.IsNullOrWhiteSpace(command) && command.Contains(" ") ? command.Substring(0, command.IndexOf(" ", StringComparison.Ordinal)) : command;
 			
             return config.ActionsBlocked.RbBlackListCommand.Contains(onlyCommand.ToLower()) ? CanActions(player) : null;
         }
         
         private object OnStructureRepair(BaseCombatEntity entity, BasePlayer player) => CanActions(player);
-        private object OnStructureUpgrade(BuildingBlock block, BasePlayer player, BuildingGrade.Enum grade, ulong param4) => CanActions(player);
+        private object OnStructureUpgrade(BuildingBlock block, BasePlayer player, BuildingGrade.Enum grade) => CanActions(player);
         private object OnStructureDemolish(BaseCombatEntity entity, BasePlayer player, bool immediate) => CanActions(player);
         private object OnStructureRotate(BaseCombatEntity entity, BasePlayer player) => CanActions(player);
 
@@ -771,17 +621,7 @@ namespace Oxide.Plugins
         #endregion
 
         #region Api
-        object CanBGrade(BasePlayer player, int grade, BuildingBlock buildingBlock, Planner planner)
-        {
-            RaidPlayer playPlayer = player.GetComponent<RaidPlayer>();
-            if (playPlayer != null && playPlayer.UnblockTimeLeft > 0)
-            {
-                RunEffect(player, "assets/prefabs/locks/keypad/effects/lock.code.denied.prefab");
-                return -1;
-            }
-            return null;
-        }
-
+        private object CanBGrade(BasePlayer player, int grade, BuildingBlock buildingBlock, Planner planner) => CanActions(player); 
         private object CanTeleport(BasePlayer player) => CanActions(player, true);
         private object canTeleport(BasePlayer player) => CanActions(player);
         private object CanRedeemKit(BasePlayer player) => CanActions(player);
@@ -848,9 +688,6 @@ namespace Oxide.Plugins
             {
                 Subscribe(nameof(OnEntityDeath));
                 Subscribe(nameof(OnPlayerConnected));
-                if(config.BlockDetect.RaidBlockOnTakeDamageHook.ActivateBlockOnTakeDamage)
-                    Subscribe(nameof(OnEntityTakeDamage));
-
                 if (config.RaidBlockMain.RaidableBasesIntegration.useRaidableBases)
                 {
                     if(config.RaidBlockMain.RaidableBasesIntegration.BlockOnEnterZone)
@@ -902,13 +739,10 @@ namespace Oxide.Plugins
                 {
                     Subscribe(nameof(CanBuild));
                 }
-                if (config.ActionsBlocked.CanUseBGrade)
-                {
-                    Subscribe(nameof(CanBGrade));
-                }
                 if (config.ActionsBlocked.CanUpgradeObjects)
                 {
                     Subscribe(nameof(OnStructureUpgrade));
+                    Subscribe(nameof(CanBGrade));
                     Subscribe(nameof(OnStructureRotate));
                 }
                 if (config.ActionsBlocked.CanPickUpObjects)
@@ -917,15 +751,12 @@ namespace Oxide.Plugins
                 }
             }
         }
-        
-        private float GetHealthPercent (BaseEntity entity, float damage = 0f) => (entity.Health () - damage) * 100f / entity.MaxHealth ();
-        
+
         private void UnsubscribeHook(bool main, bool raidActions)
         {
             if (main)
             {
                 Unsubscribe(nameof(OnEntityDeath));
-                Unsubscribe(nameof(OnEntityTakeDamage));
                 Unsubscribe(nameof(OnPlayerConnected));
                 Unsubscribe(nameof(OnPlayerEnteredRaidableBase));
                 Unsubscribe(nameof(OnPlayerExitedRaidableBase));
@@ -955,7 +786,7 @@ namespace Oxide.Plugins
         }
         private static void RunEffect(BasePlayer player, string prefab)
         {
-            Effect effect = new();
+            Effect effect = new Effect();
             effect.Init(Effect.Type.Generic, player.transform.position, Vector3.zero);
             effect.pooledString = prefab;
             EffectNetwork.Send(effect, player.net.connection);
@@ -986,10 +817,10 @@ namespace Oxide.Plugins
             DamageType? majorityDamageType = info?.damageTypes.GetMajorityDamageType();
             if (majorityDamageType == DamageType.Decay)
                 return;
-            
+
             if(!config.BlockDetect.CanRaidIfNotCupboard && entity.GetBuildingPrivilege() == null)
                 return;
-            
+
             BasePlayer raider = info?.InitiatorPlayer ? info.InitiatorPlayer : entity.lastAttacker as BasePlayer;
             if(raider == null) return;
             
@@ -1034,10 +865,10 @@ namespace Oxide.Plugins
             CreateOrRefreshRaidblock(player.transform.position, player);
         }
         
-        private static string GetGridString(Vector3 position) => MapHelper.PositionToString(position);
+        private static string GetGridString(Vector3 position) => PhoneController.PositionToGridCoord(position);
         private bool CheckEntity(BaseCombatEntity entity, HitInfo info, BasePlayer raider)
         {
-            if (entity.OwnerID == 0 || !entity.OwnerID.IsSteamId())
+            if (entity.OwnerID == 0)
                 return false;
             if (config.BlockDetect.IgnoreEntsHealth > 0 && entity.MaxHealth() < config.BlockDetect.IgnoreEntsHealth)
                 return false;
@@ -1054,7 +885,7 @@ namespace Oxide.Plugins
             return true;
         }
         
-        private bool IsBlockedClass(BaseCombatEntity entity) => entity is BuildingBlock or Door or SimpleBuildingBlock or Workbench or Barricade or BasePlayer;
+        private bool IsBlockedClass(BaseCombatEntity entity) => entity is BuildingBlock or Door or SimpleBuildingBlock or Workbench or Barricade;
 
         private bool IsWhiteList(BaseCombatEntity entity)
         {
@@ -1112,12 +943,13 @@ namespace Oxide.Plugins
 
             bool UpdateList(HashSet<uint> list, uint id)
             {
-                if (!list.Add(id))
+                if (list.Contains(id))
                 {
                     list.Remove(id);
                     return false;
                 }
 
+                list.Add(id);
                 return true;
             }
         }
@@ -1171,7 +1003,7 @@ namespace Oxide.Plugins
 
         private bool FindItemInInventory(BasePlayer player, ulong skinId)
         {
-            return (player.inventory.containerMain?.itemList ?? Enumerable.Empty<Item>()).Concat(player.inventory.containerBelt?.itemList ?? Enumerable.Empty<Item>()).Concat(player.inventory.containerWear?.itemList ?? Enumerable.Empty<Item>()) /* Player name: player.displayName */.Any(item => item.skin == skinId);
+            return player.inventory.AllItems().Any(item => item.skin == skinId);
         }
 
         private void GameTipsSendPlayer(BasePlayer player, string message, float seconds = 10f, bool error = false)
@@ -1191,11 +1023,12 @@ namespace Oxide.Plugins
                 player.SendConsoleCommand("gametip.hidegametip");
             });
 
-            if (!_playerTimer.TryAdd(player, timers))
+            if (_playerTimer.ContainsKey(player))
             {
                 if (_playerTimer[player] != null && !_playerTimer[player].Destroyed) _playerTimer[player].Destroy();
                 _playerTimer[player] = timers;
             }
+            else _playerTimer.Add(player, timers);
         }
 
         private void CreateToolGunItem(BasePlayer player, string name, ulong skinId)
@@ -1212,7 +1045,7 @@ namespace Oxide.Plugins
         private class RaidPlayer : FacepunchBehaviour
         {
             public BasePlayer player;
-            public float blockEnds;
+            public Single blockEnds;
             public float UnblockTimeLeft => Convert.ToInt32(blockEnds - Time.realtimeSinceStartup);
         
             #region UnityHooks
@@ -1226,7 +1059,7 @@ namespace Oxide.Plugins
                 Interface.CallHook("OnRaidBlockStarted", player);
             }
 
-            public void Kill(bool force = false)
+            public void Kill(Boolean force = false)
             {
                 if (!force)
                 {
@@ -1246,7 +1079,7 @@ namespace Oxide.Plugins
         
             #region Metods
         
-            public void UpdateTime(float time, bool customTime = false)
+            public void UpdateTime(Single time, Boolean customTime = false)
             {
                 if (customTime)
                 {
@@ -1258,7 +1091,7 @@ namespace Oxide.Plugins
                     blockEnds = time;
             }
         
-            public void ActivateBlock(float time)
+            public void ActivateBlock(Single time)
             {
                 if(time > blockEnds)
                     blockEnds = time;
@@ -1288,22 +1121,19 @@ namespace Oxide.Plugins
             #endregion
         }
         
+        
         private static RaidableZone GetRbZone(Vector3 position)
         {
-            List<SphereCollider> sphereColliders = Pool.Get<List<SphereCollider>>();
+            List<SphereCollider> sphereColliders = new ();
             Vis.Colliders(position, 0.1f, sphereColliders);
+            if (sphereColliders.Count <= 0) return null;
             foreach (SphereCollider sCollider in sphereColliders)
             {
-                if (sCollider.gameObject.TryGetComponent(out RaidableZone rbZone))
-                {
-                    Pool.FreeUnmanaged(ref sphereColliders);
-                    return rbZone;
-                }
+                if (!sCollider.gameObject.TryGetComponent(out RaidableZone rbZone)) continue;
+                return rbZone;
             }
-            Pool.FreeUnmanaged(ref sphereColliders);
             return null;
         }
-        
         private class RaidableZone : MonoBehaviour
         {
             #region Vars
@@ -1313,15 +1143,15 @@ namespace Oxide.Plugins
             private MapMarkerExplosion marker;
             private MapMarkerGenericRadius mapMarkerGenericRadius;
             private VendingMachineMapMarker vendingMakrer;
-            private List<BaseEntity> _spheres = Pool.Get<List<BaseEntity>>();
+            private List<BaseEntity> _spheres = new();
             
             private SphereCollider triggerZone;
             private BasePlayer initiatorRaid;
             
-            private float timeToUnblock;
-            public float UnblockTimeLeft => Convert.ToInt32(timeToUnblock - Time.realtimeSinceStartup);
-            private int raidBlockDistance;
-            private int raidBlockDuration;
+            private Single timeToUnblock;
+            private Single UnblockTimeLeft => Convert.ToInt32(timeToUnblock - Time.realtimeSinceStartup);
+            private Int32 raidBlockDistance;
+            private Int32 raidBlockDuration;
             private bool IsDynamicRaidZone;
 
             
@@ -1473,23 +1303,23 @@ namespace Oxide.Plugins
             private void InitializeTriggerZone()
             {
                 triggerZone = gameObject.AddComponent<SphereCollider>();
-                
-                gameObject.layer = (int)Layer.Reserved1;
-                gameObject.name = "RaidBlock";
+
                 triggerZone.radius = raidBlockDistance;
+                triggerZone.gameObject.layer = (int) Layer.Reserved1;
                 triggerZone.transform.SetParent(transform, true);
                 triggerZone.isTrigger = true;
             }
+
             public void CreateRaidZone(Vector3 raidPos, BasePlayer initiator)
             {
                 Instance.CheckUnsubscribeOrSubscribeHooks();
           
                 transform.position = raidPos;
                 initiatorRaid = initiator;
-                
+
                 InitializeTriggerZone();
                 AddPlayer(initiatorRaid, true);
-
+                
                 if (Instance.config.RaidBlockMain.mapMarkerSettings.IsRaidBlockMarkerEnabled)
                     CreateMapMarker();
 
@@ -1555,7 +1385,7 @@ namespace Oxide.Plugins
 
             private void AddAllPlayerInZoneDistance() 
             {
-                List<BasePlayer> players = Pool.Get<List<BasePlayer>>();
+                List<BasePlayer> players = Pool.GetList<BasePlayer>();
                 Vis.Entities(transform.position, raidBlockDistance, players);
                 foreach (BasePlayer player in players)
                 {
@@ -1564,14 +1394,12 @@ namespace Oxide.Plugins
                     AddPlayer(player, true);
                 }
                 
-                Pool.FreeUnmanaged(ref players);
+                Pool.FreeList(ref players);
             }
             
-            private void AddAllPlayerFriendsInitiator(BasePlayer initiator)
+            private void AddAllPlayerFriendsInitiator(BasePlayer initiator) 
             {
-                List<ulong> friendList = Instance.GetFriendList(initiator);
-
-                foreach (ulong playerID in friendList)
+                foreach (UInt64 playerID in Instance.GetFriendList(initiator))
                 {
                     BasePlayer player = BasePlayer.FindByID(playerID);
                     if (player == null) continue;
@@ -1580,8 +1408,6 @@ namespace Oxide.Plugins
                     
                     AddPlayer(player, true);
                 }
-                
-                Pool.FreeUnmanaged(ref friendList);
             }
             
             public void AddPlayer(BasePlayer player, Boolean force = false)
@@ -1610,7 +1436,8 @@ namespace Oxide.Plugins
 
             public void RemovePlayer(BasePlayer player)
             {
-                if(!_playersAndComponentZone.TryGetValue(player, out RaidPlayer raidPlayer)) return;
+                if(!_playersAndComponentZone.ContainsKey(player)) return;
+                RaidPlayer raidPlayer = _playersAndComponentZone[player];
                 if (raidPlayer == null) return;
                 
                 if (Instance.config.RaidBlockMain.RaidBlockOnExitRaidZone && Instance.config.RaidBlockMain.TimeLeftOnExitZone == 0)
@@ -1674,8 +1501,6 @@ namespace Oxide.Plugins
                     if (sphere.IsValid())
                         sphere.Kill();
                 
-                Pool.FreeUnmanaged(ref _spheres);
-                
                 marker = null;
                 mapMarkerGenericRadius = null;
                 _spheres = null;
@@ -1703,6 +1528,41 @@ namespace Oxide.Plugins
             
             #endregion
         }
+        
+        #region Refference
+
+        #region Friends
+        
+        private List<BasePlayer> GetPlayerFriends(BasePlayer player)
+        {
+            List<BasePlayer> teamMembers = new List<BasePlayer>();
+            if (RelationshipManager.maxTeamSize > 0 && player.currentTeam != 0UL)
+            {
+                foreach (ulong member in player.Team.members)
+                {
+                    BasePlayer playerInTeam = BasePlayer.FindByID(member);
+                    if(playerInTeam != null && playerInTeam != player)
+                        teamMembers.Add(playerInTeam);
+                }
+            }
+            else if (Friends)
+            {
+                ulong[] playersInTeam = Friends?.Call<ulong[]>("GetFriends", player.userID) ?? new ulong[]{};
+                foreach (ulong member in playersInTeam)
+                {
+                    BasePlayer playerInTeam = BasePlayer.FindByID(member);
+                    if(playerInTeam != null)
+                        teamMembers.Add(playerInTeam);
+                }
+            }
+
+            return teamMembers;
+        }
+
+
+        #endregion
+
+        #endregion
 
         #region UI
         
@@ -1739,7 +1599,7 @@ namespace Oxide.Plugins
             Interface = Interface.Replace("%left%", factor.ToString(CultureInfo.InvariantCulture));
             Interface = Interface.Replace("%TimeLeft%", "RAIDBLOCK_UI_TIMER".GetAdaptedMessage(player.UserIDString, timeLeft.ToTimeFormat()));
             if(!upd)
-                Interface = Interface.Replace("0.222", "0");
+                Interface = Interface.Replace("0.22", "0");
 
             CuiHelper.DestroyUi(player, InterfaceBuilder.RB_PROGRESS);
             CuiHelper.DestroyUi(player, InterfaceBuilder.RB_PROGRESS_TIMER);
@@ -1807,12 +1667,14 @@ namespace Oxide.Plugins
 
 			private static void AddInterface(string name, string json)
 			{
-				if (!_instance._interfaces.TryAdd(name, json))
+				if (_instance._interfaces.ContainsKey(name))
 				{
 					Instance.PrintError($"Error! Tried to add existing cui elements! -> {name}");
 					return;
 				}
-            }
+
+				_instance._interfaces.Add(name, json);
+			}
 
 			public static string GetInterface(string name)
 			{
@@ -1845,7 +1707,7 @@ namespace Oxide.Plugins
                     FadeOut = _fade,
                     CursorEnabled = false,
                     Image = { Color = "0 0 0 0", FadeIn = _fade },
-                    RectTransform ={ AnchorMin = "1 0.5", AnchorMax = "1 0.5", OffsetMin = $"{-179.006 + Instance.config.RaidBlockInterface.OffsetX} {-34.5 + Instance.config.RaidBlockInterface.OffsetY}", OffsetMax = $"{-0.006 + Instance.config.RaidBlockInterface.OffsetX} {34.5 + Instance.config.RaidBlockInterface.OffsetY}" }
+                    RectTransform ={ AnchorMin = "1 0.5", AnchorMax = "1 0.5", OffsetMin = $"{-179.00 + Instance.config.RaidBlockInterface.OffsetX} {-34.5 + Instance.config.RaidBlockInterface.OffsetY}", OffsetMax = $"{-0.00 + Instance.config.RaidBlockInterface.OffsetX} {34.5 + Instance.config.RaidBlockInterface.OffsetY}" }
                 },Instance.config.RaidBlockInterface.Layers ,RB_MAIN);
                 
                 container.Add(new CuiElement
@@ -1864,20 +1726,20 @@ namespace Oxide.Plugins
                     FadeOut = _fade,
                     CursorEnabled = false,
                     Image = { Color = _uiSettings.ProgressBarBackgroundColor, FadeIn = _fade },
-                    RectTransform = { AnchorMin = "0.5 0", AnchorMax = "0.5 0", OffsetMin = "-71.001 9.367", OffsetMax = "70.999 12.033" }
+                    RectTransform = { AnchorMin = "0.5 0", AnchorMax = "0.5 0", OffsetMin = "-71.00 9.36", OffsetMax = "70.99 12.03" }
                 },RB_MAIN,RB_PROGRESS_BAR);
                 
                 container.Add(new CuiLabel
                 {
                     FadeOut = _fade,
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-71.001 -9.637", OffsetMax = "84.101 14.717" },
+                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-71.00 -9.63", OffsetMax = "84.10 14.71" },
                     Text = { Text = "%Descriptions%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = _uiSettings.SecondaryTextColor, FadeIn = _fade }
                 }, RB_MAIN);
                 
                 container.Add(new CuiLabel
                 {
                     FadeOut = _fade,
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-71.001 14.717", OffsetMax = "-9.043 29.111"},
+                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-71.00 14.71", OffsetMax = "-9.04 29.11"},
                     Text = { Text = "%Title%", Font = "robotocondensed-bold.ttf", FontSize = 11, Align = TextAnchor.MiddleLeft, Color = _uiSettings.MainTextColor , FadeIn = _fade}
                 }, RB_MAIN);
                 
@@ -1887,7 +1749,7 @@ namespace Oxide.Plugins
                     Parent = RB_MAIN,
                     Components = {
                         new CuiRawImageComponent { Color = _uiSettings.IconColor, Png = _imageUI.GetImage("RB_VARIANT0_ICON") },
-                        new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-7.38 16.914", OffsetMax = "2.62 26.914" }
+                        new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-7.38 16.91", OffsetMax = "2.62 26.91" }
                     }
                 });
 
@@ -1902,13 +1764,13 @@ namespace Oxide.Plugins
                     FadeOut = _fade,
                     CursorEnabled = false,
                     Image = { Color = _uiSettings.ProgressBarMainColor, FadeIn = _fade },
-                    RectTransform ={ AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "0 -1.333", OffsetMax = "%left% 1.333" }
+                    RectTransform ={ AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "0 -1.33", OffsetMax = "%left% 1.33" }
                 },RB_PROGRESS_BAR,RB_PROGRESS);
 
                 container.Add(new CuiLabel
                 {
                     FadeOut = _fade,
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-71.001 -21.162", OffsetMax = "35.499 -9.638"},
+                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-71.00 -21.16", OffsetMax = "35.49 -9.63"},
                     Text = {  Text = "%TimeLeft%", Font = "robotocondensed-regular.ttf", FontSize = 9, Align = TextAnchor.MiddleLeft, Color = _uiSettings.MainTextColor }
                 }, RB_MAIN, RB_PROGRESS_TIMER);
 
@@ -1937,7 +1799,7 @@ namespace Oxide.Plugins
                     Parent = RB_MAIN,
                     Components = {
                         new CuiRawImageComponent { Color = _uiSettings.BackgroundColor , Png = _imageUI.GetImage("RB_FON1"), FadeIn = _fade },
-                        new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-100.001 -17", OffsetMax = "99.999 20" }
+                        new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-100.00 -17", OffsetMax = "99.99 20" }
                     }
                 });
                 
@@ -1952,14 +1814,14 @@ namespace Oxide.Plugins
                 container.Add(new CuiLabel
                 {
                     FadeOut = _fade,
-                    RectTransform = {AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-64.622 0", OffsetMax = "-13.368 15.562" },
+                    RectTransform = {AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-64.62 0", OffsetMax = "-13.36 15.56" },
                     Text = {  Text = "%Title%", Font = "robotocondensed-bold.ttf", FontSize = 10, Align = TextAnchor.MiddleLeft, Color = _uiSettings.MainTextColor, FadeIn = _fade }
                 }, RB_MAIN);
                 
                 container.Add(new CuiLabel
                 {
                     FadeOut = _fade,
-                    RectTransform = {  AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-64.622 -12.76", OffsetMax = "68.698 2.76" },
+                    RectTransform = {  AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-64.62 -12.76", OffsetMax = "68.69 2.76" },
                     Text = { Text = "%Descriptions%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = _uiSettings.SecondaryTextColor, FadeIn = _fade}
                 }, RB_MAIN);
                 
@@ -1969,7 +1831,7 @@ namespace Oxide.Plugins
                     Parent = RB_MAIN,
                     Components = {
                         new CuiRawImageComponent { Color = _uiSettings.AdditionalElementsColor, Png = _imageUI.GetImage("RB_VARIANT1_ICON_FON") },
-                        new CuiRectTransformComponent { AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "8.199 -10", OffsetMax = "32.199 13" }
+                        new CuiRectTransformComponent { AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "8.19 -10", OffsetMax = "32.19 13" }
                     }
                 });
 
@@ -1994,7 +1856,7 @@ namespace Oxide.Plugins
                     FadeOut = _fade,
                     CursorEnabled = false,
                     Image = { Color = _uiSettings.ProgressBarMainColor, FadeIn = _fade },
-                    RectTransform ={ AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "0 -1.665", OffsetMax = "%left% 1.665" }
+                    RectTransform ={ AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "0 -1.66", OffsetMax = "%left% 1.66" }
                 },RB_PROGRESS_BAR,RB_PROGRESS);
                 AddInterface(RB_PROGRESS_BAR, container.ToJson());
             }
@@ -2030,13 +1892,13 @@ namespace Oxide.Plugins
                     FadeOut = _fade,
                     CursorEnabled = false,
                     Image = { Color = _uiSettings.ProgressBarBackgroundColor, FadeIn = _fade },
-                    RectTransform ={ AnchorMin = "0.5 0", AnchorMax = "0.5 0", OffsetMin = "-46.03 9.425", OffsetMax = "83.97 12.755" }
+                    RectTransform ={ AnchorMin = "0.5 0", AnchorMax = "0.5 0", OffsetMin = "-46.03 9.42", OffsetMax = "83.97 12.75" }
                 },RB_MAIN,RB_PROGRESS_BAR);
                 
                 container.Add(new CuiLabel
                 {
                     FadeOut = _fade,
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-2.954 1.549", OffsetMax = "83.97 21.851" },
+                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-2.95 1.54", OffsetMax = "83.97 21.85" },
                     Text = { Text = "%Title%", Font = "robotocondensed-bold.ttf", FontSize = 14, Align = TextAnchor.MiddleRight, Color = _uiSettings.MainTextColor, FadeIn = _fade}
                 }, RB_MAIN);
                 
@@ -2068,12 +1930,12 @@ namespace Oxide.Plugins
                 {
                     CursorEnabled = false,
                     Image = { Color = _uiSettings.ProgressBarMainColor, FadeIn = _fade },
-                    RectTransform ={ AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "0 -1.665", OffsetMax = "%left% 1.665" }
+                    RectTransform ={ AnchorMin = "0 0.5", AnchorMax = "0 0.5", OffsetMin = "0 -1.66", OffsetMax = "%left% 1.66" }
                 },RB_PROGRESS_BAR,RB_PROGRESS);
                 
                 container.Add(new CuiLabel
                 {
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-46.03 -12.245", OffsetMax = "83.97 5.465" },
+                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-46.03 -12.24", OffsetMax = "83.97 5.46" },
                     Text = { Text = "%TimeLeft%", Font = "robotocondensed-regular.ttf", FontSize = 10, Align = TextAnchor.MiddleRight, Color = _uiSettings.SecondaryTextColor, FadeIn = _fade}
                 }, RB_MAIN, RB_PROGRESS_TIMER);
 
@@ -2220,31 +2082,21 @@ namespace Oxide.Plugins.RaidBlockExt
     public static class ExtensionMethods
     {
         private static readonly Lang Lang = Interface.Oxide.GetLibrary<Lang>();
-        
+
         #region GetLang
-		
-        public static string GetAdaptedMessage(this string langKey, in string userID, params object[] args)
+
+        public static string GetAdaptedMessage(this string langKey, string userID = null, params object[] args)
         {
             string message = Lang.GetMessage(langKey, RaidBlock.Instance, userID);
-			
-            StringBuilder stringBuilder = Pool.Get<StringBuilder>();
 
-            try
+            if (args == null || args.Length == 0)
             {
-                return stringBuilder.AppendFormat(message, args).ToString();
+                return message;
             }
-            finally
-            {
-                stringBuilder.Clear();
-                Pool.FreeUnmanaged(ref stringBuilder);
-            }
+            
+            return new StringBuilder().AppendFormat(message, args).ToString();
         }
-		
-        public static string GetAdaptedMessage(this string langKey, in string userID)
-        {
-            return Lang.GetMessage(langKey, RaidBlock.Instance, userID);
-        }
-		
+
         #endregion
         
         #region TimeFormat
@@ -2256,8 +2108,6 @@ namespace Oxide.Plugins.RaidBlockExt
         }
 
         #endregion
+        
     }
 }
-/* Boosty - https://boosty.to/skulidropek 
-Discord - https://discord.gg/k3hXsVua7Q 
-Discord The Rust Bay - https://discord.gg/Zq3TVjxKWk  */

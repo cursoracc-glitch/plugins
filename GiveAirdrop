@@ -1,0 +1,127 @@
+using System;
+using System.Collections.Generic;
+using Newtonsoft.Json;
+using Oxide.Core;
+using Oxide.Core.Configuration;
+using Oxide.Core.Plugins;
+using UnityEngine;
+
+namespace Oxide.Plugins
+{
+    [Info("GiveAirdrop", "RustyCMD", "1.2.0")]
+    class GiveAirdrop : RustPlugin
+    {
+        private const string PermissionSpawnAirdrop = "giveairdrop.spawn";
+        private Dictionary<ulong, double> lastSpawnTimes = new Dictionary<ulong, double>();
+        private double cooldownSeconds;
+
+        private DynamicConfigFile data;
+        private PluginConfig config;
+
+        private void Init()
+        {
+            LoadDefaultConfig();
+        }
+
+        protected override void LoadDefaultConfig()
+        {
+            config = Config.ReadObject<PluginConfig>() ?? new PluginConfig();
+            if (config.CooldownSeconds <= 0)
+            {
+                config.CooldownSeconds = 300;
+                Puts("Default cooldown seconds set to 300.");
+            }
+            cooldownSeconds = config.CooldownSeconds;
+            Config.WriteObject(config, true);
+        }
+
+        private void SaveConfigChanges() => Config.WriteObject(config, true);
+
+        private bool CanSpawnAirdrop(BasePlayer player)
+        {
+            return permission.UserHasPermission(player.UserIDString, PermissionSpawnAirdrop);
+        }
+
+        private double GetCooldownRemaining(BasePlayer player)
+        {
+            double lastSpawnTime;
+            if (lastSpawnTimes.TryGetValue(player.userID, out lastSpawnTime))
+            {
+                double timeRemaining = cooldownSeconds - (Time.realtimeSinceStartup - lastSpawnTime);
+                return timeRemaining > 0 ? timeRemaining : 0;
+            }
+            return 0;
+        }
+
+        private void GiveAirdropItem(BasePlayer player)
+        {
+            var itemDefinition = ItemManager.FindItemDefinition("supply.signal");
+            if (itemDefinition == null)
+            {
+                Puts("Airdrop item definition not found.");
+                return;
+            }
+
+            var item = ItemManager.Create(itemDefinition, 1, 0UL);
+            if (item == null)
+            {
+                Puts("Failed to create airdrop item.");
+                return;
+            }
+
+            player.inventory.GiveItem(item);
+            Puts($"Airdrop given to {player.displayName}");
+        }
+
+        [ChatCommand("spawnairdrop")]
+        private void CmdSpawnAirdrop(BasePlayer player, string command, string[] args)
+        {
+            if (!CanSpawnAirdrop(player))
+            {
+                SendReply(player, "You don't have permission to use this command.");
+                return;
+            }
+
+            double remainingTime = GetCooldownRemaining(player);
+            if (remainingTime > 0)
+            {
+                TimeSpan timeSpan = TimeSpan.FromSeconds(remainingTime);
+                string timeString = $"{(int)timeSpan.TotalMinutes}m {(int)timeSpan.Seconds}s";
+                SendReply(player, $"Command is on cooldown. Please wait {timeString} before using it again.");
+                return;
+            }
+
+            GiveAirdropItem(player);
+            lastSpawnTimes[player.userID] = Time.realtimeSinceStartup;
+        }
+
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            try
+            {
+                config = Config.ReadObject<PluginConfig>();
+                if (config == null)
+                {
+                    LoadDefaultConfig();
+                }
+                else
+                {
+                    cooldownSeconds = config.CooldownSeconds;
+                }
+            }
+            catch
+            {
+                LoadDefaultConfig();
+            }
+        }
+
+        protected override void SaveConfig() => SaveConfigChanges();
+
+        private class PluginConfig
+        {
+            [JsonProperty("CooldownSeconds")]
+            public double CooldownSeconds { get; set; }
+        }
+    }
+}

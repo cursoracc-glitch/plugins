@@ -14,7 +14,7 @@ using UnityEngine.Networking;
 
 namespace Oxide.Plugins
 {
-    [Info("Image Library", "Absolut & K1lly0u", "2.0.60")]
+    [Info("Image Library", "Absolut & K1lly0u", "2.0.62")]
     [Description("Plugin API for downloading and managing images")]
     class ImageLibrary : RustPlugin
     {
@@ -48,6 +48,7 @@ namespace Oxide.Plugins
         private void Loaded()
         {
             identifiers = Interface.Oxide.DataFileSystem.GetFile("ImageLibrary/image_data");
+            
             urls = Interface.Oxide.DataFileSystem.GetFile("ImageLibrary/image_urls");
             skininfo = Interface.Oxide.DataFileSystem.GetFile("ImageLibrary/skin_data");
 
@@ -145,11 +146,11 @@ namespace Oxide.Plugins
         private void RefreshImagery()
         {
             imageIdentifiers.imageIds.Clear();
-            imageIdentifiers.lastCEID = CommunityEntity.ServerInstance.net.ID;
+            imageIdentifiers.lastCEID = CommunityEntity.ServerInstance.net.ID.Value;
 
             AddImage("http://i.imgur.com/sZepiWv.png", "NONE", 0);
             AddImage("http://i.imgur.com/lydxb0u.png", "LOADING", 0);
-            foreach (var image in configData.UserImages)
+            foreach (KeyValuePair<string, string> image in configData.UserImages)
             {
                 if (!string.IsNullOrEmpty(image.Value))
                     AddImage(image.Value, image.Key, 0);
@@ -170,7 +171,7 @@ namespace Oxide.Plugins
 
             isInitialized = true;
 
-            if (imageIdentifiers.lastCEID != CommunityEntity.ServerInstance.net.ID)
+            if (imageIdentifiers.lastCEID != CommunityEntity.ServerInstance.net.ID.Value)
             {
                 if (imageIdentifiers.imageIds.Count < 2)
                 {
@@ -205,7 +206,7 @@ namespace Oxide.Plugins
                         if (!uint.TryParse(image.Value, out imageId))
                             continue;
 
-                        byte[] bytes = db.QueryBlob("SELECT data FROM data WHERE crc = ? AND filetype = ? AND entid = ? LIMIT 1", new object[] { (int)imageId, 0, imageIdentifiers.lastCEID });
+                        byte[] bytes = db.Query<byte[], int, int, int>("SELECT data FROM data WHERE crc = ? AND filetype = ? AND entid = ? LIMIT 1", (int)imageId, 0, (int)imageIdentifiers.lastCEID );
                         if (bytes != null)
                             oldFiles.Add(image.Key, bytes);
                         else
@@ -239,7 +240,7 @@ namespace Oxide.Plugins
 
             //loadOrders.Enqueue(new LoadOrder("Image restoration from previous database", oldFiles));
             //PrintWarning($"{imageIdentifiers.imageIds.Count - failed} images queued for restoration, {failed} images failed");
-            imageIdentifiers.lastCEID = CommunityEntity.ServerInstance.net.ID;
+            imageIdentifiers.lastCEID = CommunityEntity.ServerInstance.net.ID.Value;
             SaveData();
 
             orderPending = false;
@@ -397,10 +398,10 @@ namespace Oxide.Plugins
         public List<ulong> GetImageList(string name)
         {
             List<ulong> skinIds = new List<ulong>();
-            var matches = imageUrls.URLs.Keys.Where(x => x.StartsWith(name)).ToArray();
+            string[] matches = imageUrls.URLs.Keys.Where(x => x.StartsWith(name)).ToArray();
             for (int i = 0; i < matches.Length; i++)
             {
-                var index = matches[i].IndexOf("_");
+                int index = matches[i].IndexOf("_");
                 if (matches[i].Substring(0, index) == name)
                 {
                     ulong skinID;
@@ -441,7 +442,7 @@ namespace Oxide.Plugins
         public void ImportImageList(string title, Dictionary<string, string> imageList, ulong imageId = 0, bool replace = false, Action callback = null)
         {
             Dictionary<string, string> newLoadOrder = new Dictionary<string, string>();
-            foreach (var image in imageList)
+            foreach (KeyValuePair<string, string> image in imageList)
             {
                 if (!replace && HasImage(image.Key, imageId))
                     continue;
@@ -464,9 +465,9 @@ namespace Oxide.Plugins
         public void ImportItemList(string title, Dictionary<string, Dictionary<ulong, string>> itemList, bool replace = false, Action callback = null)
         {
             Dictionary<string, string> newLoadOrder = new Dictionary<string, string>();
-            foreach (var image in itemList)
+            foreach (KeyValuePair<string, Dictionary<ulong, string>> image in itemList)
             {
-                foreach (var skin in image.Value)
+                foreach (KeyValuePair<ulong, string> skin in image.Value)
                 {
                     if (!replace && HasImage(image.Key, skin.Key))
                         continue;
@@ -490,7 +491,7 @@ namespace Oxide.Plugins
         public void ImportImageData(string title, Dictionary<string, byte[]> imageList, ulong imageId = 0, bool replace = false, Action callback = null)
         {
             Dictionary<string, byte[]> newLoadOrder = new Dictionary<string, byte[]>();
-            foreach (var image in imageList)
+            foreach (KeyValuePair<string, byte[]> image in imageList)
             {
                 if (!replace && HasImage(image.Key, imageId))
                     continue;
@@ -1129,10 +1130,10 @@ namespace Oxide.Plugins
                 }
                 if (il.configData.ShowProgress && listCount > 1)
                 {
-                    var time = UnityEngine.Time.time;
+                    float time = UnityEngine.Time.time;
                     if (time > nextUpdate)
                     {
-                        var amountDone = listCount - queueList.Count;
+                        int amountDone = listCount - queueList.Count;
                         print($"{request} storage process at {Math.Round((amountDone / (float)listCount) * 100, 0)}% ({amountDone}/{listCount})");
                         nextUpdate = time + il.configData.UpdateInterval;
                     }
@@ -1329,7 +1330,7 @@ namespace Oxide.Plugins
 
         private class ImageIdentifiers
         {
-            public uint lastCEID;
+            public ulong lastCEID;
             public Hash<string, string> imageIds = new Hash<string, string>();
         }
 

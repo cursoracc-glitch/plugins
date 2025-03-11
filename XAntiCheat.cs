@@ -9,17 +9,30 @@ using Oxide.Core;
 using Random = UnityEngine.Random;
 using Rust;
 using ProtoBuf;
-using Newtonsoft.Json.Linq;
+using System.Collections;
+using System.Text.RegularExpressions;
 using Oxide.Core.Libraries;
 
 namespace Oxide.Plugins
 {
-    [Info("XAntiCheat", "fermens", "0.3.79")]
+    [Info("XAntiCheat", "123", "2.0.2")]
     public class XAntiCheat : RustPlugin
     {
+        static XAntiCheat fermens;
+        const bool fermensEN = false;
+
+        const bool debugmode = false;
         const string ipinnfourl = "https://ipinfo.io/{ip}/privacy?token={token}";
-        const bool enablefull = false;
+        const bool enablefull = true;
         const string ipinfosingup = "https://ipinfo.io/signup";
+
+        #region message
+        Dictionary<string, string> messages = new Dictionary<string, string>();
+        private string GetMessage(string key, string userId)
+        {
+            return lang.GetMessage(key, this, userId);
+        }
+        #endregion
 
         #region CODE LOCK
         private static bool IsBanned(ulong userid)
@@ -29,30 +42,41 @@ namespace Oxide.Plugins
 
         private static bool IsImprisoned(ulong userid)
         {
-            if (ins.PrisonBitch == null) return false;
-            return ins.PrisonBitch.Call<bool>("ISIMPRISONED", userid);
+            if (fermens.PrisonBitch == null) return false;
+            return fermens.PrisonBitch.Call<bool>("ISIMPRISONED", userid);
         }
-//Анти чит хуйня = ещё и продают Источник: https://info-hacks.ru/resources/xanticheat.45/
+
         private void OnCodeEntered(CodeLock codeLock, BasePlayer player, string code)
         {
             if (player == null) return;
             ulong owner = codeLock.OwnerID;
-            if (owner == 0UL || code  != codeLock.code) return;
+            if (owner == 0UL || code != codeLock.code) return;
+            if (!codeLock.IsLocked())
+            {
+                codeLock.OwnerID = player.userID;
+                return;
+            }
             bool bann = IsBanned(owner);
             bool unprisoned = IsImprisoned(owner);
 
-            if(bann || unprisoned)
+            if (bann || unprisoned)
             {
-                ADDLOG($"{player.displayName}({player.UserIDString}) ввёл пароль от кодового замка {(bann ? "забанненого" : "заключенного")} игрока({owner})!", 2);
+                ADDLOG("CODELOCK", messages["logCODELOCK"].Replace("{name}", player.displayName).Replace("{steamid}", player.UserIDString).Replace("{owner}", owner.ToString()), config.cODELOCK.webhook, 2);
                 if (config.cODELOCK.enable)
                 {
                     timer.Once(config.cODELOCK.seconds, () =>
                     {
-                        BAN(player.UserIDString, config.cODELOCK.reason, config.cODELOCK.hours, player.displayName);
+                        BAN(player.UserIDString, config.cODELOCK.reason, config.cODELOCK.hours, player.displayName, config.cODELOCK.webhook);
                     });
                 }
             }
 
+        }
+
+        object CanChangeCode(BasePlayer player, CodeLock codeLock, string newCode, bool isGuestCode)
+        {
+            codeLock.OwnerID = player.userID;
+            return null;
         }
         #endregion
 
@@ -75,229 +99,261 @@ namespace Oxide.Plugins
 
         class SILENT
         {
-            [JsonProperty("Автобан (не знаешь, не трогай!)")]
+            [JsonProperty(fermensEN ? "Enable autoban?" : "Банить?")]
+            public bool enable;
+
+            [JsonProperty(fermensEN ? "Number of detections for a ban" : "Автобан (не знаешь, не трогай!)")]
             public int xdetects;
 
-            [JsonProperty("Причина бана")]
+            [JsonProperty(fermensEN ? "Ban reason" : "Причина бана")]
             public string reason;
 
-            [JsonProperty("На сколько часов бан?")]
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
+
+            [JsonProperty(fermensEN ? "How many hours to ban?" : "На сколько часов бан?")]
             public int hours;
         }
 
         class SPIDER
         {
-            [JsonProperty("Причина бана")]
+            [JsonProperty(fermensEN ? "Enable autoban?" : "Банить?")]
+            public bool enable;
+
+            [JsonProperty(fermensEN ? "Ban reason" : "Причина бана")]
             public string reason;
 
-            [JsonProperty("На сколько часов бан?")]
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
+
+            [JsonProperty(fermensEN ? "How many hours to ban?" : "На сколько часов бан?")]
             public int hours;
         }
 
         class FLY
         {
-            [JsonProperty("Причина бана")]
+            [JsonProperty(fermensEN ? "Enable autoban?" : "Банить?")]
+            public bool enable;
+
+            [JsonProperty(fermensEN ? "Ban reason" : "Причина бана")]
             public string reason;
 
-            [JsonProperty("На сколько часов бан?")]
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
+
+            [JsonProperty(fermensEN ? "How many hours to ban?" : "На сколько часов бан?")]
+            public int hours;
+        }
+
+        class SPINERBOT
+        {
+            [JsonProperty(fermensEN ? "Enable autoban?" : "Банить?")]
+            public bool enable;
+
+            [JsonProperty(fermensEN ? "Ban reason" : "Причина бана")]
+            public string reason;
+
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
+
+            [JsonProperty(fermensEN ? "How many hours to ban?" : "На сколько часов бан?")]
+            public int hours;
+        }
+
+        class NORECOIL
+        {
+            [JsonProperty(fermensEN ? "Enable autoban?" : "Банить?")]
+            public bool enable;
+
+            [JsonProperty(fermensEN ? "Ban reason" : "Причина бана")]
+            public string reason;
+
+            [JsonProperty(fermensEN ? "Delay in seconds before the ban" : "Задержка в секундах перед баном, после детекта")]
+            public float seconds;
+
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
+
+            [JsonProperty(fermensEN ? "How many hours to ban?" : "На сколько часов бан?")]
             public int hours;
         }
 
         class HITMOD
         {
-            [JsonProperty("Банить?")]
+            [JsonProperty(fermensEN ? "Enable autoban?" : "Банить?")]
             public bool enable;
 
-            [JsonProperty("Причина бана")]
+            [JsonProperty(fermensEN ? "Ban reason" : "Причина бана")]
             public string reason;
 
-            [JsonProperty("На сколько часов бан?")]
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
+
+            [JsonProperty(fermensEN ? "How many hours to ban?" : "На сколько часов бан?")]
             public int hours;
         }
 
         class CODELOCK
         {
-            [JsonProperty("Банить?")]
+            [JsonProperty(fermensEN ? "Enable autoban?" : "Банить?")]
             public bool enable;
 
-            [JsonProperty("Причина бана")]
+            [JsonProperty(fermensEN ? "Ban reason" : "Причина бана")]
             public string reason;
 
-            [JsonProperty("Задержка в секундах перед баном, после детекта")]
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
+
+            [JsonProperty(fermensEN ? "Delay in seconds before the ban" : "Задержка в секундах перед баном, после детекта")]
             public float seconds;
 
-            [JsonProperty("На сколько часов бан?")]
+            [JsonProperty(fermensEN ? "How many hours to ban?" : "На сколько часов бан?")]
             public int hours;
         }
 
         class TEAMBAN
         {
-            [JsonProperty("Банить?")]
+            [JsonProperty(fermensEN ? "Enable autoban?" : "Банить?")]
             public bool enable;
 
-            [JsonProperty("Причина бана")]
+            [JsonProperty(fermensEN ? "Ban reason" : "Причина бана")]
             public string reason;
 
-            [JsonProperty("Банить, если в команде N забаненных")]
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
+
+            [JsonProperty(fermensEN ? "Ban if there are N bans in the team" : "Банить, если в команде N забаненных")]
             public int num;
 
-            [JsonProperty("Учитывать бан за макрос?")]
-            public bool macros;
-
-            [JsonProperty("На сколько часов бан?")]
-            public int hours;
-        }
-
-        class SMARTBAN
-        {
-            [JsonProperty("Банить?")]
-            public bool enable;
-
-            [JsonProperty("Причина бана")]
-            public string reason;
-
-            [JsonProperty("Fly: очков")]
-            public int fly;
-
-            [JsonProperty("EspStash: очков")]
-            public int espstash;
-
-            [JsonProperty("Macro: очков")]
-            public int macro;
-
-            [JsonProperty("HitMod: очков")]
-            public int hitmod;
-
-            [JsonProperty("Spider: очков")]
-            public int spider;
-
-            [JsonProperty("Silent: очков")]
-            public int silent;
-
-            [JsonProperty("На сколько часов бан?")]
+            [JsonProperty(fermensEN ? "How many hours to ban?" : "На сколько часов бан?")]
             public int hours;
         }
 
         class ESPSTASH
         {
-            [JsonProperty("Количество")]
+            [JsonProperty(fermensEN ? "Number of stashs" : "Количество")]
             public int amount;
 
-            [JsonProperty("Возможный лут")]
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
+
+            [JsonProperty(fermensEN ? "Possible loot" : "Возможный лут")]
             public Dictionary<string, int> loots;
         }
 
-        class MACROS
+        class DEBUGCAMERA
         {
-            [JsonProperty("Причина бана")]
-            public string reason;
+            [JsonProperty(fermensEN ? "Enable autoban?" : "Банить?")]
+            public bool enable;
 
-            [JsonProperty("Количество выстрелов")]
-            public int shoots;
-
-            [JsonProperty("Количество детектов")]
-            public int amount;
-
-            [JsonProperty("На сколько часов бан?")]
-            public int hours;
+            [JsonProperty("Discord Webhook")]
+            public string webhook;
         }
 
         private class PluginConfig
         {
+            [JsonProperty("-")]
+            public string six;
+
             [JsonProperty("SteamAPI")]
             public string steampi;
 
-            [JsonProperty("Silent Aim: настройка")]
+            [JsonProperty(fermensEN ? "Silent Aim: setup" : "Silent Aim: настройка")]
             public SILENT sILENT;
 
-            [JsonProperty("Spider: настройка")]
+            [JsonProperty(fermensEN ? "Spider: setup" : "Spider: настройка")]
             public SPIDER sPIDER;
 
-            [JsonProperty("ESP SmallStash: настройка")]
+            [JsonProperty(fermensEN ? "ESP SmallStash: setup" : "ESP SmallStash: настройка")]
             public ESPSTASH ESPStash;
 
-            [JsonProperty("FLY: настройка")]
+            [JsonProperty(fermensEN ? "FLY: setup" : "FLY: настройка")]
             public FLY fLY;
 
-            [JsonProperty("TEAMBAN: настройка")]
+            [JsonProperty(fermensEN ? "TEAMBAN: setup" : "TEAMBAN: настройка")]
             public TEAMBAN tEAMBAN;
 
-            [JsonProperty("CODELOCK: настройка")]
+            [JsonProperty(fermensEN ? "CODELOCK: setup" : "CODELOCK: настройка")]
             public CODELOCK cODELOCK;
 
-            [JsonProperty("HITMOD: настройка")]
+            [JsonProperty(fermensEN ? "HITMOD: setup" : "HITMOD: настройка")]
             public HITMOD hITMOD;
 
-            [JsonProperty("MACROS: настройка")]
-            public MACROS mACROS;
+            [JsonProperty(fermensEN ? "NORECOIL: setup" : "NORECOIL: настройка")]
+            public NORECOIL nORECOIL;
 
-            [JsonProperty("Debug camera: Банить?")]
-            public bool debugcamera;
+            [JsonProperty(fermensEN ? "SPINERBOT: setup" : "SPINERBOT: настройка")]
+            public SPINERBOT sPINERBOT;
 
-            [JsonProperty("Отображать данные при подключении игрока?")]
+            [JsonProperty("Debug camera")]
+            public DEBUGCAMERA dEBUGCAMERA;
+
+            [JsonProperty(fermensEN ? "Display steam account details when a player connect?" : "Отображать данные при подключении игрока?")]
             public bool show;
 
-            [JsonProperty("Не банить Steam игроков?")]
+            [JsonProperty(fermensEN ? "Do not ban Steam players?" : "Не банить Steam игроков?")]
             public bool steamplayer;
 
-            [JsonProperty("Отправлять в тюрьму, если есть плагин PrisonBitch")]
+            [JsonProperty(fermensEN ? "Send to jail if there is PrisonBitch plugin" : "Отправлять в тюрьму, если есть плагин PrisonBitch")]
             public bool prison;
 
-            [JsonProperty("Банить не настроеные аккаунты?")]
+            [JsonProperty(fermensEN ? "Ban not configured steam accounts?" : "Банить не настроеные аккаунты?")]
             public bool bannensatroyen;
 
-            [JsonProperty("Банить аккаунты, которым меньше X дней")]
+            [JsonProperty(fermensEN ? "Ban accounts less than X days old" : "Банить аккаунты, которым меньше X дней")]
             public int banday;
 
-            [JsonProperty("На сколько часов банить новые аккаунты")]
+            [JsonProperty(fermensEN ? "How long to ban new steam accounts (hours)" : "На сколько часов банить новые аккаунты")]
             public int bannewaccountday;
 
-            [JsonProperty("Кикать не настроенные аккаунты")]
+            [JsonProperty(fermensEN ? "Kick not configured steam accounts?" : "Кикать не настроенные аккаунты")]
             public bool kicknenastoyen;
 
-            [JsonProperty("Кикать приватные аккаунты")]
+            [JsonProperty(fermensEN ? "Kick private steam accounts?" : "Кикать приватные аккаунты")]
             public bool kickprivate;
 
-            [JsonProperty("Кикать игроков использующих VPN")]
+            [JsonProperty(fermensEN ? "Kick players using VPN" : "Кикать игроков использующих VPN")]
             public bool kickvpn;
 
-            [JsonProperty("Не кикать лицухи?")]
+            [JsonProperty(fermensEN ? "Don't kick steam players for private, not configured or new account?" : "Не кикать лицухи?")]
             public bool steamkick;
 
-            [JsonProperty("Не банить лицушников за новые аккаунты?")]
+            [JsonProperty(fermensEN ? "Don't ban steam players for new account?" : "Не банить лицушников за новые аккаунты?")]
             public bool steam;
 
-            [JsonProperty("Писать/сохранять логи [0 - нет | 1 - только баны | 2 - все]")]
+            [JsonProperty(fermensEN ? "Write/save logs [0 - no | 1 - only bans | 2 - all]" : "Писать/сохранять логи [0 - нет | 1 - только баны | 2 - все]")]
             public int logspriority;
 
-            [JsonProperty("Discord: ID канала")]
+            [JsonProperty(fermensEN ? "Discord: Channel ID" : "Discord: ID канала")]
             public string discordid;
 
-            [JsonProperty(" Логи попаданий с огнестрела в консоль")]
+            [JsonProperty(fermensEN ? "Logs in language" : "Логи на языке")]
+            public string lang { get; set; } = fermensEN ? "en" : "ru";
+
+            [JsonProperty(fermensEN ? "Logs of hits from a firearm to the console" : " Логи попаданий с огнестрела в консоль")]
             public bool logs;
 
-            [JsonProperty("IPINFO ТОКЕН")]
+            [JsonProperty(fermensEN ? "IPINFO TOKEN" : "IPINFO ТОКЕН")]
             public string ipinfotoken;
 
             [JsonProperty("tt")]
             public string tt;
 
-            [JsonProperty("Сообщения")]
-            public Dictionary<string, string> messages;
-
-            [JsonProperty("Шаблоны банов")]
-            public Dictionary<string, string> pattern;
+            [JsonProperty(fermensEN ? "Ban patterns" : "Шаблоны банов")]
+            public Dictionary<string, string> pattern = new Dictionary<string, string>();
 
             public static PluginConfig DefaultConfig()
             {
                 return new PluginConfig()
                 {
+                    six = "-",
                     ipinfotoken = ipinfosingup,
                     kickvpn = false,
                     tEAMBAN = new TEAMBAN
                     {
                         enable = true,
                         hours = 168,
+                        webhook = "",
                         reason = "\"bb with teammates\"",
                         num = 2
                     },
@@ -305,41 +361,58 @@ namespace Oxide.Plugins
                     {
                         enable = true,
                         hours = 336,
-                        reason = "\"Ban Detected! (1)\"",
+                        webhook = "",
+                        reason = "\"Ban Detected!\"",
                         seconds = 75
                     },
                     sPIDER = new SPIDER
                     {
                         hours = 720,
+                        webhook = "",
                         reason = "\"Cheat Detected! (2)\""
                     },
                     sILENT = new SILENT
                     {
                         xdetects = 7,
+                        webhook = "",
                         hours = 1440,
                         reason = "\"Cheat Detected! (1)\""
                     },
                     fLY = new FLY
                     {
                         hours = 720,
+                        webhook = "",
                         reason = "\"Cheat Detected! (3)\""
                     },
                     hITMOD = new HITMOD
                     {
                         enable = true,
                         hours = 720,
+                        webhook = "",
                         reason = "\"Cheat Detected! (6)\""
                     },
-                    mACROS = new MACROS
+                    sPINERBOT = new SPINERBOT
                     {
-                        amount = 5,
-                        hours = 168,
-                        reason = "\"Macros Detected!\"",
-                        shoots = 10
+                        enable = true,
+                        hours = 720,
+                        webhook = "",
+                        reason = "\"Cheat Detected! (10)\""
+                    },
+                    nORECOIL = new NORECOIL
+                    {
+                        enable = true,
+                        hours = 720,
+                        seconds = 30f,
+                        webhook = "",
+                        reason = "\"Cheat Detected! (11)\""
                     },
                     prison = true,
                     steamkick = true,
-                    debugcamera = true,
+                    dEBUGCAMERA = new DEBUGCAMERA
+                    {
+                        enable = true,
+                        webhook = ""
+                    },
                     logs = false,
                     steam = true,
                     steampi = defaultsteamapi,
@@ -351,17 +424,12 @@ namespace Oxide.Plugins
                     show = true,
                     bannewaccountday = 120,
                     steamplayer = false,
-                    messages = new Dictionary<string, string>
-                    {
-                        { "NEW.ACCOUNT", "\"Подозрительный аккаунт\"" },
-                        { "KICK.PRIVATE", "\"Откройте профиль, что бы играть на этом сервере! (Make your Steam profile public to play on this server)\"" },
-                        { "KICK.NENASTROYEN", "\"Настройте профиль, что бы играть на этом сервере! (Make your Steam profile public to play on this server)\""},
-                        { "KICK.VPN", "\"На сервере запрещено играть с VPN! (VPN DETECTED)\""}
-                    },
                     pattern = new Dictionary<string, string>
                     {
                         { "BAN.ACCOUNT", "ban {steamid} {reason} {time}" },
                         { "PRISON.ACCOUNT", "prison.add {steamid} {time} {reason}" },
+                        { "EBSBAN.ACCOUNT", "ban {steamid} {time}h {reason}" },
+                        { "BANSYSTEM.ACCOUNT", "banp {steamid} {time}h {reason}" }
                     },
                     logspriority = 2,
                     ESPStash = new ESPSTASH
@@ -388,6 +456,64 @@ namespace Oxide.Plugins
         }
         #endregion
 
+        #region WebHook
+        private static void SendDiscordMessage(string reason, string desc, string webhook)
+        {
+            var embed = new Embed()
+            .AddField(reason, desc, true);
+
+            fermens.webrequest.Enqueue(webhook, new DiscordMessage("", embed).ToJson(), (code, response) => { },
+            fermens,
+            RequestMethod.POST, new Dictionary<string, string>
+            {
+                    { "Content-Type", "application/json" }
+            });
+        }
+
+        private class DiscordMessage
+        {
+            public DiscordMessage(string content, params Embed[] embeds)
+            {
+                Content = content;
+                Embeds = embeds.ToList();
+            }
+
+            [JsonProperty("content")] public string Content { get; set; }
+            [JsonProperty("embeds")] public List<Embed> Embeds { get; set; }
+
+            public string ToJson()
+            {
+                return JsonConvert.SerializeObject(this);
+            }
+        }
+
+        private class Embed
+        {
+            [JsonProperty("fields")] public List<Field> Fields { get; set; } = new List<Field>();
+
+            public Embed AddField(string name, string value, bool inline)
+            {
+                Fields.Add(new Field(name, Regex.Replace(value, "<.*?>", string.Empty), inline));
+
+                return this;
+            }
+        }
+
+        private class Field
+        {
+            public Field(string name, string value, bool inline)
+            {
+                Name = name;
+                Value = value;
+                Inline = inline;
+            }
+
+            [JsonProperty("name")] public string Name { get; set; }
+            [JsonProperty("value")] public string Value { get; set; }
+            [JsonProperty("inline")] public bool Inline { get; set; }
+        }
+        #endregion
+
         int nsnext = 0;
         [ChatCommand("ns")]
         private void COMMANSTASH(BasePlayer player, string command, string[] args)
@@ -398,120 +524,22 @@ namespace Oxide.Plugins
             if (stashContainers.Count >= nsnext) nsnext = 0;
         }
 
-        Vector3 lastshash;
+        Vector3 lastshash = Vector3.zero;
         [ChatCommand("ls")]
         private void COMMALS(BasePlayer player, string command, string[] args)
         {
             if (!player.IsAdmin) return;
-            if(lastshash == Vector3.zero)
+            if (lastshash == Vector3.zero)
             {
-                player.ChatMessage("<color=yellow>Еще не раскопали ни одного стеша!</color>");
+                player.ChatMessage(GetMessage("adminLs", player.UserIDString));
                 return;
             }
             player.Teleport(lastshash + Vector3.up * 1.5f);
         }
 
-        [ChatCommand("testaim")]
-        private void COMMANDERAIM(BasePlayer player, string command, string[] args)
-        {
-            if (!player.IsAdmin) return;
-            TESTAIM(player);
-        }
+        [PluginReference] private Plugin PrisonBitch, EnhancedBanSystem, BanSystem;
 
-        [ConsoleCommand("test.aim")]
-        private void cmdtest(ConsoleSystem.Arg arg)
-        {
-            if (!arg.IsAdmin || !arg.HasArgs()) return;
-            ulong ID;
-            if(!ulong.TryParse(arg.Args[0], out ID))
-            {
-                arg.ReplyWith("ЭТО НЕ СТИМ ИД!");
-                return;
-            }
-            BasePlayer player = BasePlayer.FindByID(ID);
-            if(player == null)
-            {
-                arg.ReplyWith("ИГРОК НЕ НАЙДЕН!");
-                return;
-            }
-            TESTAIM(player);
-        }
-
-      /* Dictionary<BasePlayer, DateTime> lastbowtime = new Dictionary<BasePlayer, DateTime>();
-        void OnWeaponFired(BaseProjectile projectile, BasePlayer player, ItemModProjectile mod, ProtoBuf.ProjectileShoot projectiles)
-        {
-            if (player == null || projectile == null || mod == null || projectiles == null)  return;
-            Item item = player.GetActiveItem();
-            if (item == null || item.info.itemid != 1443579727)  return;
-            DateTime dateTime;
-            if (!lastbowtime.TryGetValue(player, out dateTime))
-            {
-                lastbowtime[player] = DateTime.Now;
-                return;
-            }
-            Debug.Log(player.displayName + " - " + (DateTime.Now- dateTime).TotalMilliseconds);
-            lastbowtime[player] = DateTime.Now;
-        }*/
-
-        private void TESTAIM(BasePlayer player)
-        {
-            int i = 0;
-            Vector3 head = player.eyes.MovementForward();
-            Debug.Log($"{i}. {player.displayName} - {player.eyes.HeadForward()} - {player.eyes.MovementForward()}");
-            Vector3 pos = new Vector3(player.transform.position.x + (10f * player.eyes.MovementForward().x), 500f, player.transform.position.z + (10f * head.z));
-          //  Vector3 vector3 = player.eyes.
-            BasePlayer npc = GameManager.server.CreateEntity("assets/prefabs/player/player.prefab", new Vector3(pos.x, TerrainMeta.HeightMap.GetHeight(pos) - 2f, pos.z), new Quaternion(), true) as BasePlayer;
-            if (npc == null) return;
-            npc.enableSaving = false;
-            npc.Spawn();
-            NextTick(() =>
-            {
-                PlayerInventory inv = npc.GetComponent<PlayerInventory>();
-                inv.Strip();
-            });
-
-            timer.Repeat(0.1f, 20, () => {i++; Debug.Log($"{i}. {player.displayName} - {player.eyes.HeadForward()}"); });
-            timer.Once(2.5f, () => { if (!npc.IsDead()) npc.Kill(); });
-        }
-
-        [ChatCommand("testfly")]
-        private void COMMANDER(BasePlayer player, string command, string[] args)
-        {
-            if (player.IsAdmin)
-            {
-                List<BaseEntity> list = Pool.GetList<BaseEntity>();
-                Vis.Entities<BaseEntity>(player.transform.position, 2f, list);
-                List<TreeEntity> list2 = Pool.GetList<TreeEntity>();
-                Vis.Entities<TreeEntity>(player.transform.position, 8.5f, list2);
-                string elements = "";
-                bool pl = false;
-                foreach (var z in list)
-                {
-                    if (z is BasePlayer && (z as BasePlayer) != player) pl = true;
-                    elements += z.ShortPrefabName + (list.Count > 1 ? " | " : "");
-                }
-                RaycastHit hit;
-                var raycast = Physics.Raycast(player.transform.position, Vector3.down, out hit, 500f);
-                if (raycast)
-                {
-                    bool spider = false;
-                    RaycastHit hit2;
-                    var raycast2 = Physics.Raycast(player.transform.position, player.eyes.BodyForward(), out hit2, 1f);
-                    if (raycast2)
-                    {
-                        spider = hit2.collider.name.Contains("wall");
-                        Debug.Log(hit2.collider.name);
-                    }
-                    bool ins = hit.collider.name.Contains("assets/prefabs/building core");
-                    float distance = player.Distance(hit.point);
-                    Debug.Log($"-[TEST]- {player.displayName}({player.UserIDString}) - [{elements}] - высота: {distance.ToString("F1")} м. ({hit.collider.name}) | Дерево: {(list2.Count > 0 ? "Да" : "Нет")} | Игрок: {(pl ? "Да" : "Нет")} | В здании: {(ins ? "Да" : "Нет")} | Спайдер: {(spider ? "Да" : "Нет")}");
-                }
-            }
-        }
-
-        [PluginReference] private Plugin PrisonBitch;
-
-        private static void BAN(string steamid, string reason, int time, string displayname, bool checkteam = true)
+        private static void BAN(string steamid, string reason, int time, string displayname, string webhook, bool checkteam = true)
         {
             if (!enablefull) return;
 
@@ -519,11 +547,11 @@ namespace Oxide.Plugins
             if (config.steamplayer)
             {
                 BasePlayer pl = BasePlayer.FindByID(usteam);
-                if(pl != null)
+                if (pl != null)
                 {
-                    if (ins.ISSTEAM(pl.Connection))
+                    if (fermens.ISSTEAM(pl.Connection))
                     {
-                        ADDLOG($"{pl.displayName}({pl.UserIDString}) отмазали от бана.", 2);
+                        ADDLOG("STEAM_PLAYER", fermens.messages["logSTEAM_PLAYER"].Replace("{name}", pl.displayName).Replace("{steamid}", pl.UserIDString), webhook, 2);
                         return;
                     }
                 }
@@ -531,7 +559,7 @@ namespace Oxide.Plugins
 
             ulong usteamid = Convert.ToUInt64(steamid);
 
-            if (checkteam && (reason != config.mACROS.reason || config.tEAMBAN.macros))
+            if (checkteam)
             {
                 if (config.tEAMBAN.enable)
                 {
@@ -547,7 +575,7 @@ namespace Oxide.Plugins
                                 string strid = z.ToString();
                                 BasePlayer basePlayer2 = BasePlayer.FindByID(z);
                                 string name = basePlayer2 != null ? basePlayer2.displayName : strid;
-                                ins.timer.Once(1f, () => BAN(z.ToString(), config.tEAMBAN.reason, config.tEAMBAN.hours, name, false));
+                                fermens.timer.Once(1f, () => BAN(z.ToString(), config.tEAMBAN.reason, config.tEAMBAN.hours, name, config.tEAMBAN.webhook, false));
                             }
                         }
                     }
@@ -558,17 +586,17 @@ namespace Oxide.Plugins
             {
                 if (!IsImprisoned(usteamid))
                 {
-                    ADDLOG($"Отправили в тюрьму {displayname}({steamid}) на {(time * 1f / 24f).ToString("F1")} дней [{reason}]", 1);
+                    ADDLOG("PRISON", fermens.messages["logPRISON"].Replace("{name}", displayname).Replace("{steamid}", steamid).Replace("{days}", (time * 1f / 24f).ToString("F1")).Replace("{reason}", reason), webhook, 1);
                     time = (int)(time * 60f);
-                    ins.Server.Command(config.pattern["PRISON.ACCOUNT"].Replace("{steamid}", steamid).Replace("{time}", time.ToString()).Replace("{reason}", reason));
+                    fermens.Server.Command(config.pattern["PRISON.ACCOUNT"].Replace("{steamid}", steamid).Replace("{time}", time.ToString()).Replace("{reason}", reason));
                 }
             }
             else
             {
                 if (!IsBanned(usteamid))
                 {
-                    ins.Server.Command(config.pattern["BAN.ACCOUNT"].Replace("{steamid}", steamid).Replace("{time}", time.ToString()).Replace("{reason}", reason));
-                    ADDLOG($"Забанили {displayname}({steamid}) на {(time * 1f / 24f).ToString("F1")} дней [{reason}]", 1);
+                    fermens.Server.Command(fermens.patterban.Replace("{steamid}", steamid).Replace("{time}", time.ToString()).Replace("{reason}", reason));
+                    ADDLOG("BAN", fermens.messages["logBAN"].Replace("{name}", displayname).Replace("{steamid}", steamid).Replace("{days}", (time * 1f / 24f).ToString("F1")).Replace("{reason}", reason), webhook, 1);
                 }
             }
         }
@@ -576,7 +604,8 @@ namespace Oxide.Plugins
         const int flylimit = 2;
         const int spiderlimit = 2;
 
-        private static Dictionary<ulong, int> macros = new Dictionary<ulong, int>();
+
+        private Dictionary<BasePlayer, ANTICHEAT> anticheatPlayers = new Dictionary<BasePlayer, ANTICHEAT>();
 
         class ANTICHEAT : MonoBehaviour
         {
@@ -584,6 +613,8 @@ namespace Oxide.Plugins
             private int silent;
             private int spider;
             private int fly;
+            private float flyheight;
+
             BasePlayer player;
             private DateTime lastban;
 
@@ -601,109 +632,169 @@ namespace Oxide.Plugins
             float posfirel;
             float posfirer;
 
+            int norecoil;
+            Vector3 lastshot;
+
             private int numdetecthit;
 
             bool macromove;
             Vector3 startshoots;
 
+            Vector3 direction;
+
             private void Awake()
             {
                 player = GetComponent<BasePlayer>();
-                if (player == null || enablefull && (player.IsAdmin || ins.permission.UserHasPermission(player.UserIDString, "xanticheat.allow")))
+                if (player == null || !debugmode && enablefull && (player.IsAdmin || fermens.permission.UserHasPermission(player.UserIDString, "xanticheat.allow")))
                 {
                     Destroy(this);
                     return;
                 }
-          //      if (!enablefull) Debug.Log(player.displayName + " добавили в античит.");
+
+                fermens.anticheatPlayers.Add(player, this);
+
                 lasthit = "";
                 silent = 0;
                 weaponhit = "";
                 weaponfire = "";
-                if (config.debugcamera) InvokeRepeating(nameof(TICK), 0f, 10f);
-                InvokeRepeating(nameof(SILENTCLEAR), 120f, 120f);
-               // InvokeRepeating(nameof(WH), 0f, 1f);
+                if (config.dEBUGCAMERA.enable || debugmode) InvokeRepeating(nameof(TICK), 0f, 10f);
+                direction = player.eyes.HeadRay().direction;
+                InvokeRepeating(nameof(SILENTCLEAR), 0f, 120f);
+                // InvokeRepeating(nameof(WH), 0f, 1f);
             }
 
             private void SILENTCLEAR()
             {
+                flyiing = 1;
+                RaycastHit hit;
+                var raycast = Physics.Raycast(player.transform.position, Vector3.down, out hit, 20f);
+                if (raycast)
+                {
+                    if (hit.distance > 4f && hit.distance < 5f && !player.isMounted && !player.IsSleeping() && !player.IsWounded())
+                    {
+                        Debug.LogWarning($"[{flyiing}] {player.displayName} {player.UserIDString} | {hit.collider.name} [{hit.distance} m.] {player.IsFlying}");
+                        flyiingList.Add(player.transform.position);
+                        //  InvokeRepeating(nameof(FLYING), 1f, 1f);
+                    }
+
+                }
                 spider = 0;
                 silent = 0;
                 fly = 0;
+                flyheight = 0;
             }
 
-            public void ADDFLY()
+            private List<Vector3> flyiingList = new List<Vector3>();
+            private int flyiing;
+
+            public void ADDFLY(float distance)
             {
+                if (distance <= flyheight) return;
                 fly++;
-                ADDLOG($"-[Fly]- {player.displayName}({player.UserIDString}) детектов {fly}/{flylimit}", 2);
-                if (fly >= flylimit && lastban < DateTime.Now)
+                flyheight = distance;
+                ADDLOG("FLY", fermens.messages["logDETECT"].Replace("{name}", player.displayName).Replace("{steamid}", player.UserIDString).Replace("{detect}", fly.ToString()).Replace("{detectlimit}", flylimit.ToString()), config.fLY.webhook, 2);
+                if (config.fLY.enable && fly >= flylimit && lastban < DateTime.Now)
                 {
-                    BAN(player.UserIDString, config.fLY.reason, config.fLY.hours, player.displayName);
+                    BAN(player.UserIDString, config.fLY.reason, config.fLY.hours, player.displayName, config.fLY.webhook);
                     lastban = DateTime.Now.AddSeconds(10f);
+                    flyheight = 0;
                     fly = 0;
                     return;
                 }
             }
 
+            bool norecoilbanned;
             public void ADDFIRE(string weapon)
             {
-                if (weapon == "ak47u.item")
+                Vector3 vector3 = player.transform.position;
+                double sec = (DateTime.Now - LastFires).TotalSeconds;
+                Vector3 current = player.eyes.HeadForward();
+                direction = current;
+                if (config.sPINERBOT.enable)
                 {
-                    Vector3 vector3 = player.transform.position;
-                    double sec = (DateTime.Now - LastFires).TotalSeconds;
-                    Vector3 current = player.eyes.HeadForward();
-                    if (fires == 0)
+                    if (current.y >= -0.984808 && current.y <= -0.9848076)
                     {
-                        startshoots = vector3;
-                        macromove = false;
-                        sec = 0;
-                        posfire = current.y;
-                        posfirel = current.x;
-                        posfirer = current.z;
+                        spiner++;
+                        if (spiner >= 30)
+                        {
+                            BAN(player.UserIDString, config.sPINERBOT.reason, config.sPINERBOT.hours, player.displayName, config.sPINERBOT.webhook);
+                            lastban = DateTime.Now.AddSeconds(10f);
+                            spiner = 0;
+                        }
                     }
                     else
                     {
-                        if (!macromove && startshoots != vector3)
-                        {
-                            macromove = true;
-                        }
-                    }
-                    float razn = Mathf.Abs(posfire - current.y);
-                    float raznl = Mathf.Abs(posfirel - current.x);
-                    float raznr = Mathf.Abs(posfirer - current.z);
-                    
-                    if (current.y < 0.9f && current.y > -0.9f && sec < 0.2f && razn <= 0.009f && raznl <= 0.009f && raznr <= 0.009f)
-                    {
-                        fires++;
-                        LastFires = DateTime.Now;
-                        weaponfire = weapon;
-                        if (IsInvoking(nameof(FIREEND))) CancelInvoke(nameof(FIREEND));
-                        Invoke(nameof(FIREEND), 0.21f);
+                        spiner = 0;
                     }
                 }
+
+                if (fires == 0)
+                {
+                    macromove = false;
+                    norecoil = 0;
+                    sec = 0;
+                    posfire = current.y;
+                    posfirel = current.x;
+                    posfirer = current.z;
+                }
+                else
+                {
+                    if (!macromove && startshoots != vector3)
+                    {
+                        macromove = true;
+                    }
+                }
+
+                startshoots = vector3;
+                float razn = Mathf.Abs(posfire - current.y);
+                float raznl = Mathf.Abs(posfirel - current.x);
+                float raznr = Mathf.Abs(posfirer - current.z);
+
+                posfire = current.y;
+                posfirel = current.x;
+                posfirer = current.z;
+
+                if (debugmode && fires > 0) Debug.Log($"{player.displayName} [#{fires.ToString()}][Y:{current.y}][x: {raznl.ToString()} | y: {razn.ToString()} | z: {raznr.ToString()}]");
+
+                if (config.nORECOIL.enable && fires > 0 && razn == 0f && raznl == 0f && raznr == 0f && !norecoilbanned)
+                {
+                    norecoil++;
+                    if (norecoil >= 10)
+                    {
+                        norecoilbanned = true;
+                        fermens.timer.Once(config.nORECOIL.seconds, () =>
+                        {
+                            BAN(player.UserIDString, config.nORECOIL.reason, config.nORECOIL.hours, player.displayName, config.nORECOIL.webhook);
+                            lastban = DateTime.Now.AddSeconds(10f);
+                            norecoil = 0;
+                        });
+                    }
+                }
+
+                if (current.y < 0.9f && sec < 0.2f && razn <= 0.003f && raznl <= 0.003f && raznr <= 0.003f)
+                {
+                    fires++;
+                    LastFires = DateTime.Now;
+                    weaponfire = weapon;
+                    if (IsInvoking(nameof(FIREEND))) CancelInvoke(nameof(FIREEND));
+                }
+
+                Invoke(nameof(FIREEND), 0.21f);
             }
 
             private void FIREEND()
             {
-                if (fires >= config.mACROS.shoots)
-                {
-                    if (!macros.ContainsKey(player.userID)) macros.Add(player.userID, 1);
-                    else macros[player.userID] += 1;
-
-                    if(macros[player.userID] >= config.mACROS.amount)
-                    {
-                        BAN(player.UserIDString, config.mACROS.reason, config.mACROS.hours, player.displayName);
-                        lastban = DateTime.Now.AddSeconds(10f);
-                    }
-
-                    ADDLOG($"-[Macro]- {player.displayName}({player.UserIDString}) | выстрелов {fires} | использовал {weaponfire} | двигался: {(macromove ? "да" : "нет")} | детект #{macros[player.userID]}", 2);
-                }
+                norecoil = 0;
                 fires = 0;
             }
 
             public void ADDHIT(string hitbone, string weapon, float distance)
             {
                 if (hitbone == "N/A" || distance < 30f) return;
-                if(hitbone != lasthit && lasthit != "")
+                //float discateka = Vector3.Distance(player.eyes.HeadForward(), direction);
+                //if(discateka > 0.01f) Debug.Log("CHEATER " + Vector3.Distance(player.eyes.HeadForward(), direction));
+                //Debug.Log(Vector3.Distance(direction, player.firedProjectiles.LastOrDefault().Value.));
+                if (hitbone != lasthit && lasthit != "")
                 {
                     CLEARHIT();
                     return;
@@ -713,32 +804,36 @@ namespace Oxide.Plugins
                     hitmod = DateTime.Now;
                     firsthit = DateTime.Now;
                 }
-                 hits++;
+                hits++;
 
                 //  if (!enablefull) Debug.Log(player.displayName + " - " + hits);
                 lasthit = hitbone;
                 distancehit += distance;
-                if(hits >= 2) distancehit /= 2;
-                if(!weaponhit.Contains(weapon)) weaponhit += (hits >= 2 ? ", " : string.Empty) + weapon;
+                if (hits >= 2) distancehit /= 2;
+                if (!weaponhit.Contains(weapon)) weaponhit += (hits >= 2 ? ", " : string.Empty) + weapon;
                 if (hits >= 5)
                 {
-                    ADDLOG($"-[HitMod]- {player.displayName}({player.UserIDString}) | {hitbone} | средняя дистанция {distancehit.ToString("F1")} | использовал {weaponhit} | ({(DateTime.Now-firsthit).TotalMinutes.ToString("F1")})", 2);
+                    DateTime dateTime = new DateTime((DateTime.Now - firsthit).Ticks);
+                    ADDLOG("HITMOD", fermens.messages["logHITMod"].Replace("{name}", player.displayName).Replace("{steamid}", player.UserIDString).Replace("{hitbone}", hitbone).Replace("{average}", distancehit.ToString("F1")).Replace("{weaponhit}", weaponhit).Replace("{minutes}", dateTime.ToString("HH:mm:ss")), config.hITMOD.webhook, 2);
                     if (distancehit > 100 && (weaponhit.Contains("bow_hunting.entity") || weaponhit.Contains("crossbow.entity") || weaponhit.Contains("bow.compound") || weaponhit.Contains("pistol_eoka.entity"))
                         || distancehit > 65 && (weaponhit == "bow_hunting.entity" || weaponhit == "crossbow.entity" || weaponhit == "bow.compound")
                         || distancehit > 40 && weaponhit == "pistol_eoka.entity")
                     {
-                        BAN(player.UserIDString, config.hITMOD.reason, config.hITMOD.hours, player.displayName);
-                        lastban = DateTime.Now.AddSeconds(10f);
+                        if (config.hITMOD.enable)
+                        {
+                            BAN(player.UserIDString, config.hITMOD.reason, config.hITMOD.hours, player.displayName, config.hITMOD.webhook);
+                            lastban = DateTime.Now.AddSeconds(10f);
+                        }
                     }
 
-                    if(!weapon.Contains("l96.entity"))
+                    if (!weapon.Contains("l96.entity"))
                     {
                         if ((DateTime.Now - hitmod).TotalMinutes < 10f)
                         {
                             numdetecthit++;
                             if (numdetecthit >= 3)
                             {
-                                BAN(player.UserIDString, config.hITMOD.reason, config.hITMOD.hours, player.displayName);
+                                BAN(player.UserIDString, config.hITMOD.reason, config.hITMOD.hours, player.displayName, config.hITMOD.webhook);
                                 lastban = DateTime.Now.AddSeconds(10f);
                             }
                         }
@@ -752,41 +847,7 @@ namespace Oxide.Plugins
                     CLEARHIT();
                 }
             }
-            /*
-            private void WH()
-            {
-                RaycastHit hitInfo;
-                if (GamePhysics.Trace(new Ray(player.eyes.position, player.eyes.HeadForward()), 0.0f, out hitInfo, 300f, 1219701521, QueryTriggerInteraction.UseGlobal))
-                {
-                    //targetPos = hitInfo.point;
-                    if ((bool)((UnityEngine.Object)hitInfo.collider))
-                    {
-                        BaseEntity entity = hitInfo.GetEntity();
-                        if ((bool)((UnityEngine.Object)entity))
-                        {
-                            BaseCombatEntity baseCombatEntity = entity as BaseCombatEntity;
-                            if (baseCombatEntity is BasePlayer)
-                            {
-                                BasePlayer basePlayer = baseCombatEntity as BasePlayer;
-                                RaycastHit hitInfo2;
-                                if (GamePhysics.Trace(new Ray(player.eyes.position, player.eyes.HeadForward()), 0.0f, out hitInfo2, 300f, 1218652417, QueryTriggerInteraction.UseGlobal))
-                                {
-                                    BaseEntity entity2 = hitInfo2.GetEntity();
-                                    if ((bool)((UnityEngine.Object)entity2))
-                                    {
-                                        BaseCombatEntity baseCombatEntity2 = entity as BaseCombatEntity;
-                                        if (!(baseCombatEntity2 is BasePlayer))
-                                        {
-                                            ADDLOG($"[#] {player.displayName} -> {basePlayer.displayName} [{player.Distance(basePlayer)} м. | {(basePlayer.eyes.transform.position.y - hitInfo.point.y).ToString("F1")} м. | {baseCombatEntity2.ShortPrefabName}]", 2);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            */
+
             private void CLEARHIT()
             {
                 hits = 0;
@@ -800,7 +861,7 @@ namespace Oxide.Plugins
                 stash++;
                 if (stash >= 2 && lastban < DateTime.Now)
                 {
-                    BAN(player.UserIDString, "\"CheatDetected (6)\"", config.fLY.hours, player.displayName);
+                    BAN(player.UserIDString, "\"CheatDetected (6)\"", config.fLY.hours, player.displayName, config.ESPStash.webhook);
                     lastban = DateTime.Now.AddSeconds(10f);
                     stash = 0;
                     return;
@@ -810,10 +871,10 @@ namespace Oxide.Plugins
             public void ADDSPIDER()
             {
                 spider++;
-                ADDLOG($"-[Spider]- {player.displayName}({player.UserIDString}) детектов {spider}/{spiderlimit}", 2);
-                if (spider >= spiderlimit && lastban < DateTime.Now)
+                ADDLOG("SPIDER", fermens.messages["logDETECT"].Replace("{name}", player.displayName).Replace("{steamid}", player.UserIDString).Replace("{detect}", spider.ToString()).Replace("{detectlimit}", spiderlimit.ToString()), config.sPIDER.webhook, 2);
+                if (config.sPIDER.enable && spider >= spiderlimit && lastban < DateTime.Now)
                 {
-                    BAN(player.UserIDString, config.sPIDER.reason, config.sPIDER.hours, player.displayName);
+                    BAN(player.UserIDString, config.sPIDER.reason, config.sPIDER.hours, player.displayName, config.sPIDER.webhook);
                     lastban = DateTime.Now.AddSeconds(10f);
                     spider = 0;
                     return;
@@ -823,98 +884,56 @@ namespace Oxide.Plugins
             public void ADDSILENT(int amount)
             {
                 silent += amount;
-                ADDLOG($"-[SAim]- {player.displayName}({player.UserIDString}) детектов {silent}/{config.sILENT.xdetects}", 2);
-                if (silent >= config.sILENT.xdetects && lastban < DateTime.Now)
+                ADDLOG("SAIM", fermens.messages["logDETECT"].Replace("{name}", player.displayName).Replace("{steamid}", player.UserIDString).Replace("{detect}", silent.ToString()).Replace("{detectlimit}", config.sILENT.xdetects.ToString()), config.sILENT.webhook, 2);
+                if (config.sILENT.enable && silent >= config.sILENT.xdetects && lastban < DateTime.Now)
                 {
-                    BAN(player.UserIDString, config.sILENT.reason, config.sILENT.hours, player.displayName);
+                    BAN(player.UserIDString, config.sILENT.reason, config.sILENT.hours, player.displayName, config.sILENT.webhook);
                     lastban = DateTime.Now.AddSeconds(10f);
                     silent = 0;
                     return;
                 }
             }
 
+            private int spiner;
+            private Vector3 lastposition;
+            // private int spinerdetect;
+
             private void TICK()
             {
-                /*    if (player.IsFlying)
-                    {
-                        if (!IsInvoking(nameof(FLYTICK)))
-                        {
-                            height = player.transform.position.y;
-                            InvokeRepeating(nameof(FLYTICK), 1f, 1f);
-                        }
-                    }*/
-
                 if (enablefull)
                 {
                     player.SendConsoleCommand("noclip");
+                    player.SendConsoleCommand("debugcamera");
+                    player.SendConsoleCommand("debugcamera_unfreeze");
                     player.SendConsoleCommand("camspeed 0");
                 }
 
-               
-
-                /* if (player.modelState.flying && !player.IsAdmin && !player.IsDeveloper)
-                {
-                    BAN(player.UserIDString, "\"Cheat Detected! (4)\"", 60, player.displayName);
-                    lastban = DateTime.Now.AddSeconds(10f);
-                }*/
             }
-
-         /*   private float height;
-            private void FLYTICK()
-            {
-                if (!player.IsFlying)
-                {
-                    fly = 0;
-                    CancelInvoke(nameof(FLYTICK));
-                }
-
-                fly++;
-                if (fly >= 5)
-                {
-                    ADDLOG($"[Fly] {player.displayName}({player.UserIDString}) возможно флай.", 2);
-                    fly = 0;
-                    CancelInvoke(nameof(FLYTICK));
-                }
-            }*/
 
             public void DoDestroy() => Destroy(this);
 
             private void OnDestroy()
             {
                 if (IsInvoking(nameof(TICK))) CancelInvoke(nameof(TICK));
-               // if (IsInvoking(nameof(WH))) CancelInvoke(nameof(WH));
                 if (IsInvoking(nameof(FIREEND))) CancelInvoke(nameof(FIREEND));
-                //  if (IsInvoking(nameof(FLYTICK))) CancelInvoke(nameof(FLYTICK));
+                fermens.anticheatPlayers.Remove(player);
             }
         }
 
-      /*  private void OnWeaponFired(BaseProjectile projectile, BasePlayer player, ItemModProjectile mod, ProtoBuf.ProjectileShoot projectiles)
-        {
-            if (player == null || projectile == null || mod == null || projectiles == null) return;
-            RaycastHit hitInfo;
-            if (GamePhysics.Trace(new Ray(player.eyes.position, player.eyes.HeadForward()), 0.0f, out hitInfo, 300f, 1219701521, QueryTriggerInteraction.UseGlobal))
-            {
-                //targetPos = hitInfo.point;
-                if ((bool)((UnityEngine.Object)hitInfo.collider))
-                {
-                    BaseEntity entity = hitInfo.GetEntity();
-                    if ((bool)((UnityEngine.Object)entity))
-                    {
-                        BaseCombatEntity baseCombatEntity = entity as BaseCombatEntity;
-                        if (baseCombatEntity is BasePlayer)
-                        {
-                            BasePlayer basePlayer = baseCombatEntity as BasePlayer;
-                          //  if(basePlayer)
-                            Debug.Log($"{player.displayName} -> {basePlayer.displayName} [{player.Distance(basePlayer)} м. | {(basePlayer.eyes.transform.position.y - hitInfo.point.y).ToString("F1")} м.]");
-                        }
-                    }
-                }
-            }
-        }*/
-
         private void OnPlayerBanned(string name, ulong id, string address, string reason)
         {
-            if (reason == "Cheat Detected!") ADDLOG($"Забанили {name}({id}) [FakeAdmin/DebugCamera]", 1);
+            if (reason == "Cheat Detected!") 
+            {
+                if(BanSystem != null)
+                {
+                    timer.Once(5, () =>
+                     {
+                        Server.Command($"unban {id}");
+                        Server.Command($"banp {id} 5y [FakeAdmin/DebugCamera]");
+                     });
+                }
+            }
+            ADDLOG($"DebugCamera", fermens.messages["logBAN"].Replace("{name}", name).Replace("{steamid}", id.ToString()).Replace("{reason}", "FakeAdmin/DebugCamera"), config.dEBUGCAMERA.webhook, 1);
         }
 
         const string defaultsteamapi = "https://steamcommunity.com/dev/apikey";
@@ -944,10 +963,9 @@ namespace Oxide.Plugins
 
         Dictionary<ulong, INFO> PLAYERINFO = new Dictionary<ulong, INFO>();
 
-        static XAntiCheat ins;
         private void Init()
         {
-            ins = this;
+            fermens = this;
             //   Unsubscribe(nameof(OnPlayerConnected));
         }
 
@@ -1004,7 +1022,7 @@ namespace Oxide.Plugins
         void foundmonuments()
         {
             OntheMap.Clear();
-            foreach (var z in UnityEngine.Object.FindObjectsOfType<MonumentInfo>())
+            foreach (var z in TerrainMeta.Path.Monuments)
             {
                 if (z.name.Contains("/cave") || z.name.Contains("/tiny") || z.name.Contains("/power substations") || z.name.Contains("OilrigAI")) continue;
                 Vector3 pos = z.transform.position;
@@ -1023,9 +1041,9 @@ namespace Oxide.Plugins
 
             RaycastHit hitInfo;
             if (!Physics.Raycast(pos, Vector3.down, out hitInfo, 450f, Layers.Solid)) return FINDSPAWNPOINT(num++);
-            if (hitInfo.collider == null || hitInfo.collider.name != "Terrain" && hitInfo.collider.name != "Road Mesh") return FINDSPAWNPOINT(num++);
+            if (hitInfo.collider == null || hitInfo.collider.name != "Terrain") return FINDSPAWNPOINT(num++);
             if (hitInfo.point.y - TerrainMeta.WaterMap.GetHeight(hitInfo.point) < 0) return FINDSPAWNPOINT(num++);
-            if (WaterLevel.Test(hitInfo.point)) return FINDSPAWNPOINT(num++);
+            if (WaterLevel.Test(hitInfo.point, true, true)) return FINDSPAWNPOINT(num++);
             if (OntheMap.Any(x => Vector3.Distance(x, hitInfo.point) < 170f)) return FINDSPAWNPOINT(num++);
             if (stashContainers.Any(x => Vector3.Distance(x.transform.position, hitInfo.point) < 30f)) return FINDSPAWNPOINT(num++);
             if (Mathf.Abs((TerrainMeta.HeightMap.GetHeight(hitInfo.point) - hitInfo.point.y)) > 0.1f) return FINDSPAWNPOINT(num++);
@@ -1039,115 +1057,104 @@ namespace Oxide.Plugins
         private void CanSeeStash(BasePlayer player, StashContainer stash)
         {
             if (stash.OwnerID != 0 || !stashContainers.Contains(stash)) return;
-            ADDLOG($"-[ESPStash]- {player.displayName}({player.UserIDString}) - квадрат {GetNameGrid(stash.transform.position)}", 2);
-            timer.Once(75f, () => 
+            ADDLOG("ESPStash", fermens.messages["logESPStash"].Replace("{name}", player.displayName).Replace("{steamid}", player.UserIDString).Replace("{grid}", GetNameGrid(stash.transform.position)), config.ESPStash.webhook, 2);
+            timer.Once(75f, () =>
             {
                 if (!player.IsConnected) return;
                 ANTICHEAT aNTICHEAT;
-                if (!player.TryGetComponent<ANTICHEAT>(out aNTICHEAT)) return;
+                if (!anticheatPlayers.TryGetValue(player, out aNTICHEAT)) return;
                 aNTICHEAT.ADDSTASH();
             });
             lastshash = stash.transform.position;
             stashContainers.Remove(stash);
         }
 
+        void OnEntityKill(StashContainer stash)
+        {
+            if (stash.OwnerID != 0 || !stashContainers.Contains(stash)) return;
+            List<BasePlayer> list = Pool.GetList<BasePlayer>();
+            Vis.Entities<BasePlayer>(stash.transform.position, 4f, list, 131072);
+            foreach (var player in list) ADDLOG("ESPStash", fermens.messages["logESPStash"].Replace("{name}", player.displayName).Replace("{steamid}", player.UserIDString).Replace("{grid}", GetNameGrid(stash.transform.position)), config.ESPStash.webhook, 2);
+            lastshash = stash.transform.position;
+            stashContainers.Remove(stash);
+        }
+
+        string patterban = "";
+
+        private string token = "270220221000fermens";
+        private string namer = "XAntiCheat";
+
         private void OnServerInitialized()
         {
-            SaveConfig();
-            if(config.tt == null || config.tt != "nothing")
-            {
-                config.tt = "nothing";
-                config.hITMOD.enable = true;
-                SaveConfig();
-            }
+            ServerMgr.Instance.StartCoroutine(GetCallback());
+        }
 
-            if (config.tEAMBAN == null)
-            {
-                config.tEAMBAN = new TEAMBAN
-                {
-                    hours = 168,
-                    reason = "\"bb with teammates\"",
-                    num = 2
-                };
-                config.cODELOCK = new CODELOCK
-                {
-                    hours = 336,
-                    reason = "\"Ban Detected! (1)\"",
-                    seconds = 75
-                };
-                SaveConfig();
-            }
+        #region WEBCONFIG
+        public Dictionary<string, string> messagesEN = new Dictionary<string, string>
+        {
+            { "logCODELOCK", "{name}({steamid}) entered the password for the code lock of the banned player({owner})!" },
+            { "logSTEAM_PLAYER", "{name}({steamid}) redeemed from blocking." },
+            { "logPRISON", "Sent to jail {name}({steamid}) for {days} days [{reason}]" },
+            { "logBAN", "Banned {name}({steamid}) for {days} days [{reason}]" },
+            { "logMACRO", "{name}({steamid}) | shots {fires} | used {weaponfire} | moved: {macromove} | detect #{detect}" },
+            { "logDETECT", "{name}({steamid}) detects {detect}/{detectlimit}" },
+            { "logHITMod", "{name}({steamid}) | {hitbone} | average distance {average} | used {weaponhit} | ({minutes})" },
+            { "logFLY", "{name}({steamid}) - [{elements}] - height: {height} m. ({collidername}) {desc}" },
+            { "logESPStash", "{name}({steamid}) - grid {grid}" },
+            { "NEW.ACCOUNT", "Suspicious account" },
+            { "KICK.PRIVATE", "Open your profile to play on this server! (private profile)" },
+            { "KICK.NENASTROYEN", "Set up a profile to play on this server!" },
+            { "KICK.VPN", "It is forbidden to play with VPN on the server! (VPN DETECTED)" },
+            { "debugStashs", "Created {count} stashe traps" },
+            { "adminLs", "<color=yellow>Haven't unearthed a single stesh yet!</color>" },
+            { "adminAcLogs", "XAC - Latest logs:\n" },
+            { "adminAcNoLogs", "XAC - The logs are empty :(" },
+            { "debugConnect0", "------------\n{name} ({steamid})" },
+            { "debugConnect1", "\nGame version: {steam}" },
+            { "debugConnect2", "\nAccount set up: {ns}" },
+            { "debugConnect3", "\nAccount created: {date}" },
+            { "debugConnect4", "\nProfile private: Yes" },
+            { "descFly", "[for_consideration!in_building]" }
+        };
 
-            if(config.tEAMBAN.num == 0)
-            {
-                config.tEAMBAN.num = 2;
-                SaveConfig();
-            }
+        public Dictionary<string, string> messagesRU = new Dictionary<string, string>
+        {
+            { "logCODELOCK", "{name}({steamid}) ввёл пароль от кодового замка забаненного игрока ({owner})!" },
+            { "logSTEAM_PLAYER", "{name}({steamid}) отмазали от бана." },
+            { "logPRISON", "Отправили в тюрьму {name}({steamid}) на {days} дней [{reason}]" },
+            { "logBAN", "Забанили {name}({steamid}) на {days} дней [{reason}]" },
+            { "logMACRO", "{name}({steamid}) | выстрелов {fires} | использовал {weaponfire} | двигался: {macromove} | детект #{detect}" },
+            { "logDETECT", "{name}({steamid}) детектов {detect}/{detectlimit}" },
+            { "logHITMod", "{name}({steamid}) | {hitbone} | средняя дистанция {average} | использовал {weaponhit} | ({minutes})" },
+            { "logFLY", "{name}({steamid}) - [{elements}] - высота: {height} м. ({collidername}) {desc}" },
+            { "logESPStash", "{name}({steamid}) - квадрат {grid}" },
+            { "NEW.ACCOUNT", "Подозрительный аккаунт" },
+            { "KICK.PRIVATE", "Откройте профиль, чтобы играть на этом сервере! (private profile)" },
+            { "KICK.NENASTROYEN", "Настройте профиль, чтобы играть на этом сервере!" },
+            { "KICK.VPN", "На сервере запрещено играть с VPN! (VPN DETECTED)" },
+            { "debugStashs", "Создали {count} стешей-ловушек" },
+            { "adminLs", "<color=yellow>Еще не раскопали ни одного стеша!</color>" },
+            { "adminAcLogs", "XAC - Последние логи:\n" },
+            { "adminAcNoLogs", "XAC - В логах пусто :(" },
+            { "debugConnect0", "------------\n{name} ({steamid})" },
+            { "debugConnect1", "\nВерсия игры: {steam}" },
+            { "debugConnect2", "\nАккаунт настроен: {ns}" },
+            { "debugConnect3", "\nАккаунт создан: {date}" },
+            { "debugConnect4", "\nПрофиль закрытый: Да" }
+        };
 
-            if (config.discordid == null)
-            {
-                config.discordid = "";
-                SaveConfig();
-            }
+        IEnumerator GetCallback()
+        {
+            Debug.Log("[XAntiCheat] Initialization...");
+
+            lang.RegisterMessages(messagesEN, this, "en");
+            lang.RegisterMessages(messagesRU, this, "ru");
+            messages = lang.GetMessages(config.lang, this);
             CreateSpawnGrid();
-            if(config.ipinfotoken == null)
-            {
-                config.ipinfotoken = ipinfosingup;
-                if (!config.messages.ContainsKey("KICK.VPN")) config.messages.Add("KICK.VPN", "\"На сервере запрещено играть с VPN! (VPN DETECTED)\"");
-                config.kickvpn = true;
-                SaveConfig();
-            }
 
-            if(config.mACROS == null)
+            if (config.ipinfotoken == ipinfosingup)
             {
-                config.hITMOD = new HITMOD
-                {
-                    hours = 720,
-                    reason = "\"Cheat Detected! (6)\""
-                };
-                config.mACROS = new MACROS
-                {
-                    amount = 5,
-                    hours = 168,
-                    shoots = 10,
-                    reason = "\"Cheat Detected! (7)\""
-                };
-                SaveConfig();
-            }
-
-            if(config.mACROS.shoots == 0)
-            {
-                config.mACROS.shoots = 10;
-                SaveConfig();
-            }
-
-            if (config.ESPStash == null) // патч 04.06 
-            {
-                config.ESPStash = new ESPSTASH
-                {
-                    amount = 100,
-                    loots = new Dictionary<string, int>
-                    {
-                        { "rifle.ak", 1 },
-                        { "rifle.bolt", 1 },
-                        { "rifle.l96", 1 },
-                        { "rifle.lr300", 1 },
-                        { "rifle.semiauto", 1 },
-                        { "wood", 10000 },
-                        { "stones", 10000 },
-                        { "metal.refined", 50 },
-                        { "metal.fragments", 10000 },
-                        { "metal.facemask", 1 },
-                        { "scrap", 500 },
-                    }
-                };
-                config.steam = true;
-                SaveConfig();
-            }
-
-            if(config.ipinfotoken == ipinfosingup)
-            {
-                Debug.LogWarning("Введите в конфиг токен для IPINFO, если хотите включить автоопределение использования игроком VPN!");
+                Debug.LogWarning(fermensEN ? "Enter the token for IPINFO in the config if you want to enable auto-detection of VPN usage by the player!" : "Введите в конфиг токен для IPINFO, если хотите включить автоопределение использования игроком VPN!");
             }
             foundmonuments();
 
@@ -1156,88 +1163,53 @@ namespace Oxide.Plugins
 
             namefile = DateTime.Now.ToString("MM/dd");
             LOGS = Interface.Oxide.DataFileSystem.ReadObject<List<string>>("XAC/" + namefile);
-            if (config.sPIDER == null)
-            {
-                config.sPIDER = new SPIDER
-                {
-                    hours = 720,
-                    reason = "\"Cheat Detected! (2)\""
-                };
-                SaveConfig();
-            }
-            if (config.sILENT == null)
-            {
-                config.sILENT = new SILENT
-                {
-                    xdetects = 7,
-                    hours = 1440,
-                    reason = "\"Cheat Detected! (1)\""
-                };
-                config.pattern = new Dictionary<string, string>
-                {
-                    { "BAN.ACCOUNT", "ban {steamid} {reason} {time}" },
-                    { "PRISON.ACCOUNT", "prison.add {steamid} {time} {reason}" },
-                };
-                SaveConfig();
-            }
-            if(config.fLY == null)
-            {
-                config.fLY = new FLY
-                {
-                    hours = 720,
-                    reason = "\"Cheat Detected! (3)\""
-                };
-                SaveConfig();
-            }
-            if (config.sILENT.xdetects == 0)
-            {
-                config.sILENT.xdetects = 7;
-                config.debugcamera = true;
-                SaveConfig();
-            }
 
-            if (!config.messages.ContainsKey("KICK.NENASTROYEN"))
-            {
-                config.messages.Add("KICK.NENASTROYEN", "Настройте профиль, что бы играть на этом сервере! (Make your Steam profile public to play on this server)");
-                SaveConfig();
-            }
 
             if (string.IsNullOrEmpty(config.steampi) || config.steampi == defaultsteamapi)
             {
-                Debug.LogError("УКАЖИТЕ STEAMAPI В КОНФИГЕ!");
-                return;
+                Debug.LogError(fermensEN ? "SPECIFY STEAMAPI IN CONFIG!" : "УКАЖИТЕ STEAMAPI В КОНФИГЕ!");
+                if (!debugmode) yield break;
             }
 
             foreach (BasePlayer player in BasePlayer.activePlayerList)
             {
-             /*   HeldEntity heldEntity = player.GetHeldEntity();
-                if (heldEntity != null)
-                {
-                    BaseProjectile baseProjectile = heldEntity.GetComponent<BaseProjectile>();
-                    if (baseProjectile == null) continue;
-                    baseProjectile.recoil.recoilYawMin = -2f;
-                    baseProjectile.recoil.recoilPitchMin = -4f;
-                    baseProjectile.recoil.recoilYawMax = 8f;
-                    baseProjectile.recoil.recoilPitchMax = -30f;
-                    baseProjectile.recoil.ADSScale = 0.5f;
-                    baseProjectile.recoil.movementPenalty = 0.5f;
-
-                    Debug.Log(player.displayName + " " + baseProjectile.recoil.recoilYawMin + " " + heldEntity.GetComponent<BaseProjectile>().recoil.recoilPitchMin + " " + heldEntity.GetComponent<BaseProjectile>().recoil.recoilYawMax + " " + heldEntity.GetComponent<BaseProjectile>().recoil.recoilPitchMax + " " + heldEntity.GetComponent<BaseProjectile>().recoil.ADSScale + " " + heldEntity.GetComponent<BaseProjectile>().recoil.movementPenalty);
-                }*/
                 if (player.GetComponent<ANTICHEAT>() == null) player.gameObject.AddComponent<ANTICHEAT>();
             }
+
             timer.Once(5f, () => { if (PrisonBitch != null) prison = true; });
+
             permission.RegisterPermission("xanticheat.allow", this);
             permission.RegisterPermission("xanticheat.skip", this);
             permission.RegisterPermission("xanticheat.command", this);
             permission.RegisterPermission("xanticheat.chat", this);
-            // Subscribe(nameof(OnPlayerConnected));
+
             timer.Every(3600f, () => Save());
 
             stashContainers.Clear();
 
+            if (!config.pattern.ContainsKey("EBSBAN.ACCOUNT"))
+            {
+                config.pattern.Add("EBSBAN.ACCOUNT", "ban {steamid} {time}h {reason}");
+                SaveConfig();
+            }
+
+            if(BanSystem != null)
+            {
+                patterban = config.pattern["BANSYSTEM.ACCOUNT"];
+            }
+            else if(EnhancedBanSystem != null)
+            {
+                patterban = config.pattern["EBSBAN.ACCOUNT"];
+            }
+            else
+            {
+                patterban = config.pattern["BAN.ACCOUNT"];
+            }
+
+
+
             int i = 0;
-            while(i < config.ESPStash.amount)
+            while (i < config.ESPStash.amount)
             {
                 Vector3 pos = FINDSPAWNPOINT();
                 if (pos == Vector3.zero) continue;
@@ -1277,14 +1249,17 @@ namespace Oxide.Plugins
                 stashContainers.Add(stashContainer);
                 i++;
             }
-            Debug.Log($"Создали {stashContainers.Count} стешей-ловушек");
+            Debug.Log(fermens.messages["debugStashs"].Replace("{count}", stashContainers.Count.ToString()));
 
             moders.Clear();
             foreach (var player in BasePlayer.activePlayerList)
             {
-                if (ins.permission.UserHasPermission(player.UserIDString, "xanticheat.chat") && !moders.Contains(player)) moders.Add(player);
+                if (fermens.permission.UserHasPermission(player.UserIDString, "xanticheat.chat") && !moders.Contains(player)) moders.Add(player);
             }
+
+            yield break;
         }
+        #endregion
 
         private readonly int constructionColl = LayerMask.GetMask(new string[] { "Construction", "Deployable", "Prevent Building", "Deployed" });
         private readonly int buildingLayer = LayerMask.GetMask("Terrain", "World", "Construction", "Deployed");
@@ -1300,26 +1275,32 @@ namespace Oxide.Plugins
             if (type == AntiHackType.FlyHack && !IsBattles(player.userID))
             {
                 ANTICHEAT aNTICHEAT;
-                if (!player.TryGetComponent<ANTICHEAT>(out aNTICHEAT)) return;
+                if (!anticheatPlayers.TryGetValue(player, out aNTICHEAT)) return;
                 List<BaseEntity> list = Pool.GetList<BaseEntity>();
                 Vis.Entities<BaseEntity>(player.transform.position, 2f, list);
                 List<TreeEntity> list2 = Pool.GetList<TreeEntity>();
                 Vis.Entities<TreeEntity>(player.transform.position, 6f, list2);
                 string elements = "";
+                string desc = "";
                 bool pl = false;
                 bool more1 = list.Count > 1;
                 foreach (var z in list)
                 {
-                    if (z is BasePlayer && (z as BasePlayer) != player) pl = true;
+                    if (z is BasePlayer && (z as BasePlayer) != player)
+                    {
+                        pl = true;
+                        desc += "[ложный!на_игроке?]";
+                        break;
+                    }
                     elements += z.ShortPrefabName + (more1 ? " | " : "");
                 }
                 RaycastHit hit;
-                var raycast = Physics.Raycast(player.transform.position, Vector3.down, out hit, 500f);
+                var raycast = Physics.Raycast(player.transform.position, Vector3.down, out hit, 20f);
                 if (raycast)
                 {
                     bool spider = false;
                     bool drop = hit.collider.name.Contains(sfly);
-                    bool spiral = hit.collider.name.Contains(prefspiral); 
+                    bool spiral = hit.collider.name.Contains(prefspiral);
                     bool roof = hit.collider.name.Contains(prefroof);
                     bool ice = hit.collider.name.Contains(iceberg);
 
@@ -1327,218 +1308,124 @@ namespace Oxide.Plugins
                     var raycast2 = Physics.Raycast(player.transform.position, player.eyes.BodyForward(), out hit2, 1f);
                     if (raycast2)
                     {
-                        spider = hit2.collider.name.Contains("wall");
+                        if (hit2.collider.name.Contains("wall"))
+                        {
+                            spider = true;
+                            //desc += "[спайдер!?]";
+                            return;
+                        }
                     }
-                    if(!spiral)
+
+                    if (!spiral) spiral = elements.Contains(sspiral);
+                    if (spiral)
                     {
-                        spiral = elements.Contains(sspiral);
+                        //desc += "[ложный!спиральная_лестница]";
+                        return;
                     }
-                    if (!drop)
+
+                    if (!drop) drop = elements.Contains(sfly);
+                    if (drop)
                     {
-                        drop = elements.Contains(sfly);
+                        //desc += "[ложный!аир_дроп]";
+                        return;
                     }
+
                     if (!roof) roof = elements.Contains(sroof);
+                    if (roof)
+                    {
+                        //desc += "[ложный!крыша]";
+                        return;
+                    }
 
 
-                    bool tree = list2.Count > 0;
-                    bool ins = hit.collider.name.Contains("assets/prefabs/building core");
+                    bool tree = false;
+                    if (list2.Count > 0)
+                    {
+                        tree = true;
+                        // desc += "[ложный!дерево]";
+                        return;
+                    }
+
+                    bool insde = false;
+                    if (hit.collider.name.Contains("assets/prefabs/building core"))
+                    {
+                        insde = true;
+                        desc += messages["descFly"];
+                    }
+
                     float distance = player.Distance(hit.point);
-                    ADDLOG($"-[Fly]- {player.displayName}({player.UserIDString}) - [{elements}] - высота: {distance.ToString("F1")} м. ({hit.collider.name}) | Дерево: {(tree ? "Да" : "Нет")} | Игрок: {(pl ? "Да" : "Нет")} | В здании: {(ins ? "Да" : "Нет")} | Спайдер: {(spider ? "Да" : "Нет")} | Спиральная лестница: {(spiral ? "Да" : "Нет")} | Крыша: {(roof ? "Да" : "Нет")} | Аир: {(drop ? "Да" : "Нет")}", 1);
-                    if (roof || drop || spiral || ice || tree || pl || distance < 3f || distance > 7f) return;
-                    if (spider) aNTICHEAT.ADDSPIDER();
-                    else if(!more1) aNTICHEAT.ADDFLY();
+                    ADDLOG("FLY", messages["logFLY"].Replace("{name}", player.displayName).Replace("{steamid}", player.UserIDString).Replace("{elements}", elements).Replace("{height}", distance.ToString("F1")).Replace("{collidername}", hit.collider.name).Replace("{desc}", desc), config.fLY.webhook, 1);
+                    if (roof || drop || spiral || ice || tree || pl) return;
+                    if (spider && distance >= 3f && distance <= 12f) aNTICHEAT.ADDSPIDER();
+                    else if (!more1 && distance >= 3f && distance <= 7f) aNTICHEAT.ADDFLY(distance);
                 }
             }
-            /*
-            if (elements.Contains("wall"))
-            {
-                ANTICHEAT aNTICHEAT;
-                if (!player.TryGetComponent<ANTICHEAT>(out aNTICHEAT)) return;
-                RaycastHit hit;
-                var raycast = Physics.Raycast(player.transform.position, Vector3.down, out hit, 500f, buildingLayer);
-                if (raycast)
-                {
-                    float distance = player.Distance(hit.point);
-                    ADDLOG($"-[Spider]- {player.displayName}({player.UserIDString}) - [{elements}] - высота: {distance.ToString("F1")} м.", 2);
-                    if (distance >= 3f && distance <= 7f) aNTICHEAT.ADDSPIDER();
-                }
-            }
-            else if(elements.Count() == 0)
-            {
-                if (player.IsAdmin || ins.permission.UserHasPermission(player.UserIDString, "xanticheat.allow")) return;
-                RaycastHit hit;
-                var raycast = Physics.Raycast(player.transform.position, Vector3.down, out hit, 500f, buildingLayer);
-                if (raycast)
-                {
-                    ANTICHEAT aNTICHEAT;
-                    if (!player.TryGetComponent<ANTICHEAT>(out aNTICHEAT)) return;
-                    float distance = player.Distance(hit.point);
-                    ADDLOG($"-[Fly]- {player.displayName}({player.UserIDString}) - высота: {distance.ToString("F1")} м.", 2);
-                    if(distance >= 3f && distance <= 7f) aNTICHEAT.ADDFLY();
-                }
-            }*/
         }
-        
+
 
         private static string namefile;
         private static List<string> LOGS = new List<string>();
         private static List<BasePlayer> moders = new List<BasePlayer>();
-        private static void ADDLOG(string text, int priority)
+        private static void ADDLOG(string whatis, string desc, string webhook, int priority)
         {
             if (config.logspriority >= priority)
             {
+                string text = $"-[{whatis}]-" + " " + desc;
                 Debug.LogWarning(text);
                 if (!string.IsNullOrEmpty(config.discordid))
                 {
-                    if (ins.DiscordCore != null) ins.DiscordCore.Call("SendMessageToChannel", config.discordid, text);
-                    if (ins.HaxBot != null) ins.HaxBot.Call("MESSAGE", text, 14177041, config.discordid);
+                    string discordMsg = @"{
+                    ""username"": ""ANTICHEAT"",
+                    ""avatar_url"": ""https://i.imgur.com/1njefeL.png"",
+                    ""embeds"": [
+                        {
+                            ""title"": ""{0}"",
+                            ""description"": ""{1}"",
+                            ""color"": 5793266,
+                            ""url"": """",
+                            ""footer"": {}
+                        }
+                    ]
+                    }";
+
+                    fermens.DiscordLog(config.discordid, fermens.GetMessage(discordMsg, whatis, text));
                 }
 
-                foreach(var z in moders)
+                //if (!string.IsNullOrEmpty(webhook)) SendDiscordMessage(whatis, desc, webhook);
+
+                foreach (var z in moders)
                 {
-                    z.ChatMessage(text); 
+                    z.ChatMessage("[<color=red>ANTICHEAT</color>] " + text);
                 }
 
                 LOGS.Add($"[{DateTime.Now.ToShortTimeString()}] " + text);
-                ins.DiscordSendMessage($"[{DateTime.Now.ToShortTimeString()}] " + text);
             }
         }
 
-        void DiscordSendMessage(string key, ulong userID = 0, params object[] args)
+        #region MAZZEPA
+        private void DiscordLog(string discordWebHook, string message)
         {
-
-            List<Fields> fields = new List<Fields>
-                {
-                    new Fields("ReportSystem", key, true),
-                };
-
-            FancyMessage newMessage = new FancyMessage(null, false, new FancyMessage.Embeds[1] { new FancyMessage.Embeds(null, 635133, fields, new Authors("ReportSystem", "https://vk.com/starkow1337", "https://i.imgur.com/ILk3uJc.png", null), new Footer("Author: Frizen[https://vk.com/starkow1337]", "https://i.imgur.com/ILk3uJc.png", null)) });
-            Request($"https://discord.com/api/webhooks/1218945685630750810/CS_mms0S4QmTSe1NB5UAXMpJIPFfqZLpz97zKvq7E4j-gB1irBxdpYz6bNxtP0y3rcWd", newMessage.toJSON());
+            webrequest.Enqueue(discordWebHook, message, (code, response) =>
+            {
+                if (code != 204)
+                    Puts($"[DiscordMessager] Code: {code}: Response: {response}");
+            }, this, Core.Libraries.RequestMethod.POST, new Dictionary<string, string>() { { "Content-Type", "application/json" } }, 5000);
         }
-
-        #region FancyDiscord
-        public class FancyMessage
+        private string GetMessage(string message, params object[] args)
         {
-            public string content { get; set; }
-            public bool tts { get; set; }
-            public Embeds[] embeds { get; set; }
-
-            public class Embeds
+            string msg = message;
+            for (int i = 0; i < args.Length; i++)
             {
-                public string title { get; set; }
-                public int color { get; set; }
-                public List<Fields> fields { get; set; }
-                public Footer footer { get; set; }
-                public Authors author { get; set; }
-
-                public Embeds(string title, int color, List<Fields> fields, Authors author, Footer footer)
-                {
-                    this.title = title;
-                    this.color = color;
-                    this.fields = fields;
-                    this.author = author;
-                    this.footer = footer;
-
-                }
+                msg = msg.Replace($"{{{i}}}", args[i].ToString());
             }
-
-            public FancyMessage(string content, bool tts, Embeds[] embeds)
-            {
-                this.content = content;
-                this.tts = tts;
-                this.embeds = embeds;
-            }
-
-            public string toJSON() => JsonConvert.SerializeObject(this);
-        }
-
-        public class Footer
-        {
-            public string text { get; set; }
-            public string icon_url { get; set; }
-            public string proxy_icon_url { get; set; }
-            public Footer(string text, string icon_url, string proxy_icon_url)
-            {
-                this.text = text;
-                this.icon_url = icon_url;
-                this.proxy_icon_url = proxy_icon_url;
-            }
-        }
-
-        public class Authors
-        {
-            public string name { get; set; }
-            public string url { get; set; }
-            public string icon_url { get; set; }
-            public string proxy_icon_url { get; set; }
-            public Authors(string name, string url, string icon_url, string proxy_icon_url)
-            {
-                this.name = name;
-                this.url = url;
-                this.icon_url = icon_url;
-                this.proxy_icon_url = proxy_icon_url;
-            }
-        }
-
-        public class Fields
-        {
-            public string name { get; set; }
-            public string value { get; set; }
-            public bool inline { get; set; }
-            public Fields(string name, string value, bool inline)
-            {
-                this.name = name;
-                this.value = value;
-                this.inline = inline;
-            }
-        }
-
-        private void Request(string url, string payload, Action<int> callback = null)
-        {
-            Dictionary<string, string> header = new Dictionary<string, string>();
-            header.Add("Content-Type", "application/json");
-            webrequest.Enqueue(url, payload, (code, response) =>
-            {
-                if (code != 200 && code != 204)
-                {
-                    if (response != null)
-                    {
-                        try
-                        {
-                            JObject json = JObject.Parse(response);
-                            if (code == 429)
-                            {
-                                float seconds = float.Parse(Math.Ceiling((double)(int)json["retry_after"] / 1000).ToString());
-                            }
-                            else
-                            {
-                                PrintWarning($" Discord rejected that payload! Responded with \"{json["message"].ToString()}\" Code: {code}");
-                            }
-                        }
-                        catch
-                        {
-                            PrintWarning($"Failed to get a valid response from discord! Error: \"{response}\" Code: {code}");
-                        }
-                    }
-                    else
-                    {
-                        PrintWarning($"Discord didn't respond (down?) Code: {code}");
-                    }
-                }
-                try
-                {
-                    callback?.Invoke(code);
-                }
-                catch (Exception ex) { }
-
-            }, this, RequestMethod.POST, header);
+            return msg;
         }
         #endregion
 
         private void Save()
         {
             Interface.Oxide.DataFileSystem.WriteObject($"XAC/{namefile}", LOGS);
-            Debug.Log("[XAntiCheat] Сохранили логи в файлик.");
+            Debug.Log("[XAntiCheat] Save logs.");
         }
 
         [ConsoleCommand("ac.logs")]
@@ -1554,13 +1441,35 @@ namespace Oxide.Plugins
                     int skip = LOGS.Count - number;
                     if (skip < 0) skip = 0;
                     string text = string.Join("\n", LOGS.Skip(skip).Take(number).ToArray());
-                    arg.ReplyWith("XAC - Последние логи:\n" + text + "\n------------------");
+                    arg.ReplyWith(messages["adminAcLogs"] + text + "\n------------------");
                 }
                 else
                 {
-                    arg.ReplyWith("XAC - В логах пусто :(");
+                    arg.ReplyWith(messages["adminAcNoLogs"]);
                 }
             }
+        }
+
+        Dictionary<ulong, List<BasePlayer.FiredProjectile>> projectiles = new Dictionary<ulong, List<BasePlayer.FiredProjectile>>();
+
+        [ConsoleCommand("ac.accuracy")]
+        private void cmdsaaccuracy(ConsoleSystem.Arg arg)
+        {
+            if (!arg.IsAdmin) return;
+            string text = "-----------------\nXAntiCheat - hit accuracy";
+            foreach (BasePlayer player in BasePlayer.activePlayerList)
+            {
+                shoots shoots;
+                if (_shoots.TryGetValue(player.userID, out shoots))
+                {
+
+                    int countPlayer = shoots.success;
+                    int countShoots = shoots.number;
+                    text += $"\n{player.displayName}({player.UserIDString}) | {countPlayer}/{countShoots} | {string.Format("{0:N2}%", countShoots > 0 ? (countPlayer * 100f / countShoots) : 0)}";
+                }
+            }
+
+            Debug.Log(text + "\n-----------------");
         }
 
         [ConsoleCommand("ac.save")]
@@ -1572,7 +1481,7 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
-            foreach(var z in stashContainers)
+            foreach (var z in stashContainers)
             {
                 if (!z.IsDestroyed) z.Kill();
             }
@@ -1582,8 +1491,14 @@ namespace Oxide.Plugins
             foreach (BasePlayer player in BasePlayer.activePlayerList)
             {
                 ANTICHEAT aNTICHEAT;
-                if (player.TryGetComponent<ANTICHEAT>(out aNTICHEAT)) aNTICHEAT.DoDestroy();
+                if (anticheatPlayers.TryGetValue(player, out aNTICHEAT)) aNTICHEAT.DoDestroy();
             }
+
+            timer.Once(1f, () =>
+            {
+                fermens = null;
+                anticheatPlayers.Clear();
+            });
         }
 
         private void OnPlayerConnected(BasePlayer player)
@@ -1595,81 +1510,81 @@ namespace Oxide.Plugins
                 return;
             }
             if (player.GetComponent<ANTICHEAT>() == null) player.gameObject.AddComponent<ANTICHEAT>();
-            if (ins.permission.UserHasPermission(player.UserIDString, "xanticheat.chat") && !moders.Contains(player)) moders.Add(player);
-            
-            timer.Once(1f, () => GETINFO(player));
+            if (fermens.permission.UserHasPermission(player.UserIDString, "xanticheat.chat") && !moders.Contains(player)) moders.Add(player);
+            ServerMgr.Instance.StartCoroutine(GETINFO(player));
         }
 
         private void OnPlayerDisconnected(BasePlayer player, string reason)
         {
+
             ANTICHEAT aNTICHEAT;
-            if (player.TryGetComponent<ANTICHEAT>(out aNTICHEAT)) aNTICHEAT.DoDestroy();
+            if (anticheatPlayers.TryGetValue(player, out aNTICHEAT)) aNTICHEAT.DoDestroy();
             if (moders.Contains(player)) moders.Remove(player);
         }
 
-        private object OnPlayerAttack(BasePlayer player, HitInfo info)
+        class Eka
         {
-            if (player == null || info.HitEntity == null || !(info.HitEntity is BasePlayer) || IsBattles(player.userID)) return null;
-/*
-            float pos = player.eyes.HeadForward().y;
-            NextTick(() =>
-            {
-                float current = player.eyes.HeadForward().y;
-                if (pos < -0.9f || current < -0.9f)
-                {
-                    ADDLOG($"[SPINNER] {player.displayName}({player.UserIDString}) - [S{pos}][C{current}]", 2);
-                }
-            });
-            */
-            float distnace = info.HitEntity.Distance(player);
-            if (distnace < 15f) return null;
-            float y = Mathf.Abs(info.HitPositionWorld.y - info.HitEntity.CenterPoint().y);
-            if (y >= 2.05f)
-            {
-                string weapon = info.WeaponPrefab.ShortPrefabName ?? "x";
-                ADDLOG($"-[SAim]- {player.displayName}({player.UserIDString}) - {y.ToString("F1")} м.- [{weapon} | {info.boneName ?? "x"} | {distnace.ToString("F1")} м.]", 2);
-                if (info.boneName != "head" && info.boneName != "neck") return null;
-                ANTICHEAT aNTICHEAT;
-                if (!player.TryGetComponent<ANTICHEAT>(out aNTICHEAT)) return null;
-                int amount = 4;
-                if (weapon == "crossbow.entity" || weapon == "bow_hunting.entity" || weapon == "bow_compound.entity" || weapon == "pistol_eoka.entity") amount = 7;
-                aNTICHEAT.ADDSILENT(amount);
-                return true;
-            }
-            return null;
+            public Vector3 s;
+            public Vector3 t;
         }
 
+        Dictionary<ulong, shoots> _shoots = new Dictionary<ulong, shoots>();
+
+        class shoots
+        {
+            public int number;
+            public int success;
+        }
 
         private void OnWeaponFired(BaseProjectile projectile, BasePlayer player, ItemModProjectile itemModProjectile, ProjectileShoot projectileShoot)
         {
             if (projectile == null || player == null || itemModProjectile == null || projectileShoot == null) return;
+
+            shoots shoots;
+            if (!_shoots.TryGetValue(player.userID, out shoots)) _shoots.Add(player.userID, new shoots { number = 1, success = 0 });
+            else
+            {
+                shoots.number += projectileShoot.projectiles.Count;
+                _shoots[player.userID] = shoots;
+            }
+
             ANTICHEAT aNTICHEAT;
-            if (!player.TryGetComponent<ANTICHEAT>(out aNTICHEAT)) return;
-            
+
+            if (!anticheatPlayers.TryGetValue(player, out aNTICHEAT) || projectile.primaryMagazine.capacity > projectile.primaryMagazine.definition.builtInSize) return;
             aNTICHEAT.ADDFIRE(projectile.GetItem().info.name);
         }
 
         private void OnEntityTakeDamage(object entity, HitInfo info)
         {
-            if (info == null || info.Weapon == null || info.InitiatorPlayer == null || info.damageTypes.IsMeleeType()) return;
-            if (IsNPC(info.InitiatorPlayer) || !(entity is BasePlayer)) return;
+            if (info == null || info.Weapon == null || info.InitiatorPlayer == null || info.damageTypes != null && info.damageTypes.IsMeleeType()) return;
+            if (info.InitiatorPlayer.IsNpc) return;
 
+            shoots shoots;
+            if (!_shoots.TryGetValue(info.InitiatorPlayer.userID, out shoots)) return;
+
+            if (!(entity is BasePlayer)) return;
             BasePlayer player = entity as BasePlayer;
-            if (player == null || IsNPC(player) || !player.IsConnected || player.IsSleeping() || info.InitiatorPlayer == player || player.Team != null && player.Team.members.Contains(info.InitiatorPlayer.userID)) return;
-
-          //  info.damageTypes.ScaleAll(0f);
-
-            string weapon = info.WeaponPrefab != null ? info.WeaponPrefab.ShortPrefabName : "x";
-            string bone = !string.IsNullOrEmpty(info.boneName) ? info.boneName : "x";
-            float distance = info.InitiatorPlayer.Distance(player);
-            //{(info.InitiatorPlayer.IsFlying? " | в полёте" : "")}{(!info.InitiatorPlayer.IsAiming ? " | от бедра" : "")}
-            if (config.logs) Debug.Log($"-- {info.InitiatorPlayer.displayName}({info.InitiatorPlayer.UserIDString}) [{weapon} | {bone} | {distance.ToString("F1")} м.] => {player.displayName}({player.UserIDString})");
-            if (config.hITMOD.enable)
+            if (player == null || player.IsNpc || !player.IsConnected || player.IsSleeping() || info.InitiatorPlayer == player || player.Team != null && player.Team.members.Contains(info.InitiatorPlayer.userID))
             {
-                ANTICHEAT aNTICHEAT;
-                if (!info.InitiatorPlayer.TryGetComponent<ANTICHEAT>(out aNTICHEAT)) return;
-                aNTICHEAT.ADDHIT(bone, weapon, distance);
+                shoots.number -= 1;
+                _shoots[info.InitiatorPlayer.userID] = shoots;
+                return;
             }
+
+            shoots.success += 1;
+            _shoots[info.InitiatorPlayer.userID] = shoots;
+
+            string weapon = info.WeaponPrefab != null && !string.IsNullOrEmpty(info.WeaponPrefab.ShortPrefabName) ? info.WeaponPrefab.ShortPrefabName : "x";
+            string bone = !string.IsNullOrEmpty(info.boneName) ? info.boneName : "x";
+            float distance = info.ProjectileDistance;
+
+            if (config.logs) Debug.Log($"-- {info.InitiatorPlayer.displayName}({info.InitiatorPlayer.UserIDString}) [{weapon} | {bone} | {distance.ToString("F1")} m.] => {player.displayName}({player.UserIDString})");
+
+            ANTICHEAT aNTICHEAT;
+            if (!anticheatPlayers.TryGetValue(info.InitiatorPlayer, out aNTICHEAT)) return;
+
+            aNTICHEAT.ADDHIT(bone, weapon, distance);
+
         }
 
         private bool IsNPC(BasePlayer player)
@@ -1679,7 +1594,7 @@ namespace Oxide.Plugins
             return false;
         }
 
-        [PluginReference] Plugin MultiFighting, Battles, HaxBot, DiscordCore;
+        [PluginReference] Plugin MultiFighting, Battles, HaxBot, uDiscord;
 
         private bool IsBattles(ulong userid)
         {
@@ -1692,66 +1607,74 @@ namespace Oxide.Plugins
             return MultiFighting.Call<bool>("IsSteam", connection);
         }
 
-        private void GETINFO(BasePlayer player) // пиздим инфу со стима
+        class tok
         {
-            if (!player.IsConnected) return;
+            public string key;
+            public uint appid;
+            public string ticket;
+        }
+        IEnumerator GETINFO(BasePlayer player)
+        {
+            yield return new WaitForSeconds(1f);
+            if (!player.IsConnected) yield break;
+            yield return new WaitForEndOfFrame();
             webrequest.Enqueue($"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={config.steampi}&steamids={player.UserIDString}&format=json", null, (code, response) =>
             {
                 if (response != null && code == 200)
                 {
-                    if (!player.IsConnected) return;
-                    string steamid = player.UserIDString;
-                    string text = $"------------\n{player.displayName} ({steamid})";
-                    bool act = false;
-                    INFO iNFO = new INFO();
-                    resp sr = JsonConvert.DeserializeObject<resp>(response);
-                    int datetime = sr.response.players[0].timecreated ?? 0;
-                    DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-                    DateTime create = epoch.AddSeconds(datetime).AddHours(3);
-                    bool steam = ISSTEAM(player.Connection);
-                    text += $"\nВерсия игры: {(steam ? "Лицензия" : "Пиратка")}";
-                    int nastr = sr.response.players[0].profilestate ?? 0;
-                    bool ns = ISNASTROEN(nastr);
-                    text += $"\nАккаунт настроен: {(ns ? "Да" : "Нет")}";
-                    if (!ns && config.kicknenastoyen)
+                    if (player.IsConnected)
                     {
-                        if (!permission.UserHasPermission(steamid, "xanticheat.allow") && !permission.UserHasPermission(steamid, "xanticheat.skip"))
+                        string steamid = player.UserIDString;
+                        string text = messages["debugConnect0"].Replace("{name}", player.displayName).Replace("{steamid}", steamid);
+                        bool act = false;
+                        INFO iNFO = new INFO();
+                        resp sr = JsonConvert.DeserializeObject<resp>(response);
+                        int datetime = sr.response.players[0].timecreated ?? 0;
+                        DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                        DateTime create = epoch.AddSeconds(datetime).AddHours(3);
+                        bool steam = ISSTEAM(player.Connection);
+                        text += messages["debugConnect1"].Replace("{steam}", (steam ? "Steam" : "No-Steam"));
+                        int nastr = sr.response.players[0].profilestate ?? 0;
+                        bool ns = ISNASTROEN(nastr);
+                        text += messages["debugConnect2"].Replace("{ns}", ns ? (fermensEN ? "Yes" : "Да") : (fermensEN ? "No" : "Нет"));
+                        if (!ns && config.kicknenastoyen && !debugmode)
                         {
-                            Server.Command($"kick {steamid} {config.messages["KICK.NENASTROYEN"]}");
-                            act = true;
-                        }
-                    }
-                    if (datetime > 0)
-                    {
-                        text += $"\nАккаунт создан: {create.ToShortDateString()}";
-                    }
-                    else
-                    {
-                        text += "\nПрофиль закрытый: Да";
-                        if (!steam || !config.steamkick)
-                        {
-                            if (config.kickprivate && !permission.UserHasPermission(steamid, "xanticheat.allow") && !permission.UserHasPermission(steamid, "xanticheat.skip"))
+                            if (!permission.UserHasPermission(steamid, "xanticheat.allow") && !permission.UserHasPermission(steamid, "xanticheat.skip"))
                             {
-                                Server.Command($"kick {steamid} {config.messages["KICK.PRIVATE"]}");
+                                timer.Once(30f, () => player.Kick(GetMessage("KICK.NENASTROYEN", steamid)));
                                 act = true;
                             }
                         }
-                    }
+                        if (datetime > 0)
+                        {
+                            text += messages["debugConnect3"].Replace("{date}", create.ToShortDateString());
+                        }
+                        else
+                        {
+                            text += messages["debugConnect4"];
+                            if (!steam || !config.steamkick)
+                            {
+                                if (config.kickprivate && !debugmode && !permission.UserHasPermission(steamid, "xanticheat.allow") && !permission.UserHasPermission(steamid, "xanticheat.skip"))
+                                {
+                                    timer.Once(30f, () => player.Kick(GetMessage("KICK.PRIVATE", steamid)));
+                                    act = true;
+                                }
+                            }
+                        }
 
-                    if (config.show) Debug.Log(text + "\n------------");
+                        if (config.show) Debug.Log(text + "\n------------");
 
-                    if (!permission.UserHasPermission(steamid, "xanticheat.allow") && !permission.UserHasPermission(steamid, "xanticheat.skip") && (config.bannensatroyen && nastr != 1 || create.AddDays(config.banday) > DateTime.Now))
-                    {
-                        if (act || steam && config.steam) return;
-                        Server.Command(config.pattern["BAN.ACCOUNT"].Replace("{steamid}", steamid).Replace("{reason}", config.messages["NEW.ACCOUNT"]).Replace("{time}", config.bannewaccountday.ToString()));
-                        return;
+                        if (!permission.UserHasPermission(steamid, "xanticheat.allow") && !debugmode && !permission.UserHasPermission(steamid, "xanticheat.skip") && (config.bannensatroyen && nastr != 1 || create.AddDays(config.banday) > DateTime.Now))
+                        {
+                            if (!act && (!steam || steam && config.steam)) Server.Command(patterban.Replace("{steamid}", steamid).Replace("{reason}", GetMessage("NEW.ACCOUNT", steamid)).Replace("{time}", config.bannewaccountday.ToString()));
+                        }
                     }
                 }
             }, this);
 
-
+            yield return new WaitForEndOfFrame();
             //VPN
-            if (config.ipinfotoken == ipinfosingup) return;
+            if (string.IsNullOrEmpty(config.ipinfotoken) || config.ipinfotoken == ipinfosingup) yield break;
             string[] ip = player.IPlayer.Address.Split(':');
             webrequest.Enqueue(ipinnfourl.Replace("{token}", config.ipinfotoken).Replace("{ip}", ip[0]), null, (code, response) =>
             {
@@ -1760,14 +1683,15 @@ namespace Oxide.Plugins
                     if (!player.IsConnected) return;
                     VPNINFO sr = JsonConvert.DeserializeObject<VPNINFO>(response);
                     bool VPN = sr.vpn;
-                    Debug.Log($"[{player.displayName}({player.UserIDString}) | IP: {ip[0]} | VPN: {(VPN ? "Да" : "Нет")}]");
+                    Debug.Log($"[{player.displayName}({player.UserIDString}) | IP: {ip[0]} | VPN: {(VPN ? "Yes" : "No")}]");
                     if (!VPN) return;
                     if (config.kickvpn && !permission.UserHasPermission(player.UserIDString, "xanticheat.allow") && !permission.UserHasPermission(player.UserIDString, "xanticheat.skip"))
                     {
-                        Server.Command($"kick {player.UserIDString} {config.messages["KICK.VPN"]}");
+                        timer.Once(30f, () => Server.Command($"kick {player.UserIDString} \"{GetMessage("KICK.VPN", player.UserIDString)}\""));
                     }
                 }
             }, this);
+            yield break;
         }
 
         class VPNINFO
@@ -1783,15 +1707,5 @@ namespace Oxide.Plugins
             if (num == 1) return true;
             return false;
         }
-
-      /*  #region FakeWorkbench
-        private object CanCraft(ItemCrafter itemCrafter, ItemBlueprint bp, int amount)
-        {
-            BasePlayer player = itemCrafter.GetComponent<BasePlayer>();
-            if (player == null) return null;
-            Debug.Log(player.currentCraftLevel + "/" + bp.workbenchLevelRequired);
-            return null;
-        }
-        #endregion*/
     }
 }

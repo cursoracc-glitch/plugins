@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,7 +14,7 @@ using WebSocketSharp;
 
 namespace Oxide.Plugins
 {
-    [Info("GameStoresRUST", "HOUGAN & Sstine & rostov114 # GAMESTORES", "0.3.9")]
+    [Info("GameStoresRUST", "HOUGAN & Sstine & rostov114 # GAMESTORES", "0.4.1")]
     public class GameStoresRUST : RustPlugin
     {
         #region References
@@ -77,12 +77,12 @@ namespace Oxide.Plugins
         {
             public class API
             {
-                [JsonProperty("")]
-                public string ShopID = "43024";
+                [JsonProperty("ИД магазина в сервисе")]
+                public string ShopID = "UNDEFINED";
                 [JsonProperty("ИД сервера в сервисе")]
-                public string ServerID = "32533";
+                public string ServerID = "UNDEFINED";
                 [JsonProperty("Секретный ключ (не распространяйте его)")]
-                public string SecretKey = "5047e570403ad2d3dee9f2356fa4ae44";
+                public string SecretKey = "UNDEFINED";
             }
 
             public class Interface
@@ -185,8 +185,8 @@ namespace Oxide.Plugins
                     var imageLibrary = instance.plugins.Find("ImageLibrary");
                     if (imageLibrary != null)
                     {
-                        if (ItemID == 0)
-                        {
+                        //if (ItemID == 0)
+                        //{
                             if ((bool)imageLibrary.Call("HasImage", $"IconGS.{ID}"))
                             {
                                 string probablyId = (string)imageLibrary.Call("GetImage", $"IconGS.{ID}");
@@ -199,13 +199,13 @@ namespace Oxide.Plugins
                             {
                                 imageLibrary.Call("AddImage", ImageUrl.Replace("https", "http"), $"IconGS.{ID}");
                             }
-                        }
-                        else
-                        {
-                            string probablyId = (string)imageLibrary.Call("GetImage", ShortName);
-                            if (!probablyId.IsNullOrEmpty() && probablyId != instance.NoImageID && probablyId != instance.LoadingImageID)
-                                ImageUrl = probablyId;
-                        }
+                        //}
+                        //else
+                        //{
+                        //    string probablyId = (string)imageLibrary.Call("GetImage", ShortName);
+                        //    if (!probablyId.IsNullOrEmpty() && probablyId != instance.NoImageID && probablyId != instance.LoadingImageID)
+                        //        ImageUrl = probablyId;
+                        //}
                     }
                 }
                 catch (NullReferenceException e)
@@ -408,6 +408,9 @@ namespace Oxide.Plugins
                 }
             }
 
+			if (plugins.Find("ImageLibrary") != null && ImageLibrary != null && !(bool)ImageLibrary.Call("HasImage", $"blueprintbase"))
+				ImageLibrary.Call("AddImage", "http://gamestores.ru/img/games/rust/blueprintbase.png", "blueprintbase");
+				
             instance = this;
             Settings.TOPSettings.UseTop = false; //Принудительное отключение топа игроков
             if (!Settings.TOPSettings.UseTop) Unsubscribe(nameof(OnEntityDeath));
@@ -964,12 +967,6 @@ namespace Oxide.Plugins
                     Text = { Text = _(player, "BASKET"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 32, Color = "1 1 1 0.6" }
                 }, StoreLayer, StoreLayer + ".ITT");
 
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0.8 0.9", AnchorMax = "0.935 1", OffsetMax = "0 0" },
-                    Button = { Color = "0 0 0 0", Close = StoreLayer, Command = "closemenu" },
-                    Text = { Text = _(player, "EXIT"), Align = TextAnchor.MiddleRight, Font = "robotocondensed-regular.ttf", FontSize = 28 }
-                }, StoreLayer);
                 container.Add(new CuiLabel
                 {
                     RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0", OffsetMin = "0 -0", OffsetMax = "0 20" },
@@ -996,6 +993,16 @@ namespace Oxide.Plugins
                 RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1.1", OffsetMax = "0 0" },
                 Text = { Text = _(player, "REQUEST.PROCESSING"), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 34 }
             }, StoreLayer + ".BlockPanel", StoreLayer + ".BlockPanel.Text");
+
+            if (first)
+            {
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = "0.8 0.9", AnchorMax = "0.935 1", OffsetMax = "0 0" },
+                    Button = { Color = "0 0 0 0", Close = StoreLayer, Command = "closemenu" },
+                    Text = { Text = _(player, "EXIT"), Align = TextAnchor.MiddleRight, Font = "robotocondensed-regular.ttf", FontSize = 28 }
+                }, StoreLayer);
+            }
 
             CuiHelper.AddUi(player, container);
 
@@ -1582,7 +1589,7 @@ namespace Oxide.Plugins
             Request($"&info=true", (code, response) =>
             {
                 LogAction(null, $"-----------------------------", true);
-                LogAction(null, $" GameStores {Version} (c) 2022", true);
+                LogAction(null, $" GameStores {Version} (c) 2023", true);
                 try
                 {
                     if (response.Length < 1)
@@ -1634,6 +1641,7 @@ namespace Oxide.Plugins
         private static int errorsReq = 0;
         private static void Request(string ask, Action<int, string> callback, BasePlayer player = null, bool cancel = true)
         {
+            float timeout = 3000f;
             if (player != null && !Delays.CanRequest(player))
             {
                 instance.ShowNotify(player, instance._(player, "MANY.REQUESTS"));
@@ -1694,11 +1702,12 @@ namespace Oxide.Plugins
                 if (player != null && cancel) Delays.FinishRequest(player);
 
                 callback?.Invoke(code, response);
-            }, instance, RequestMethod.GET, reqHeaders);
+            }, instance, RequestMethod.GET, reqHeaders, timeout);
                       
         }
         private static void CheckRequest(string link, Action<int, string> callback)
         {
+            float timeout = 3000f;
             Dictionary<string, string> reqHeaders = new Dictionary<string, string> { { "User-Agent", "GameStores Plugin" } };
             if (!SecureConnection && link.Contains("https://")) link = link.Replace("https://", "http://");
             instance.webrequest.Enqueue(link, "", (code, response) =>
@@ -1720,7 +1729,7 @@ namespace Oxide.Plugins
                 }
 
                 callback?.Invoke(code, response);
-            }, instance, RequestMethod.GET, reqHeaders);
+            }, instance, RequestMethod.GET, reqHeaders, timeout);
 
         }
 

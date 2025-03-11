@@ -3,126 +3,18 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("XMiniCopterPlus", "https://topplugin.ru/ / https://discord.com/invite/5DPTsRmd3G", "1.0.31")]
+    [Info("XMiniCopterPlus", "Sempai#3239", "1.1.4")]
     class XMiniCopterPlus : RustPlugin
     {
-		#region Configuration
-
-        private CopterConfig config;
-
-        private class CopterConfig
-        {		
-            internal class CopterSetting
-            {				    
-				[JsonProperty("SkinID")] 
-                public ulong CopterSkinID;				
-				[JsonProperty("Имя")] 
-                public string CopterName;			
-            }	
-			
-			internal class WorkSetting
-            {            			
-				[JsonProperty("Включить третье место")]
-                public bool Chair = true;				
-				[JsonProperty("Включить стеш")]
-                public bool Stash = true;
-            }			      
-			
-			[JsonProperty("Настройки коптера")]
-            public CopterSetting Copter = new CopterSetting();
-			[JsonProperty("Общее")]
-            public WorkSetting Settings = new WorkSetting();
-			
-			public static CopterConfig GetNewConfiguration()
-            {
-                return new CopterConfig
-                {
-					Settings = new WorkSetting
-					{
-						Chair = true,
-						Stash = true
-					},
-					Copter = new CopterSetting
-					{
-						CopterSkinID = 2199754843,
-						CopterName = "КОПТЕР"
-					}
-				};
-			}
-        }
-
-        protected override void LoadDefaultConfig()
-        {
-            config = CopterConfig.GetNewConfiguration();
-
-            PrintWarning("Создание начальной конфигурации плагина!!!");
-        }
         protected override void LoadConfig()
         {
             base.LoadConfig();
-
+		   		 		  						  	   		  	   		  						  						  	 	 
             config = Config.ReadObject<CopterConfig>();
         }
-        protected override void SaveConfig()
-        {
-            Config.WriteObject(config);
-        }
-
-        #endregion
 		
-		#region Commands
-		
-		[ConsoleCommand("c_give")]
-        void cmdConsoleCommand(ConsoleSystem.Arg args)
-        {
-			if (args.Player() != null) return;
-			
-			BasePlayer player = BasePlayer.FindByID(ulong.Parse(args.Args[0]));
-			
-			if (player == null) return;
-			
-			Item item = ItemManager.CreateByName("woodcross", int.Parse(args.Args[1]), config.Copter.CopterSkinID);
-            item.name = config.Copter.CopterName;
-			
-            player.GiveItem(item);
-        }
-
-        #endregion	
-		
-        #region Hooks
-		
-		private void OnServerInitialized()
-		{		
-			PrintWarning("\n-----------------------------\n" +
-			"     Author - https://topplugin.ru/ / https://discord.com/invite/5DPTsRmd3G\n" +
-			"     VK - https://vk.com/rustnastroika\n" +
-			"     Discord - https://discord.com/invite/5DPTsRmd3G\n" +
-			"     Config - v.1539\n" +
-			"-----------------------------");
-		}
-		
-        private void OnEntitySpawned(MiniCopter copter)
-        {
-            if (copter.mountPoints.Count < 3 && copter.ShortPrefabName == "minicopter.entity")
-            {
-				if (config.Settings.Chair) copter.mountPoints.Add(SpawnPassenger(copter));
-				
-				timer.Once(0.1f, () => {
-                    if (config.Settings.Chair) Chair(copter);
-		            if (config.Settings.Stash) Stash(copter);
-				});
-            }
-        }
-		
-		private void OnEntityBuilt(Planner plan, GameObject go)
-        {
-            SpawnEntity(go.ToBaseEntity());
-        }
-		
-        #endregion
-
-        #region Entity
-		
+        
+        		
 		private void SpawnEntity(BaseEntity entity)
         {
             if (entity == null) return;
@@ -135,21 +27,8 @@ namespace Oxide.Plugins
 				NextTick(() => { entity.Kill(); });
 			}			
         }
-
-        private void Chair(MiniCopter copter)
-        {
-            BaseEntity entity = GameManager.server.CreateEntity("assets/prefabs/vehicle/seats/passengerchair.prefab");
 			
-            if (entity == null) return;
-			
-            entity.transform.localPosition = new Vector3(0f, 0.4f, -1.0f);
-			entity.transform.localRotation = Quaternion.Euler(new Vector3(0, 180, 0));
-
-			entity.Spawn();
-			entity.SetParent(copter);
-        }            
-			
-		private void Stash(MiniCopter copter)
+		private void Stash(Minicopter copter)
         {
 			foreach (var container in copter.GetComponentsInChildren<StorageContainer>()) {
 				if (container.name == "assets/content/vehicles/boats/rowboat/subents/rowboat_storage.prefab") return;
@@ -165,10 +44,15 @@ namespace Oxide.Plugins
 			entity.Spawn();
 			entity.SetParent(copter);
         }
-
-        MiniCopter.MountPointInfo SpawnPassenger(MiniCopter copter)
+		
+		private void OnEntityBuilt(Planner plan, GameObject go)
         {
-            return new MiniCopter.MountPointInfo
+            SpawnEntity(go.ToBaseEntity());
+        }
+
+        Minicopter.MountPointInfo SpawnPassenger(Minicopter copter)
+        {
+            return new Minicopter.MountPointInfo
             {
 				pos = new Vector3(0f, 0.335f, -1.35f),
                 rot = new Vector3(0, 180, 0),
@@ -176,7 +60,113 @@ namespace Oxide.Plugins
                 mountable = copter.mountPoints[1].mountable,
             };
         }
+
+        		
+        		
+		private void OnServerInitialized()
+		{		
+			PrintWarning("\n-----------------------------\n" +
+			"     Author - Sempai#3239\n" +
+			//"     Config - v.5314\n" +
+			"-----------------------------");
+		}
+
+        protected override void LoadDefaultConfig()
+        {
+            config = CopterConfig.GetNewConfiguration();
+
+            PrintWarning("Создание начальной конфигурации плагина!!!");
+        }
+		
+        private CopterConfig config;
+		
+        private void OnEntitySpawned(Minicopter copter)
+        {
+            if (copter.mountPoints.Count < 3 && copter.ShortPrefabName == "minicopter.entity")
+            {
+				if (config.Settings.Chair) copter.mountPoints.Add(SpawnPassenger(copter));
+				
+				timer.Once(0.1f, () => {
+                    if (config.Settings.Chair) Chair(copter);
+		            if (config.Settings.Stash) Stash(copter);
+				});
+            }
+        }
+		   		 		  						  	   		  	   		  						  						  	 	 
+        private class CopterConfig
+        {		
+			[JsonProperty("Общее")]
+            public WorkSetting Settings = new WorkSetting();
+            internal class CopterSetting
+            {				    
+				[JsonProperty("Имя")] 
+                public string CopterName;			
+				[JsonProperty("SkinID")] 
+                public ulong CopterSkinID;				
+            }	
 			
-        #endregion
-    }
+			[JsonProperty("Настройки коптера")]
+            public CopterSetting Copter = new CopterSetting();
+			
+			internal class WorkSetting
+            {            			
+				[JsonProperty("Включить третье место")]
+                public bool Chair = true;				
+				[JsonProperty("Включить стеш")]
+                public bool Stash = true;
+            }			      
+			
+			public static CopterConfig GetNewConfiguration()
+            {
+                return new CopterConfig
+                {
+					Settings = new WorkSetting
+					{
+						Chair = false,
+						Stash = true
+					},
+					Copter = new CopterSetting
+					{
+						CopterSkinID = 2199754843,
+						CopterName = "КОПТЕР"
+					}
+				};
+			}
+        }
+        protected override void SaveConfig()
+        {
+            Config.WriteObject(config);
+        }
+
+        		
+				
+		[ConsoleCommand("c_give")]
+        void cmdConsoleCommand(ConsoleSystem.Arg args)
+        {
+			if (args.Player() != null) return;
+			
+			BasePlayer player = BasePlayer.FindByID(ulong.Parse(args.Args[0]));
+			
+			if (player == null) return;
+			
+			Item item = ItemManager.CreateByName("woodcross", int.Parse(args.Args[1]), config.Copter.CopterSkinID);
+            item.name = config.Copter.CopterName;
+			
+            player.GiveItem(item);
+        }
+
+        private void Chair(Minicopter copter)
+        {
+            BaseEntity entity = GameManager.server.CreateEntity("assets/prefabs/vehicle/seats/passengerchair.prefab");
+			
+            if (entity == null) return;
+			
+            entity.transform.localPosition = new Vector3(0f, 0.4f, -1.0f);
+			entity.transform.localRotation = Quaternion.Euler(new Vector3(0, 180, 0));
+
+			entity.Spawn();
+			entity.SetParent(copter);
+        }            
+			
+            }
 }
