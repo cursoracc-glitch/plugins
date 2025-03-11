@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Auto Doors", "Wulf/lukespragg/Arainrr", "3.2.9", ResourceId = 1924)]
+    [Info("Auto Doors", "Wulf/lukespragg/Arainrr/James/Bushhy", "3.3.10", ResourceId = 1924)]
     [Description("Automatically closes doors behind players after X seconds")]
     public class AutoDoors : RustPlugin
     {
@@ -18,7 +18,7 @@ namespace Oxide.Plugins
 
         [PluginReference] private Plugin RustTranslationAPI;
         private const string PERMISSION_USE = "autodoors.use";
-        private readonly Hash<uint, Timer> doorTimers = new Hash<uint, Timer>();
+        private readonly Hash<ulong, Timer> doorTimers = new Hash<ulong, Timer>();
         private readonly Dictionary<string, string> supportedDoors = new Dictionary<string, string>();
         private HashSet<DoorManipulator> doorManipulators;
 
@@ -70,7 +70,7 @@ namespace Oxide.Plugins
         private void OnEntityKill(Door door)
         {
             if (door == null || door.net == null) return;
-            var doorID = door.net.ID;
+            var doorID = door.net.ID.Value;
             Timer value;
             if (doorTimers.TryGetValue(doorID, out value))
             {
@@ -105,7 +105,7 @@ namespace Oxide.Plugins
             var playerData = GetPlayerData(player.userID, true);
             if (!playerData.doorData.enabled) return;
             float autoCloseTime;
-            var doorID = door.net.ID;
+            var doorID = door.net.ID.Value;
             StoredData.DoorData doorData;
             if (playerData.theDoorS.TryGetValue(doorID, out doorData))
             {
@@ -141,10 +141,10 @@ namespace Oxide.Plugins
         {
             if (door == null || door.net == null || door.IsOpen()) return;
             Timer value;
-            if (doorTimers.TryGetValue(door.net.ID, out value))
+            if (doorTimers.TryGetValue(door.net.ID.Value, out value))
             {
                 value?.Destroy();
-                doorTimers.Remove(door.net.ID);
+                doorTimers.Remove(door.net.ID.Value);
             }
         }
 
@@ -318,11 +318,11 @@ namespace Oxide.Plugins
                         }
 
                         StoredData.DoorData doorData;
-                        if (!playerData.theDoorS.TryGetValue(door.net.ID, out doorData))
+                        if (!playerData.theDoorS.TryGetValue(door.net.ID.Value, out doorData))
                         {
                             doorData = new StoredData.DoorData
                             { enabled = true, time = configData.globalS.defaultDelay };
-                            playerData.theDoorS.Add(door.net.ID, doorData);
+                            playerData.theDoorS.Add(door.net.ID.Value, doorData);
                         }
 
                         if (args.Length <= 1)
@@ -496,7 +496,7 @@ namespace Oxide.Plugins
                 public string[] commands = { "ad", "autodoor" };
 
                 [JsonProperty(PropertyName = "Chat prefix")]
-                public string prefix = "<color=#8e6874>STORM RUST - Автоматические двери</color>:\n ";
+                public string prefix = "<color=#00FFFF>[AutoDoors]</color>: ";
 
                 [JsonProperty(PropertyName = "Chat steamID icon")]
                 public ulong steamIDIcon = 0;
@@ -547,7 +547,7 @@ namespace Oxide.Plugins
                     string prefix, prefixColor;
                     if (GetConfigValue(out prefix, "Chat Settings", "Chat Prefix") && GetConfigValue(out prefixColor, "Chat Settings", "Chat Prefix Color"))
                     {
-                        configData.chatS.prefix = $"<color={prefixColor}>{prefix}</color> :";
+                        configData.chatS.prefix = $"<color={prefixColor}>{prefix}</color>: ";
                     }
                 }
                 configData.version = Version;
@@ -579,7 +579,7 @@ namespace Oxide.Plugins
             public class PlayerData
             {
                 public DoorData doorData = new DoorData();
-                public readonly Dictionary<uint, DoorData> theDoorS = new Dictionary<uint, DoorData>();
+                public readonly Dictionary<ulong, DoorData> theDoorS = new Dictionary<ulong, DoorData>();
                 public readonly Dictionary<string, DoorData> doorTypeS = new Dictionary<string, DoorData>();
             }
 
@@ -648,29 +648,54 @@ namespace Oxide.Plugins
         {
             lang.RegisterMessages(new Dictionary<string, string>
             {
-                ["NotAllowed"] = "У вас не прав на использование данной команды",
-                ["Enabled"] = "<color=#8ee700>ВКЛЮЧЕНО</color>",
-                ["Disabled"] = "<color=#8e6874>ВЫКЛЮЧЕНО</color>",
-                ["AutoDoor"] = "Автоматическое закрытие двери теперь {0}",
-                ["AutoDoorDelay"] = "Задержка автоматического закрытия двери установлена на {0}с. (Двери, установленные по «одинарным» и «типу», не включены)",
-                ["AutoDoorDelayAll"] = "Автоматическая задержка закрытия всех дверей установлена на {0}с",
-                ["DoorNotFound"] = "Вам нужно посмотреть на дверь",
-                ["DoorNotSupported"] = "Этот тип двери не поддерживается",
-                ["AutoDoorDelayLimit"] = "Допустимая задержка автоматического закрытия двери составляет от {0}с до {1}с",
-                ["AutoDoorSingle"] = "Автоматическое закрытие этого <color=#8e6874>{0}</color> является {1}",
-                ["AutoDoorSingleDelay"] = "Автоматическая задержка закрытия этого<color=#8e6874>{0}</color> является {1}с",
-                ["AutoDoorType"] = "Автоматическое закрытие <color=#8e6874>{0}</color> дверь {1}",
-                ["AutoDoorTypeDelay"] = "Автоматическая задержка закрытия <color=#8e6874>{0}</color> дверь {1}с",
-                ["SyntaxError"] = "Синтаксическая ошибка, тип '<color=#8e6874>/{0} <help | h></color>' просмотреть справку",
+                ["NotAllowed"] = "You do not have permission to use this command",
+                ["Enabled"] = "<color=#8ee700>Enabled</color>",
+                ["Disabled"] = "<color=#ce422b>Disabled</color>",
+                ["AutoDoor"] = "Automatic door closing is now {0}",
+                ["AutoDoorDelay"] = "Automatic door closing delay set to {0}s. (Doors set by 'single' and 'type' are not included)",
+                ["AutoDoorDelayAll"] = "Automatic closing delay of all doors set to {0}s",
+                ["DoorNotFound"] = "You need to look at a door",
+                ["DoorNotSupported"] = "This type of door is not supported",
+                ["AutoDoorDelayLimit"] = "Automatic door closing delay allowed is between {0}s and {1}s",
+                ["AutoDoorSingle"] = "Automatic closing of this <color=#4DFF4D>{0}</color> is {1}",
+                ["AutoDoorSingleDelay"] = "Automatic closing delay of this <color=#4DFF4D>{0}</color> is {1}s",
+                ["AutoDoorType"] = "Automatic closing of <color=#4DFF4D>{0}</color> door is {1}",
+                ["AutoDoorTypeDelay"] = "Automatic closing delay of <color=#4DFF4D>{0}</color> door is {1}s",
+                ["SyntaxError"] = "Syntax error, type '<color=#ce422b>/{0} <help | h></color>' to view help",
 
-                ["AutoDoorSyntax"] = "<color=#8e6874>/{0} </color> - Включить/выключить автоматическое закрытие двери",
-                ["AutoDoorSyntax1"] = "<color=#8e6874>/{0} [time (seconds)]</color> - Включить/выключить автоматическое закрытие двери {1}с до {2}с. (Двери, установленные по «одинарным» и «типу», не включены)",
-                ["AutoDoorSyntax2"] = "<color=#8e6874>/{0} <single | s></color> - Включить/выключить автоматическое закрытие двери, на которую вы смотрите",
-                ["AutoDoorSyntax3"] = "<color=#8e6874>/{0} <single | s> [time (seconds)]</color> - Установите задержку автоматического закрытия для двери, на которую вы смотрите, разрешенное время между {1}s and {2}s",
-                ["AutoDoorSyntax4"] = "<color=#8e6874>/{0} <type | t></color> - Включите/отключите автоматическое закрытие двери для выбранного типа двери. («тип» — это просто слово, а не тип двери)",
-                ["AutoDoorSyntax5"] = "<color=#8e6874>/{0} <type | t> [time (seconds)]</color> - Установите задержку автоматического закрытия для типа двери, на которую вы смотрите, допустимое время составляет от {1} с до {2} с. («тип» — это просто слово, а не тип двери)",
-                ["AutoDoorSyntax6"] = "<color=#8e6874>/{0} <all | a> [time (seconds)]</color> - Установите задержку автоматического закрытия для всех дверей, допустимое время составляет от {1} с до {2} с..",
+                ["AutoDoorSyntax"] = "<color=#ce422b>/{0} </color> - Enable/Disable automatic door closing",
+                ["AutoDoorSyntax1"] = "<color=#ce422b>/{0} [time (seconds)]</color> - Set automatic closing delay for doors, the allowed time is between {1}s and {2}s. (Doors set by 'single' and 'type' are not included)",
+                ["AutoDoorSyntax2"] = "<color=#ce422b>/{0} <single | s></color> - Enable/Disable automatic closing of the door you are looking at",
+                ["AutoDoorSyntax3"] = "<color=#ce422b>/{0} <single | s> [time (seconds)]</color> - Set automatic closing delay for the door you are looking at, the allowed time is between {1}s and {2}s",
+                ["AutoDoorSyntax4"] = "<color=#ce422b>/{0} <type | t></color> - Enable/disable automatic door closing for the type of door you are looking at. ('type' is just a word, not the type of door)",
+                ["AutoDoorSyntax5"] = "<color=#ce422b>/{0} <type | t> [time (seconds)]</color> - Set automatic closing delay for the type of door you are looking at, the allowed time is between {1}s and {2}s. ('type' is just a word, not the type of door)",
+                ["AutoDoorSyntax6"] = "<color=#ce422b>/{0} <all | a> [time (seconds)]</color> - Set automatic closing delay for all doors, the allowed time is between {1}s and {2}s.",
             }, this);
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["NotAllowed"] = "您没有权限使用该命令",
+                ["Enabled"] = "<color=#8ee700>已启用</color>",
+                ["Disabled"] = "<color=#ce422b>已禁用</color>",
+                ["AutoDoor"] = "自动关门现在的状态为 {0}",
+                ["AutoDoorDelay"] = "自动关门延迟设置为 {0}秒",
+                ["AutoDoorDelayAll"] = "全部门的自动关闭延迟设置为 {0}秒",
+                ["DoorNotFound"] = "请您看着一条门再输入指令",
+                ["DoorNotSupported"] = "不支持您看着的这种门",
+                ["AutoDoorDelayLimit"] = "自动关门延迟应该在 {0}秒 和 {1}秒 之间",
+                ["AutoDoorSingle"] = "这条 <color=#4DFF4D>{0}</color> 的自动关闭状态为 {1}",
+                ["AutoDoorSingleDelay"] = "这条 <color=#4DFF4D>{0}</color> 的自动关闭延迟为 {1}秒",
+                ["AutoDoorType"] = "这种 <color=#4DFF4D>{0}</color> 的自动关闭状态为 {1}",
+                ["AutoDoorTypeDelay"] = "这种 <color=#4DFF4D>{0}</color> 的自动关闭延迟为 {1}秒",
+                ["SyntaxError"] = "语法错误, 输入 '<color=#ce422b>/{0} <help | h></color>' 查看帮助",
+
+                ["AutoDoorSyntax"] = "<color=#ce422b>/{0} </color> - 启用/禁用自动关门",
+                ["AutoDoorSyntax1"] = "<color=#ce422b>/{0} [时间 (秒)]</color> - 设置自动关门延迟。(时间在 {1}秒 和 {2}秒 之间) (不包括'single'和'type'设置的门)",
+                ["AutoDoorSyntax2"] = "<color=#ce422b>/{0} <single | s></color> - 为您看着的这条门，启用/禁用自动关门",
+                ["AutoDoorSyntax3"] = "<color=#ce422b>/{0} <single | s> [时间 (秒)]</color> - 为您看着的这条门设置自动关闭延迟。(时间在 {1}秒 和 {2}秒 之间)",
+                ["AutoDoorSyntax4"] = "<color=#ce422b>/{0} <type | t></color> - 为您看着的这种门，启用/禁用自动关门",
+                ["AutoDoorSyntax5"] = "<color=#ce422b>/{0} <type | t> [时间 (秒)]</color> - 为您看着的这种门设置自动关闭延迟。(时间在 {1}秒 和 {2}秒 之间)",
+                ["AutoDoorSyntax6"] = "<color=#ce422b>/{0} <all | a> [时间 (秒)]</color> - 为所有门设置自动关闭延迟。(时间在 {1}秒 和 {2}秒 之间)",
+            }, this, "zh-CN");
         }
 
         #endregion LanguageFile

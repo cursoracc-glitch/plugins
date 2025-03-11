@@ -1,8 +1,7 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.IO;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Plugins;
@@ -11,24 +10,20 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("AutoBaseUpgrade", "CASHR#6906", "1.1.9")]
-    [Description("This plugin was fixed by KACAT [Rust Plugin Sliv]: ")]
+    /*ПЛАГИН БЫЛ ПОФИКШЕН С ПОМОЩЬЮ ПРОГРАММЫ СКАЧАНОЙ С https://discord.gg/dNGbxafuJn */ [Info("AutoBaseUpgrade", "", "1.0.7")]
     internal class AutoBaseUpgrade : RustPlugin
     {
         #region Static
-        [PluginReference] private Plugin NoEscape;
+        [PluginReference] private Plugin ImageLibrary, NoEscape;
         private Dictionary<BuildingPrivlidge, BuildSettings> TCList = new Dictionary<BuildingPrivlidge, BuildSettings>();
         private Configuration _config;
-        private const string permUpgrade = "autobaseupgrade.upgrade";
-        private const string permRepair = "autobaseupgrade.repair";
+        private const string perm = "autobaseupgrade.use";
         #endregion
 
         #region Config
 
         private class Configuration
         {
-            [JsonProperty(PropertyName = "How long after an entity is damaged before it can be repaired (Seconds)", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-            public int LastAttackSeconds = 30;
             [JsonProperty("Allow the repair of deployable objects?")]
             public bool DepRepair = true;
             [JsonProperty("Upgrade cooldown (seconds)")]
@@ -84,7 +79,6 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
-            DownloadImage();
             foreach (var check in _config.CDList)
             {
                 if (!permission.PermissionExists(check.Key, this))
@@ -95,77 +89,9 @@ namespace Oxide.Plugins
                 if (!permission.PermissionExists(check.Key, this))
                     permission.RegisterPermission(check.Key, this);
             }
-            permission.RegisterPermission(permUpgrade, this);
-            permission.RegisterPermission(permRepair, this);
-            
+            permission.RegisterPermission(perm, this);
         }
 
-        private List<ImageSettings> ImageSettingsList = new List<ImageSettings>()
-        {
-            new ImageSettings()
-            {
-                Name = "wood",
-                Url = "https://gspics.org/images/2023/06/26/0at5EK.png"
-            },
-            new ImageSettings()
-            {
-                Name = "stones",
-                Url = "https://gspics.org/images/2023/06/26/0atOm7.png"
-            },
-            new ImageSettings()
-            {
-                Name = "metal.fragments",
-                Url = "https://gspics.org/images/2023/06/26/0atbsu.png"
-            },
-            new ImageSettings()
-            {
-                Name = "metal.refined",
-                Url = "https://gspics.org/images/2023/06/26/0ateTo.png"
-            }
-        };
-        private Dictionary<string, string> ImageList = new Dictionary<string, string>();
-        private class ImageSettings
-        {
-            [JsonProperty(PropertyName = "Name", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-            public string Name;
-
-            [JsonProperty(PropertyName = "Path", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-            public string Url;
-        }
-        private void DownloadImage()
-        {
-            var image = ImageSettingsList.FirstOrDefault(p=> !ImageList.ContainsKey(p.Name));
-			
-			
-            if (image == null)
-            {
-                Puts("Image upload completed");
-                return;
-            }
-            ServerMgr.Instance.StartCoroutine(StartDownloadImage(image));
-        }
-        private IEnumerator StartDownloadImage(ImageSettings image)
-        {
-            string url = image.Url;
-            using (var www = new WWW(url))
-            {
-                yield return www;
-                if (www.error != null)
-                {
-                    PrintError($"Failed to download image {image.Name}.Address [{image.Url}] invalid");
-                    ImageList.Add(image.Name, "");
-                }
-                else
-                {
-                    var texture = www.texture;
-                    var png = FileStorage.server.Store(texture.EncodeToPNG(), FileStorage.Type.png,
-                        CommunityEntity.ServerInstance.net.ID).ToString();
-                    ImageList.Add(image.Name, png);
-                }
-                DownloadImage();
-            }
-
-        }
         private void Unload()
         {
             foreach (var check in TCList)
@@ -222,10 +148,6 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            if (entity.SecondsSinceAttacked < _config.LastAttackSeconds)
-            {
-                return false;
-            }
             if (Interface.CallHook("OnStructureRepair", entity, player) != null)
             {
                 return false;
@@ -282,29 +204,14 @@ namespace Oxide.Plugins
 
         }
 
-        private bool IsRaidBlocked(BasePlayer player)
-        {
-            if (NoEscape != null)
-            {
-                if (NoEscape.Call<bool>("IsRaidBlocked", player.UserIDString))
-                {
-                    player.ChatMessage(GetMessage("MSG_RAIDBLOCK", player.UserIDString));
-                    return true;
-                }
-            }
-            return false;
-        }
         private IEnumerator RepairProgress(BasePlayer player, BuildingPrivlidge tc)
         {
-          
-         
             var building = tc.GetBuilding();
             yield return CoroutineEx.waitForSeconds(0.15f);
             var cd = GetCD(player);
             var cost = GetCost(player);
             for (int index = 0; index < building.buildingBlocks.Count; index++)
             {
-                if(IsRaidBlocked(player))yield break;
                 var entity = building.buildingBlocks[index];
                 if (!TCList[tc].isRepair) break;
                 if (!DoRepair(player, entity, tc, cost)) continue;
@@ -315,7 +222,6 @@ namespace Oxide.Plugins
             {
                 for (int index = 0; index < building.decayEntities.Count; index++)
                 {
-                    if(IsRaidBlocked(player))yield break;
                     var entity = building.decayEntities[index];
                     if (!TCList[tc].isRepair) break;
                     if (!DoRepair(player, entity, tc, cost)) continue;
@@ -336,8 +242,10 @@ namespace Oxide.Plugins
             for (var index = 0; index < set.Count; index++)
             {
                 var check = set[index];
-                if (tc == null) yield break;
-                if(IsRaidBlocked(player))yield break;
+                if (tc == null)
+                {
+                    yield break;
+                }
                 if(!TCList[tc].isUpgrade)break;
                 var grade = TCList[tc].currentGrade;
                 if (grade <= check.grade) continue;
@@ -363,13 +271,7 @@ namespace Oxide.Plugins
 
         private void PayForUpgrade(BuildingBlock block,BuildingPrivlidge tc, BuildingGrade.Enum grade, List<Item> itemList, BasePlayer initiator)
         {
-			var constructionGrade = block.blockDefinition.GetGrade(grade, 0);
-			if (constructionGrade == null)
-			{
-				return;
-			}
-			
-            if (!CanUpgrade(block, constructionGrade, tc, grade))
+            if (!CanUpgrade(tc,block,grade))
             {
                 initiator.ChatMessage(GetMessage("MSG_RESOURSENOTFUND",initiator.UserIDString));
                 TCList[tc].isUpgrade = false;
@@ -377,21 +279,16 @@ namespace Oxide.Plugins
             }
 
             if (IsUpgradeBlocked(block)) return;
-            var list = constructionGrade.CostToBuild();
+            var list = block.blockDefinition.GetGrade(grade, block.skinID).CostToBuild(grade);
             for (var index = 0; index < list.Count; index++)
             {
                 var check = list[index];
                 Take(tc.inventory.itemList, check.itemDef.shortname, (int)check.amount);
             }
-			
-			if(grade == BuildingGrade.Enum.Stone)
-				block.skinID = 10220;
-			else
-				block.skinID = 0;
-			
+
             block.SetGrade(grade);
             block.SetHealthToMax();
-            block.UpdateSkin(true);
+            block.UpdateSkin();
             if (_config.Effect)
             {
                 var effect = grade == BuildingGrade.Enum.Metal
@@ -463,7 +360,7 @@ namespace Oxide.Plugins
                 Parent = "Panel_507",
                 Components =
                 {
-                    new CuiRawImageComponent {Color = "1 1 1 1", Png = ImageList[image]},
+                    new CuiRawImageComponent {Color = "1 1 1 1", Png = ImageLibrary?.Call<string>("GetImage", image)},
                     new CuiRectTransformComponent
                     {
                         AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "36.347 -10", OffsetMax = "56.347 10"
@@ -492,6 +389,7 @@ namespace Oxide.Plugins
         private void cmdConsoleUI_UPGRADEBASEUP(ConsoleSystem.Arg arg)
         {
             var player = arg.Player();
+            if (!permission.UserHasPermission(player.UserIDString, perm)) return;
             if (!player.IsBuildingAuthed())
             {
                 player.ChatMessage("You should be getting a building authed");
@@ -514,7 +412,6 @@ namespace Oxide.Plugins
                 }
                 case "REPAIR":
                 {
-                    if (!permission.UserHasPermission(player.UserIDString, permRepair)) return;
                     TCList[tc].isRepair = !TCList[tc].isRepair;
 
                     if (TCList[tc].isRepair)
@@ -542,8 +439,6 @@ namespace Oxide.Plugins
                 }
                 case "SWITCH":
                 {
-                    if (!permission.UserHasPermission(player.UserIDString, permUpgrade)) return;
-
                     TCList[tc].isUpgrade = !TCList[tc].isUpgrade;
 
                     if (TCList[tc].isUpgrade)
@@ -565,25 +460,23 @@ namespace Oxide.Plugins
 
           
         }
-		
-        public bool CanUpgrade(BuildingBlock buildingBlock, ConstructionGrade constructionGrade, BuildingPrivlidge tc, BuildingGrade.Enum grade)
-		{
-			var flag = true;
-			foreach (var item in constructionGrade.CostToBuild())
-			{
-				var missingAmount = item.amount - tc.inventory.GetAmount(item.itemid, false);
-				if (missingAmount > 0f)
-				{
-					flag = false;
-				}
-			}
-			return flag;
-		}
+        private bool CanUpgrade(BuildingPrivlidge tc, BuildingBlock block,BuildingGrade.Enum iGrade )
+        {
+            var list = block.blockDefinition.GetGrade(iGrade, block.skinID).CostToBuild(iGrade);
+            for (var index = 0; index < list.Count; index++)
+            {
+                ItemAmount itemAmount = list[index];
+                if (tc.inventory.GetAmount(itemAmount.itemid, false) < (double) itemAmount.amount)
+                    return false;
+            }
+
+            return true;
+        }
         
         private void OnLootEntity(BasePlayer player, BuildingPrivlidge tc)
         {
             if (player == null || tc == null) return;
-            if (!permission.UserHasPermission(player.UserIDString, permRepair) && !permission.UserHasPermission(player.UserIDString, permUpgrade)) return;
+            if (!permission.UserHasPermission(player.UserIDString, perm)) return;
             if (NoEscape != null)
             {
                 if (NoEscape.Call<bool>("IsRaidBlocked", player.UserIDString))
@@ -646,7 +539,6 @@ namespace Oxide.Plugins
             {
                 ["MSG_UPGRADEDONE"] = "The improvement of the buildings is finished",
                 ["MSG_REPAIRDONE"] = "The repair of the building is finished",
-                ["MSG_RAIDBLOCK"] = "Repair/The improvement of the building has been completed due to your presence in the raid block",
                 ["MSG_REPAIRNOTFUND"] = "Not enough resources to repair the building",
                 ["MSG_RESOURSENOTFUND"] = "There are not enough resources to improve the structure",
             }, this);
@@ -654,7 +546,6 @@ namespace Oxide.Plugins
             lang.RegisterMessages(new Dictionary<string, string>
             {
                 ["MSG_UPGRADEDONE"] = "Улучшение построек закончено",
-                ["MSG_RAIDBLOCK"] = "Ремонт/Улучшение здания закончено по причине нахождения вас в рейд блоке",
                 ["MSG_REPAIRDONE"] = "Ремонт здания завершен",
                 ["MSG_REPAIRNOTFUND"] = "Недостаточно ресурсов для ремонта здания",
                 ["MSG_RESOURSENOTFUND"] = "Не достаточно ресурсов для того, чтобы улучшить строение",
@@ -673,4 +564,6 @@ namespace Oxide.Plugins
 
 
     }
-}
+}/* Boosty - https://boosty.to/skulidropek 
+Discord - https://discord.gg/k3hXsVua7Q 
+Discord The Rust Bay - https://discord.gg/Zq3TVjxKWk  */

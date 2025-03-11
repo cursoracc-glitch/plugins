@@ -1,5 +1,4 @@
-﻿using Newtonsoft.Json;
-using Oxide.Core;
+using Newtonsoft.Json;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using System;
@@ -10,9 +9,10 @@ using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 
+
 namespace Oxide.Plugins
 {
-    [Info("DeathMessages", "VooDoo", "1.4.4")]  
+    [Info("DeathMessages", "Sempai#3239", "1.4.6")]
     [Description("DeathMessages")]
     public class DeathMessages : RustPlugin
     {
@@ -22,9 +22,7 @@ namespace Oxide.Plugins
 
         private bool AddImage(string url, string imageName, ulong imageId = 0, Action callback = null) => (bool)ImageLibrary.Call("AddImage", url, imageName, imageId, callback);
         private string GetImage(string imageName, ulong imageId = 0, bool returnUrl = false) => (string)ImageLibrary.Call("GetImage", imageName, imageId, returnUrl);
-        private bool HasImage(string imageName, ulong imageId = 0) => (bool)ImageLibrary.Call("HasImage", imageName, imageId);
 
-        private Dictionary<ulong, TemporaryBool> uiHide = new Dictionary<ulong, TemporaryBool>();
         private Dictionary<BaseEntity, HitInfo> lastHitInfo = new Dictionary<BaseEntity, HitInfo>();
         private Dictionary<uint, string> prefabID2Item = new Dictionary<uint, string>();
         private Dictionary<string, string> prefabName2Item = new Dictionary<string, string>()
@@ -35,17 +33,11 @@ namespace Oxide.Plugins
             ["explosive.satchel.deployed"] = "explosive.satchel",
             ["explosive.timed.deployed"] = "explosive.timed",
             ["rocket_basic"] = "rocket.launcher",
-            ["rocket_admin"] = "rocket.launcher",
+            ["rocket_admin"] = "1429",
             ["rocket_hv"] = "rocket.launcher",
             ["rocket_fire"] = "rocket.launcher",
             ["survey_charge.deployed"] = "surveycharge"
         };
-        
-        public struct TemporaryBool
-        {
-            public bool Value;
-            public double Expire;
-        }
 
         public static DeathMessages Instance;
         #endregion
@@ -73,32 +65,156 @@ namespace Oxide.Plugins
             }
 
             [JsonProperty("Максимальное количество уведомлений")]
-            public int MaxKillsForBar = 3;
+            public int MaxKillsForBar;
             [JsonProperty("Показывать моды оружия")]
-            public bool ShowWeaponMods = true;
+            public bool ShowWeaponMods;
             [JsonProperty("Показывать смерть животных")]
-            public bool ShowAnimalsDeath = true;
-            [JsonProperty("Показывать смерть НПЦ")]
-            public bool ShowNPCDeath = true;
+            public bool ShowAnimalsDeath;
             [JsonProperty("Показывать хедшоты")]
-            public bool ShowHeadShots = true;
+            public bool ShowHeadShots;
             [JsonProperty("Цвет ника по привилегиям (По стандарту белый)")]
-            public Dictionary<string, ColorNickName> ColorsNamePlayer = new Dictionary<string, PluginConfig.ColorNickName>
-            {
-                { "deathmessages.premium", new PluginConfig.ColorNickName { ColorDeath = "#55ff8a", ColorKill = "#55ff8a" } },
-                { "deathmessages.vip", new PluginConfig.ColorNickName { ColorDeath = "#f9ff55", ColorKill = "#f9ff55" } },
-                { "deathmessages.deluxe", new PluginConfig.ColorNickName { ColorDeath = "#7303c0", ColorKill = "#7303c0" } },
-                { "deathmessages.godlike", new PluginConfig.ColorNickName { ColorDeath = "#ff0000", ColorKill = "#ff0000" } }
-            };
+            public Dictionary<string, ColorNickName> ColorsNamePlayer = new Dictionary<string, ColorNickName>();
             [JsonProperty("Настройка интерфейса")]
-            public UISettings UI = new PluginConfig.UISettings
+            public UISettings UI = new UISettings();
+        }
+
+        public PluginConfig GetDefaultConfig()
+        {
+            return new PluginConfig
             {
-                BackgroundColor = "#00000080",
-                DistanceColor = "#FFFFFF00",
-                OffsetY = 0
+                ShowWeaponMods = true,
+                ShowHeadShots = true,
+                ShowAnimalsDeath = true,
+                MaxKillsForBar = 3,
+                ColorsNamePlayer = new Dictionary<string, PluginConfig.ColorNickName>
+                {
+                    { "deathmessages.premium", new PluginConfig.ColorNickName { ColorDeath = "#55ff8a", ColorKill = "#55ff8a" } },
+                    { "deathmessages.vip", new PluginConfig.ColorNickName { ColorDeath = "#f9ff55", ColorKill = "#f9ff55" } },
+                    { "deathmessages.deluxe", new PluginConfig.ColorNickName { ColorDeath = "#7303c0", ColorKill = "#7303c0" } },
+                    { "deathmessages.godlike", new PluginConfig.ColorNickName { ColorDeath = "#ff0000", ColorKill = "#ff0000" } }
+                },
+                UI = new PluginConfig.UISettings
+                {
+                    BackgroundColor = "#8000ff",
+                    DistanceColor = "#fff0",
+                    OffsetY = 0
+                }
             };
-            [JsonProperty("Названия")]
-            public Dictionary<string, string> Names = new Dictionary<string, string>()
+        }
+
+        private void Init()
+        {
+            Configuration = Config.ReadObject<PluginConfig>();
+        }
+
+        protected override void LoadDefaultConfig()
+        {
+            Config.WriteObject(GetDefaultConfig(), true);
+        }
+
+        #endregion
+
+        #region U'mod Hook's
+        private void OnServerInitialized()
+        {
+            PrintWarning("\n-----------------------------\n " +" Author - Sempai#3239\n " +" VK - https://vk.com/rustnastroika\n " +" Forum - https://topplugin.ru\n " +" Discord - https://discord.gg/5DPTsRmd3G\n" +"-----------------------------"); 
+            Instance = this;
+
+            foreach (var itemDef in ItemManager.GetItemDefinitions())
+            {
+                Item newItem = ItemManager.CreateByName(itemDef.shortname, 1, 0);
+
+                BaseEntity heldEntity = newItem.GetHeldEntity();
+                if (heldEntity != null)
+                {
+                    prefabID2Item[heldEntity.prefabID] = itemDef.shortname;
+                }
+
+                var deployablePrefab = itemDef.GetComponent<ItemModDeployable>()?.entityPrefab?.resourcePath;
+                if (string.IsNullOrEmpty(deployablePrefab))
+                {
+                    continue;
+                }
+
+                var shortPrefabName = GameManager.server.FindPrefab(deployablePrefab)?.GetComponent<BaseEntity>()?.ShortPrefabName;
+                if (!string.IsNullOrEmpty(shortPrefabName) && !prefabName2Item.ContainsKey(shortPrefabName))
+                {
+                    prefabName2Item.Add(shortPrefabName, itemDef.shortname);
+                }
+            }
+
+            foreach (var item in ItemManager.itemDictionary)
+            {
+                AddImage($"http://api.skyplugins.ru/api/getimage/{item.Value.shortname}/256", item.Value.shortname, 666);
+            }
+
+            AddImage($"https://gspics.org/images/2024/02/12/0buj0v.png", "headshot", 1336);
+
+            foreach (var perm in Configuration.ColorsNamePlayer)
+                permission.RegisterPermission(perm.Key, this);
+
+
+            if (Configuration.ShowAnimalsDeath == false)
+            {
+                Unsubscribe("OnEntityDeath");
+            }
+        }
+
+        protected override void LoadDefaultMessages()
+        {
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                ["npcplayer"] = "НПЦ",
+                ["guntrap.deployed"] = "Гантрап",
+                ["landmine"] = "Мина",
+                ["beartrap"] = "Капкан",
+                ["flameturret.deployed"] = "Огненная турель",
+                ["flameturret_fireball"] = "Огненная турель",
+                ["autoturret_deployed"] = "Турель",
+                ["sentry.scientist.static"] = "Турель NPC",
+                ["sentry.bandit.static"] = "Турель NPC",
+                ["spikes.floor"] = "Шипы",
+                ["spikes_static"] = "Шипы",
+                ["teslacoil.deployed"] = "Тесла",
+                ["barricade.wood"] = "Баррикада",
+                ["barricade.woodwire"] = "Баррикада",
+                ["barricade.metal"] = "Баррикада",
+                ["bradleyapc"] = "Танк",
+                ["gates.external.high.wood"] = "Ворота",
+                ["gates.external.high.stone"] = "Ворота",
+                ["icewall"] = "Ледяная стена",
+                ["wall.external.high.ice"] = "Ледяная стена",
+                ["wall.external.high.stone"] = "Стена",
+                ["wall.external.high.wood"] = "Стена",
+                ["campfire"] = "Костер",
+                ["skull_fire_pit"] = "Костер",
+                ["lock.code"] = "Замок",
+                ["boar"] = "Кабан",
+                ["bear"] = "Медведь",
+                ["polarbear"] = "Полярный Медведь",
+                ["wolf"] = "Волк",
+                ["stag"] = "Олень",
+                ["chicken"] = "Курица",
+                ["horse"] = "Конь",
+                ["minicopter.entity"] = "Миникоптер",
+                ["scraptransporthelicopter"] = "Транспортный вертолет",
+                ["patrolhelicopter"] = "Патрульный вертолет",
+                ["napalm"] = "Напалм",
+                ["fireball_small"] = "Огонь",
+                ["fireball_small_shotgun"] = "Огонь",
+                ["fireball_small_arrow"] = "Огонь",
+                ["sam_site_turret_deployed"] = "ПВО",
+                ["cactus-1"] = "Кактус",
+                ["cactus-2"] = "Кактус",
+                ["cactus-3"] = "Кактус",
+                ["cactus-4"] = "Кактус",
+                ["cactus-5"] = "Кактус",
+                ["cactus-6"] = "Кактус",
+                ["cactus-7"] = "Кактус",
+                ["hotairballoon"] = "Воздушный шар",
+                ["cave_lift_trigger"] = "Лифт"
+            }, this, "ru");
+            lang.RegisterMessages(new Dictionary<string, string>
             {
                 ["npcplayer"] = "NPC",
                 ["guntrap.deployed"] = "Guntrap",
@@ -148,95 +264,7 @@ namespace Oxide.Plugins
                 ["cactus-7"] = "Cactus",
                 ["hotairballoon"] = "Hot air balloon",
                 ["cave_lift_trigger"] = "Lift"
-            };
-            [JsonProperty("Префикс в чате")]
-            public string ChatPrefix = "<color=#55ff8a>[DeathMessages]</color>";
-            [JsonProperty("Время появления новой строчки в секундах")]
-            public string FadeIn  = "1";
-        }
-
-        private void Init()
-        {
-            Configuration = Config.ReadObject<PluginConfig>();
-            Config.WriteObject(Configuration);
-        }
-
-        protected override void LoadDefaultConfig()
-        {
-            Config.WriteObject(new PluginConfig(), true);
-        }
-
-        protected override void LoadDefaultMessages()
-        {
-            lang.RegisterMessages(new Dictionary<string, string>
-            {
-                {"USAGE", ": Usage example: /dm <on>/<off>"},
-                {"ENABLED", ": You enable DeathMessages"},
-                {"DISABLED", ": You disable DeathMessages"}
-            }, this);
-        }
-
-        #endregion
-
-        #region U'mod Hook's
-        private void OnServerInitialized()
-        {
-            Instance = this;
-            uiHide = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, TemporaryBool>>("DMData");
-            foreach (var itemDef in ItemManager.GetItemDefinitions())
-            {
-                Item newItem = ItemManager.CreateByName(itemDef.shortname, 1, 0);
-
-                BaseEntity heldEntity = newItem.GetHeldEntity();
-                if (heldEntity != null)
-                {
-                    prefabID2Item[heldEntity.prefabID] = itemDef.shortname;
-                }
-
-                var deployablePrefab = itemDef.GetComponent<ItemModDeployable>()?.entityPrefab?.resourcePath;
-                if (string.IsNullOrEmpty(deployablePrefab))
-                {
-                    continue;
-                }
-
-                var shortPrefabName = GameManager.server.FindPrefab(deployablePrefab)?.GetComponent<BaseEntity>()?.ShortPrefabName;
-                if (!string.IsNullOrEmpty(shortPrefabName) && !prefabName2Item.ContainsKey(shortPrefabName))
-                {
-                    prefabName2Item.Add(shortPrefabName, itemDef.shortname);
-                }
-            }
-
-            foreach (var item in ItemManager.itemDictionary)
-            {
-                if (HasImage(item.Value.shortname, 16) == false)
-                {
-                    AddImage($"https://api.skyplugins.ru/api/getimage/{item.Value.shortname}/16", item.Value.shortname, 16);
-                }
-            }
-
-            AddImage($"https://i.imgur.com/aK1fE31.png", "headshot", 16);
-
-            foreach (var perm in Configuration.ColorsNamePlayer)
-                permission.RegisterPermission(perm.Key, this);
-
-            if (Configuration.ShowAnimalsDeath == false)
-            {
-                Unsubscribe("OnEntityDeath");
-            }
-
-            List<ulong> hPlayersCache = new List<ulong>();
-            foreach(var hPlayer in uiHide)
-            {
-                if(hPlayer.Value.Expire + 604800 < new DateTimeOffset(DateTime.Now).ToUnixTimeMilliseconds())
-                {
-                    hPlayersCache.Add(hPlayer.Key);
-                }
-            }
-
-            foreach(var hPlayer in hPlayersCache)
-            {
-                uiHide.Remove(hPlayer);
-            }
+            }, this, "en");
         }
 
         private void Unload()
@@ -244,22 +272,11 @@ namespace Oxide.Plugins
             if (DeathNotesTimer != null)
                 DeathNotesTimer.Destroy();
 
+            DeathNote.DeathNotes = new List<DeathNote>();
+
             foreach (var player in BasePlayer.activePlayerList)
             {
                 CuiHelper.DestroyUi(player, "DeathMessages");
-            }
-
-            Interface.Oxide.DataFileSystem.WriteObject("DMData", uiHide);
-        }
-
-        private double lastSave = new DateTimeOffset(DateTime.Now).ToUnixTimeSeconds();
-        private void OnServerSave()
-        {
-            double value = new DateTimeOffset(DateTime.Now).ToUnixTimeSeconds();
-            if (lastSave + 1800 < value)
-            {
-                lastSave = value;
-                Interface.Oxide.DataFileSystem.WriteObject("DMData", uiHide);
             }
         }
 
@@ -310,27 +327,12 @@ namespace Oxide.Plugins
 
                 if (hitInfo.InitiatorPlayer != null)
                 {
-                    if(hitInfo.InitiatorPlayer.IsNpc || player.IsNpc)
-                    {
-                        if(Configuration.ShowNPCDeath == false)
-                        {
-                            return null;
-                        }
-                    }
-
                     OnDeath(player, hitInfo.InitiatorPlayer, hitInfo);
                 }
                 else
                 {
                     if (hitInfo.Initiator != null)
                     {
-                        if (hitInfo.Initiator.IsNpc || player.IsNpc)
-                        {
-                            if (Configuration.ShowNPCDeath == false)
-                            {
-                                return null;
-                            }
-                        }
                         OnDeath(player, hitInfo.Initiator, hitInfo);
                     }
                 }
@@ -346,7 +348,6 @@ namespace Oxide.Plugins
             public string WeaponName;
             public string[] WeaponMods;
             public bool IsHeadShot;
-            public bool IsBody;
         }
 
         private void OnDeath(BasePlayer victim, BasePlayer initiator, HitInfo hitInfo)
@@ -362,7 +363,7 @@ namespace Oxide.Plugins
             WeaponInfo weaponInfo = GetWeaponInfo(hitInfo);
 
             float fDistance = Vector3.Distance(victim.transform.position, initiator.transform.position);
-            float sDistance = fDistance > 650 ? 650 : fDistance;
+            float sDistance = fDistance > 300 ? 300 : fDistance;
 
             weaponInfo.IsHeadShot = hitInfo.HitBone == 698017942;
 
@@ -373,6 +374,14 @@ namespace Oxide.Plugins
             }
             else
             {
+                /*string clanTag = string.Empty;
+                if (Clans != null)
+                {
+                    clanTag = (string)Clans?.Call("GetClanOf", initiator);
+                    if (!string.IsNullOrEmpty(clanTag))
+                        clanTag = "[" + clanTag + "] ";
+                }*/
+
                 initiatorDisplayName = initiator.displayName;
             }
 
@@ -383,6 +392,14 @@ namespace Oxide.Plugins
             }
             else
             {
+                /*string clanTag = string.Empty;
+                if (Clans != null)
+                {
+                    clanTag = (string)Clans?.Call("GetClanOf", victim);
+                    if(!string.IsNullOrEmpty(clanTag))
+                        clanTag = "[" + clanTag + "] ";
+                }*/
+
                 victimDisplayName = victim.displayName;
             }
 
@@ -421,9 +438,8 @@ namespace Oxide.Plugins
             WeaponInfo weaponInfo = GetWeaponInfo(hitInfo);
 
             float fDistance = Vector3.Distance(victim.transform.position, initiator.transform.position);
-            float sDistance = fDistance > 650 ? 650 : fDistance;
+            float sDistance = fDistance > 300 ? 300 : fDistance;
 
-            weaponInfo.IsBody = hitInfo.HitBone == 383;
             weaponInfo.IsHeadShot = hitInfo.HitBone == 698017942;
 
             if (initiator.IsNpc == true || initiator.userID.IsSteamId() == false)
@@ -433,6 +449,14 @@ namespace Oxide.Plugins
             }
             else
             {
+                /*string clanTag = string.Empty;
+                if (Clans != null)
+                {
+                    clanTag = (string)Clans?.Call("GetClanOf", initiator);
+                    if (!string.IsNullOrEmpty(clanTag))
+                        clanTag = "[" + clanTag + "] ";
+                }*/
+
                 initiatorDisplayName = initiator.displayName;
             }
 
@@ -518,15 +542,15 @@ namespace Oxide.Plugins
             WeaponInfo weaponInfo = GetWeaponInfoFromPrefab(initiator);
 
             float fDistance = Vector3.Distance(victim.transform.position, initiator.transform.position);
-            float sDistance = fDistance > 650 ? 650 : fDistance;
+            float sDistance = fDistance > 300 ? 300 : fDistance;
 
             if (initiator != null)
             {
                 initiatorDisplayName = initiator.ShortPrefabName;
 
-                if (Configuration.Names.ContainsKey(initiatorDisplayName) == false)
+                if (lang.GetMessage(initiatorDisplayName, this, null) == initiatorDisplayName)
                 {
-                    LogToFile("DeathMessages", "[CONFIG ISSUE] Не найдено красивое названия для: " + initiator.ShortPrefabName, this, true);
+                    LogToFile("DeathMessages", "InitiatorDisplayName: " + initiator.ShortPrefabName, this, true);
                     return;
                 }
 
@@ -600,19 +624,6 @@ namespace Oxide.Plugins
             return weaponInfo;
         }
 
-        public static Encoding CP866 = Encoding.GetEncoding("CP866");
-        public static string GetCleanString(string str)
-        {
-            try
-            {
-                return CP866.GetString(Encoding.Convert(Encoding.UTF8, CP866, Encoding.UTF8.GetBytes(str)));
-            }
-            catch(ArgumentOutOfRangeException exception)
-            {
-                return str;
-            }
-        }
-
         public static double GetStringWidth(string message, string font, int fontSize)
         {
             if (message.Contains("</color>"))
@@ -620,13 +631,24 @@ namespace Oxide.Plugins
                 message = message.Substring(16);
                 message = message.Replace("</color>", "");
             }
-            
+
             System.Drawing.Font stringFont = new System.Drawing.Font(font, fontSize, System.Drawing.FontStyle.Bold);
             using (System.Drawing.Bitmap tempImage = new System.Drawing.Bitmap(200, 200))
             {
                 System.Drawing.SizeF stringSize = System.Drawing.Graphics.FromImage(tempImage).MeasureString(message, stringFont);
                 return stringSize.Width;
             }
+        }
+
+        public static int GetStringLength(string message)
+        {
+            if (message.Contains("</color>"))
+            {
+                message = message.Substring(16);
+                message = message.Replace("</color>", "");
+            }
+
+            return message.Length;
         }
         #endregion
 
@@ -640,83 +662,134 @@ namespace Oxide.Plugins
 
             public WeaponInfo WeaponInfo { get; set; }
 
+            public bool RenameVictim { get; set; }
+            public bool RenameInitiator { get; set; }
+
+            public Dictionary<string, string> UIStrings = new Dictionary<string, string>();
+
             public string Distance { get; set; }
 
-            public static List<string> DeathNotes = new List<string>();
+            public static List<DeathNote> DeathNotes = new List<DeathNote>();
 
             public DeathNote(string victimName, string initiatorName, WeaponInfo weaponInfo, float distance, string colorVictim = "", string colorInitiator = "", bool needRenameVictim = false, bool needRenameInitiator = false)
             {
-                this.WeaponInfo = weaponInfo;
-                this.Distance = distance.ToString("0.0");
-
-                if (needRenameVictim && Instance.Configuration.Names.TryGetValue(victimName, out victimName))
+                if (needRenameVictim)
                     this.VictimName = $"{victimName}";
                 else
-                    this.VictimName = $"<color={(string.IsNullOrEmpty(colorVictim) ? "#ffffff" : colorVictim)}>{GetCleanString(victimName)}</color>";
+                    this.VictimName = $"<color={(string.IsNullOrEmpty(colorVictim) ? "#ffffff" : colorVictim)}>{victimName}</color>";
 
-                if (needRenameInitiator && Instance.Configuration.Names.TryGetValue(initiatorName, out initiatorName))
+                if (needRenameInitiator)
                     this.InitiatorName = $"{initiatorName}";
                 else
-                    this.InitiatorName = $"<color={(string.IsNullOrEmpty(colorInitiator) ? "#ffffff" : colorInitiator)}>{GetCleanString(initiatorName)}</color>";
-                
+                    this.InitiatorName = $"<color={(string.IsNullOrEmpty(colorInitiator) ? "#ffffff" : colorInitiator)}>{initiatorName}</color>";
+
+                this.WeaponInfo = weaponInfo;
+                this.Distance = distance.ToString("0.0");
+                this.RenameVictim = needRenameVictim;
+                this.RenameInitiator = needRenameInitiator;
+
                 if (DeathNotes.Count > Instance.Configuration.MaxKillsForBar - 1)
                     DeathNotes.Remove(DeathNotes.LastOrDefault());
 
                 if (DeathNotes.Count == 0)
-                    DeathNotes.Add(ToJson());
+                    DeathNotes.Add(this);
                 else
-                    DeathNotes.Insert(0, ToJson());
+                    DeathNotes.Insert(0, this);
 
-                UpdateUI(true);
+                UpdateUI();
                 UpdateTimer();
-            }
-
-            public string ToJson()
-            {
-                return Instance.GetReplacedString
-                (
-                    VictimName,
-                    InitiatorName,
-                    WeaponInfo.WeaponName,
-                    WeaponInfo.WeaponMods,
-                    WeaponInfo.IsHeadShot,
-                    Distance,
-                    GetStringWidth(VictimName, "Roboto Condensed", 8) + 20,
-                    GetStringWidth(InitiatorName, "Roboto Condensed", 8) + 20
-                );
             }
         }
 
-        public static void UpdateUI(bool onInsert)
+        public static void UpdateUI()
         {
             string deathContainer = Instance.GetUIContainerString();
-            string[] dNotes = new string[DeathNote.DeathNotes.Count];
-            for (int i = 0; i < DeathNote.DeathNotes.Count; i++)
+            Dictionary<string, string[]> deathNotes = new Dictionary<string, string[]>();
+            for (int j = 0; j < Instance.lang.GetLanguages(Instance).Length; j++)
             {
-                string dNote = string.Copy(DeathNote.DeathNotes[i]);
-                dNote = dNote.Replace($"{{MainOffsetMinY}}", $"{-66 + (Instance.Configuration.UI.OffsetY) - i * 25}");
-                dNote = dNote.Replace($"{{MainOffsetMaxY}}", $"{-46 + (Instance.Configuration.UI.OffsetY) - i * 25}");
+                string lang = Instance.lang.GetLanguages(Instance).ElementAt(j);
+                deathNotes[lang] = new string[Instance.Configuration.MaxKillsForBar];
+                for (int i = 0; i < DeathNote.DeathNotes.Count; i++)
+                {
+                    string initiatorName = DeathNote.DeathNotes[i].InitiatorName;
+                    string victimName = DeathNote.DeathNotes[i].VictimName;
 
-                if (i == 0 && onInsert)
-                    dNote = dNote.Replace("1337", Instance.Configuration.FadeIn);
-                else
-                    dNote = dNote.Replace("1337", "0");
+                    if (DeathNote.DeathNotes[i].RenameInitiator)
+                    {
+                        if (Instance.lang.GetMessages(lang, Instance).ContainsKey(initiatorName))
+                            initiatorName = Instance.lang.GetMessages(lang, Instance)[initiatorName];
+                    }
 
-                dNotes[i] = dNote;
+                    if (DeathNote.DeathNotes[i].RenameVictim)
+                    {
+                        if (Instance.lang.GetMessages(lang, Instance).ContainsKey(victimName))
+                            victimName = Instance.lang.GetMessages(lang, Instance)[victimName];
+                    }
+
+                    double initiatorWidth = GetStringWidth(initiatorName, "Roboto condensed", 12);
+                    double victimWidth = GetStringWidth(victimName, "Roboto condensed", 12);
+
+                    int initiatorLength = GetStringLength(initiatorName);
+                    if (initiatorLength <= 2)
+                    {
+                        initiatorWidth *= 2;
+                    }
+                    else if (initiatorLength <= 5)
+                    {
+                        initiatorWidth *= 1;
+                    }
+                    else if (initiatorLength <= 10)
+                    {
+                        initiatorWidth *= 0.8;
+                    }
+                    else
+                    {
+                        initiatorWidth *= 0.7;
+                    }
+
+                    int victimLength = GetStringLength(victimName);
+                    if (victimLength <= 2)
+                    {
+                        victimWidth *= 2;
+                    }
+                    else if (victimLength <= 5)
+                    {
+                        victimWidth *= 1;
+                    }
+                    else if (victimLength <= 10)
+                    {
+                        victimWidth *= 0.8;
+                    }
+                    else
+                    {
+                        victimWidth *= 0.7;
+                    }
+
+                    deathNotes[lang][i] = Instance.GetReplacedString(i,
+                    victimName,
+                    initiatorName,
+                    DeathNote.DeathNotes[i].WeaponInfo.WeaponName,
+                    DeathNote.DeathNotes[i].WeaponInfo.WeaponMods,
+                    DeathNote.DeathNotes[i].WeaponInfo.IsHeadShot,
+                    DeathNote.DeathNotes[i].Distance,
+                    victimWidth,
+                    initiatorWidth);
+                }
             }
 
             foreach (var player in BasePlayer.activePlayerList)
             {
-                TemporaryBool showUI;
-                if (Instance.uiHide.TryGetValue(player.userID, out showUI) && showUI.Value == false)
-                    continue;
-
                 CuiHelper.DestroyUi(player, "DeathMessages");
                 CuiHelper.AddUi(player, deathContainer);
 
-                for (int i = 0; i < dNotes.Length; i++)
+                string playerLang = Instance.lang.GetLanguage(player.UserIDString);
+
+                if (deathNotes.ContainsKey(playerLang) == false)
+                    playerLang = "en";
+
+                for (int i = 0; i < deathNotes[playerLang].Length; i++)
                 {
-                    CuiHelper.AddUi(player, dNotes[i]);
+                    CuiHelper.AddUi(player, deathNotes[playerLang][i]);
                 }
             }
         }
@@ -732,7 +805,7 @@ namespace Oxide.Plugins
                 {
                     DeathNote.DeathNotes.Remove(DeathNote.DeathNotes.LastOrDefault());
 
-                    UpdateUI(false);
+                    UpdateUI();
                     UpdateTimer();
                 }
                 else
@@ -752,7 +825,7 @@ namespace Oxide.Plugins
 
         private string defaultUIModString = string.Empty;
 
-        private string GetReplacedString(string victimName, string initiatorName, string weaponName, string[] weaponMods, bool isHeadShot, string distance, double victimWidth, double initiatorWidth)
+        private string GetReplacedString(int stringPosition, string victimName, string initiatorName, string weaponName, string[] weaponMods, bool isHeadShot, string distance, double victimWidth, double initiatorWidth)
         {
             string killString = GetUIString();
             double iconsOffset = 0.0;
@@ -761,7 +834,8 @@ namespace Oxide.Plugins
             {
                 string headShotString = GetUIHeadShotString();
                 iconsOffset += 21.0;
-                headShotString = headShotString.Replace($"{{WeaponImage}}", GetImage("headshot", 16));
+                headShotString = headShotString.Replace($"[{{i}}]", stringPosition.ToString());
+                headShotString = headShotString.Replace($"{{WeaponImage}}", GetImage("headshot", 1336));
                 headShotString = headShotString.Replace($"{{WeaponOffsetMinX}}", $"{5 + initiatorWidth + iconsOffset}");
                 headShotString = headShotString.Replace($"{{WeaponOffsetMaxX}}", $"{5 + initiatorWidth + iconsOffset + 18}");
                 headShotString = headShotString.Substring(1, headShotString.Length - 2);
@@ -775,7 +849,8 @@ namespace Oxide.Plugins
                 {
                     string weaponModString = GetUIModString();
                     iconsOffset += 18.0;
-                    weaponModString = weaponModString.Replace($"{{WeaponImage}}", GetImage(weaponMod, 16));
+                    weaponModString = weaponModString.Replace($"[{{i}}]", stringPosition.ToString());
+                    weaponModString = weaponModString.Replace($"{{WeaponImage}}", GetImage(weaponMod, 666));
                     weaponModString = weaponModString.Replace($"{{WeaponOffsetMinX}}", $"{5 + initiatorWidth + iconsOffset + 6}");
                     weaponModString = weaponModString.Replace($"{{WeaponOffsetMaxX}}", $"{5 + initiatorWidth + iconsOffset + 18}");
                     weaponModString = weaponModString.Substring(1, weaponModString.Length - 2);
@@ -790,7 +865,11 @@ namespace Oxide.Plugins
                 weaponName = "skull.human";
             }
 
+            killString = killString.Replace($"[{{i}}]", stringPosition.ToString());
+
             killString = killString.Replace($"{{MainOffsetMinX}}", $"-{victimWidth + initiatorWidth + iconsOffset + 18 + 15 + 6 + 50}");
+            killString = killString.Replace($"{{MainOffsetMinY}}", $"{-66 + (Configuration.UI.OffsetY) - stringPosition * 25}");
+            killString = killString.Replace($"{{MainOffsetMaxY}}", $"{-46 + (Configuration.UI.OffsetY) - stringPosition * 25}");
             killString = killString.Replace($"{{InitiatorName}}", initiatorName);
             killString = killString.Replace($"{{InitiatorOffsetMaxX}}", initiatorWidth.ToString());
             killString = killString.Replace($"{{VictimName}}", victimName);
@@ -801,7 +880,7 @@ namespace Oxide.Plugins
             killString = killString.Replace($"{{DistanceM}}", distance + "m");
             killString = killString.Replace($"{{DistanceMOffsetMinX}}", $"{5 + initiatorWidth + iconsOffset + 18 + 5 + victimWidth}");
             killString = killString.Replace($"{{DistanceMOffsetMaxX}}", $"{5 + initiatorWidth + iconsOffset + 18 + 5 + victimWidth + 60}");
-            killString = killString.Replace($"{{WeaponImage}}", GetImage(weaponName, 16));
+            killString = killString.Replace($"{{WeaponImage}}", GetImage(weaponName, 666));
             killString = killString.Replace($"{{WeaponOffsetMinX}}", $"{5 + initiatorWidth}");
             killString = killString.Replace($"{{WeaponOffsetMaxX}}", $"{5 + initiatorWidth + 18}");
 
@@ -878,13 +957,12 @@ namespace Oxide.Plugins
             CuiElementContainer Container = new CuiElementContainer();
             Container.Add(new CuiElement
             {
-                Name = $"DeathMessages.[ValueRemoved]",
+                Name = $"DeathMessages.[{{i}}]",
                 Parent = "DeathMessages",
                 Components =
                 {
                     new CuiImageComponent
                     {
-                        FadeIn = 1337f,
                         Color = HexToRustFormat(Configuration.UI.BackgroundColor),
                     },
                     new CuiRectTransformComponent
@@ -899,12 +977,11 @@ namespace Oxide.Plugins
             Container.Add(new CuiElement
             {
                 Name = "DeathMessages.Initiator",
-                Parent = $"DeathMessages.[ValueRemoved]",
+                Parent = $"DeathMessages.[{{i}}]",
                 Components =
                         {
                             new CuiTextComponent
                             {
-                                FadeIn = 1337f,
                                 Text = $"<color=#FFFFFF>{{InitiatorName}}</color>",
                                 Align = TextAnchor.MiddleCenter,
                                 Font = "robotocondensed-bold.ttf",
@@ -927,12 +1004,11 @@ namespace Oxide.Plugins
             Container.Add(new CuiElement
             {
                 Name = "DeathMessages.Victim",
-                Parent = $"DeathMessages.[ValueRemoved]",
+                Parent = $"DeathMessages.[{{i}}]",
                 Components =
                         {
                             new CuiTextComponent
                             {
-                                FadeIn = 1337f,
                                 Text = $"<color=#FFFFFF>{{VictimName}}</color>",
                                 Align = TextAnchor.MiddleCenter,
                                 Font = "robotocondensed-bold.ttf",
@@ -955,12 +1031,11 @@ namespace Oxide.Plugins
             Container.Add(new CuiElement
             {
                 Name = $"DeathMessages.Distance",
-                Parent = $"DeathMessages.[ValueRemoved]",
+                Parent = $"DeathMessages.[{{i}}]",
                 Components =
                             {
                                 new CuiRawImageComponent
                                 {
-                                    FadeIn = 1337f,
                                     Color = HexToRustFormat(Configuration.UI.DistanceColor),
                                     Material = "assets/icons/iconmaterial.mat",
                                     Sprite = $"assets/icons/subtract.png",
@@ -977,12 +1052,11 @@ namespace Oxide.Plugins
             Container.Add(new CuiElement
             {
                 Name = "DeathMessages.DistanceM",
-                Parent = $"DeathMessages.[ValueRemoved]",
+                Parent = $"DeathMessages.[{{i}}]",
                 Components =
                         {
                             new CuiTextComponent
                             {
-                                FadeIn = 1337f,
                                 Text = $"<color=#404040>{{DistanceM}}</color>",
                                 Align = TextAnchor.MiddleCenter,
                                 Font = "robotocondensed-bold.ttf",
@@ -1005,12 +1079,11 @@ namespace Oxide.Plugins
             Container.Add(new CuiElement
             {
                 Name = $"DeathMessages.WeaponImage",
-                Parent = $"DeathMessages.[ValueRemoved]",
+                Parent = $"DeathMessages.[{{i}}]",
                 Components =
                             {
                                 new CuiRawImageComponent
                                 {
-                                    FadeIn = 1337f,
                                     Png = $"{{WeaponImage}}",
                                 },
                                 new CuiRectTransformComponent
@@ -1038,12 +1111,11 @@ namespace Oxide.Plugins
             Container.Add(new CuiElement
             {
                 Name = $"DeathMessages.WeaponMod",
-                Parent = $"DeathMessages.[ValueRemoved]",
+                Parent = $"DeathMessages.[{{i}}]",
                 Components =
                             {
                                 new CuiRawImageComponent
                                 {
-                                    FadeIn = 1337f,
                                     Png = $"{{WeaponImage}}",
                                 },
                                 new CuiRectTransformComponent
@@ -1071,12 +1143,11 @@ namespace Oxide.Plugins
             Container.Add(new CuiElement
             {
                 Name = $"DeathMessages.WeaponHeadshot",
-                Parent = $"DeathMessages.[ValueRemoved]",
+                Parent = $"DeathMessages.[{{i}}]",
                 Components =
                             {
                                 new CuiRawImageComponent
                                 {
-                                    FadeIn = 1337f,
                                     Png = $"{{WeaponImage}}",
                                 },
                                 new CuiRectTransformComponent
@@ -1106,43 +1177,6 @@ namespace Oxide.Plugins
             ColorUtility.TryParseHtmlString(hex, out color);
             sb.Clear();
             return sb.AppendFormat("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a).ToString();
-        }
-        #endregion
-
-        #region Chat&Console
-        [ChatCommand("dm")]
-        private void DMCmd(BasePlayer player, string cmd, string[] args)
-        {
-            if(args.Length > 0)
-            {
-                switch (args[0])
-                {
-                    case "on":
-                        {
-                            uiHide[player.userID] = new TemporaryBool()
-                            {
-                                Value = true,
-                                Expire = new DateTimeOffset(DateTime.UtcNow).ToUnixTimeSeconds()
-                            };
-                            SendReply(player, Configuration.ChatPrefix + lang.GetMessage("ENABLED", this, player.UserIDString));
-                            break;
-                        }
-                    case "off":
-                        {
-                            uiHide[player.userID] = new TemporaryBool()
-                            {
-                                Value = false,
-                                Expire = new DateTimeOffset(DateTime.UtcNow).ToUnixTimeSeconds()
-                            };
-                            CuiHelper.DestroyUi(player, "DeathMessages");
-                            SendReply(player, Configuration.ChatPrefix + lang.GetMessage("DISABLED", this, player.UserIDString));
-                            break;
-                        }
-                }
-                return;
-            }
-
-            SendReply(player, Configuration.ChatPrefix + lang.GetMessage("USAGE", this, player.UserIDString));
         }
         #endregion
     }

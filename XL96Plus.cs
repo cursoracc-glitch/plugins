@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("XL96Plus", "WhitePlugins.ru", "1.0.1")]
+    [Info("XL96Plus", "Monster", "1.0.1")]
     class XL96Plus : RustPlugin
 	{		
 		#region Configuration

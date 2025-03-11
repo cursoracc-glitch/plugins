@@ -1,4 +1,4 @@
-﻿using Network;
+using Network;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Plugins;
@@ -8,7 +8,7 @@ using System.Collections.Generic;
 using UnityEngine;
 namespace Oxide.Plugins
 {
-    [Info("Trade", "KACAT КОРМИТ", "2.3.3")]
+    [Info("Trade fix by Leo", "rustmods.ru", "2.2.31")]
     public class Trade : RustPlugin
     {
         private static Trade ins;
@@ -19,7 +19,7 @@ namespace Oxide.Plugins
 
         protected override void LoadDefaultConfig()
         {
-            PrintWarning("Благодарим за покупку плагина на сайте oxide-russia.ru. Если вы передадите этот плагин сторонним лицам знайте - это лишает вас гарантированных обновлений!");
+            PrintWarning("Благодарим за покупку плагина на сайте RustPlugin.ru. Если вы передадите этот плагин сторонним лицам знайте - это лишает вас гарантированных обновлений!");
             config = PluginConfig.DefaultConfig();
         }
 
@@ -126,7 +126,7 @@ namespace Oxide.Plugins
 
 
             [JsonIgnore]
-            [JsonProperty("Инициализация плагина")]
+            [JsonProperty("Инициализация плагина‌​​​‍")]
             public bool Init;
 
             public static PluginConfig DefaultConfig()
@@ -203,6 +203,8 @@ namespace Oxide.Plugins
 
         bool CanPlayerTrade(BasePlayer player)
         {
+            var reply = 0;
+            if (reply == 0) { }
             if (!config.Init) return false;
             if (config.mainSettings.getSwim)
             {
@@ -293,7 +295,7 @@ namespace Oxide.Plugins
                 "DENIED.PERMISSION", "Недоступно, вы в зоне Building Blocked!"
             }
             , {
-                "TRADE.HELP", "Trade by oxide-russia.ru\nИспользуйте комманду <color=orange>/trade \"НИК\"</color> для обмена\nЧто бы принять обмен, введите: <color=orange>/trade yes</color> (или /trade accept)\nЧто бы отказаться от обмена введите: <color=orange>/trade no </color> (или /trade cancel)"
+                "TRADE.HELP", "Trade by RustPlugin.ru\nИспользуйте комманду <color=orange>/trade \"НИК\"</color> для обмена\nЧто бы принять обмен, введите: <color=orange>/trade yes</color> (или /trade accept)\nЧто бы отказаться от обмена введите: <color=orange>/trade no </color> (или /trade cancel)"
             }
             , {
                 "PLAYER.NOT.FOUND", "Игрок '{0}' не найден!"
@@ -526,7 +528,7 @@ namespace Oxide.Plugins
             return null;
         }
 
-        public BasePlayer FindOnline(string nameOrUserId, ulong playerid = 4356096)
+        public BasePlayer FindOnline(string nameOrUserId, ulong playerid = 0)
         {
             nameOrUserId = nameOrUserId.ToLower();
             foreach (BasePlayer activePlayer in BasePlayer.activePlayerList)
@@ -730,21 +732,26 @@ namespace Oxide.Plugins
                 enabled = true;
             }
 
-            public void SendEntity(BasePlayer a, BaseEntity b, string reason = "")
+            public void SendEntity(BasePlayer a, BaseEntity b, string reason = "⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠")
             {
+                if (!Net.sv.IsConnected())
+                    return;
+
+                NetWrite netWrite = Net.sv.StartWrite();
+
                 a.net.connection.validate.entityUpdates++;
                 BaseNetworkable.SaveInfo c = new BaseNetworkable.SaveInfo
                 {
                     forConnection = a.net.connection,
                     forDisk = false
-                };
-
-                NetWrite netWrite = Net.sv.StartWrite();
+                }
+                ;
                 netWrite.PacketID(Message.Type.Entities);
                 netWrite.UInt32(a.net.connection.validate.entityUpdates);
                 b.ToStreamForNetwork(netWrite, c);
                 netWrite.Send(new SendInfo(a.net.connection));
             }
+
 
             public void StartLooting(BasePlayer player)
             {
@@ -788,40 +795,27 @@ namespace Oxide.Plugins
 
             public void CustomCompleteTrade()
             {
-                if (shopFront.vendorPlayer == null || shopFront.customerPlayer == null) return;
-                var player = shopFront.vendorPlayer;
-                var buyer = shopFront.customerPlayer;
-
-                if (player != null && buyer != null && shopFront.HasFlag(global::BaseEntity.Flags.Reserved1) && shopFront.HasFlag(global::BaseEntity.Flags.Reserved2))
+                if (shopFront.vendorPlayer != null && shopFront.customerPlayer != null && shopFront.HasFlag(global::BaseEntity.Flags.Reserved1) && shopFront.HasFlag(global::BaseEntity.Flags.Reserved2))
                 {
                     for (int i = shopFront.vendorInventory.capacity - 1; i >= 0; i--)
                     {
                         Item slot = shopFront.vendorInventory.GetSlot(i);
                         Item slot2 = shopFront.customerInventory.GetSlot(i);
-                        if (buyer != null && slot != null)
+                        if (shopFront.customerPlayer && slot != null)
                         {
-                            if (!buyer.inventory.GiveItem(slot))
-                                slot.Drop(buyer.inventory.containerMain.dropPosition, buyer.inventory.containerMain.dropVelocity, new Quaternion());
+                            player2.GiveItem(slot, global::BaseEntity.GiveItemReason.Generic);
                         }
-                        if (player != null && slot2 != null)
+                        if (shopFront.vendorPlayer && slot2 != null)
                         {
-                            if (!player.inventory.GiveItem(slot2))
-                                slot.Drop(player.inventory.containerMain.dropPosition, player.inventory.containerMain.dropVelocity, new Quaternion());
+                            player1.GiveItem(slot2, global::BaseEntity.GiveItemReason.Generic);
                         }
                     }
-                    global::Effect.server.Run(shopFront.transactionCompleteEffect.resourcePath, player, 0u, new Vector3(0f, 1f, 0f), Vector3.zero, null, false);
-                    global::Effect.server.Run(shopFront.transactionCompleteEffect.resourcePath, buyer, 0u, new Vector3(0f, 1f, 0f), Vector3.zero, null, false);
-                    ins.Reply(player, "TRADE.SUCCESS");
-                    ins.Reply(buyer, "TRADE.SUCCESS");
-
-                    if (ins.Cooldowns.ContainsKey(player))
-                        ins.Cooldowns[player] = DateTime.Now.AddSeconds(ins.GetPlayerCooldown(player.UserIDString));
-                    else ins.Cooldowns.Add(player, DateTime.Now.AddSeconds(ins.GetPlayerCooldown(player.UserIDString)));
-
-                    if (ins.Cooldowns.ContainsKey(buyer))
-                        ins.Cooldowns[buyer] = DateTime.Now.AddSeconds(ins.GetPlayerCooldown(buyer.UserIDString));
-                    else ins.Cooldowns.Add(buyer, DateTime.Now.AddSeconds(ins.GetPlayerCooldown(buyer.UserIDString)));
-
+                    global::Effect.server.Run(shopFront.transactionCompleteEffect.resourcePath, player1, 0u, new Vector3(0f, 1f, 0f), Vector3.zero, null, false);
+                    global::Effect.server.Run(shopFront.transactionCompleteEffect.resourcePath, player2, 0u, new Vector3(0f, 1f, 0f), Vector3.zero, null, false);
+                    ins.Reply(player1, "TRADE.SUCCESS");
+                    ins.Reply(player2, "TRADE.SUCCESS");
+                    ins.Cooldowns[player1] = DateTime.Now.AddSeconds(ins.GetPlayerCooldown(player1.UserIDString));
+                    ins.Cooldowns[player2] = DateTime.Now.AddSeconds(ins.GetPlayerCooldown(player2.UserIDString));
                     ins.tradeBoxes.Remove(this);
                     Destroy(this);
                 }

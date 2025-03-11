@@ -60,7 +60,7 @@ namespace Oxide.Plugins
             public bool ShowCraftNotes = false;
 
             [JsonProperty("Crafting rate bonus mulitplier (apply oxide perms for additional mulitpliers")]
-            public Dictionary<string, float> BonusMultiplier = new Dictionary<string, float>() { { "vip1", 90 }, { "vip2", 80 } };
+            public Dictionary<string, float> BonusMultiplier = new Dictionary<string, float>() { { "vip1", 90 }, { "vip2", 0 } };
 
             [JsonProperty("Advanced Crafting Options")]
             public Dictionary<string, CraftingData> CraftingOptions = new Dictionary<string, CraftingData>();

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Globalization;
@@ -10,8 +10,7 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("SkipNight", "A1M41K", "2.2.11")]
-      //  Слив плагинов server-rust by Apolo YouGame
+    [Info("SkipNight", "Sempai#3239", "3.0.0")]
     [Description("Плагин для пропуска ночи")]
     public class SkipNight : RustPlugin
     {
@@ -162,7 +161,6 @@ namespace Oxide.Plugins
         private void DrawUI(BasePlayer player)
         {
             CuiHelper.DestroyUi(player, "InfoVote");
-      //  Слив плагинов server-rust by Apolo YouGame
             var VoteUI = new CuiElementContainer();
             var VoteGUI = VoteUI.Add(new CuiPanel
             {
@@ -177,14 +175,11 @@ namespace Oxide.Plugins
                     AnchorMax = _cui.PanelMax
                 },
             }, "Overlay", "InfoVote");
-      //  Слив плагинов server-rust by Apolo YouGame
 
             VoteUI.Add(new CuiElement
             {
                 Parent = "InfoVote",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Name = "InfoVote" + "Headrs",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Components =
                 {
                     new CuiImageComponent()
@@ -203,7 +198,6 @@ namespace Oxide.Plugins
             VoteUI.Add(new CuiElement
             {
                 Parent = "InfoVote" + "Headrs",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Components =
                 {
                     new CuiTextComponent()
@@ -226,9 +220,7 @@ namespace Oxide.Plugins
             VoteUI.Add(new CuiElement
             {
                 Parent = "InfoVote",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Name = "InfoVote" + "VotesYes",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Components =
                 {
                     new CuiImageComponent()
@@ -248,7 +240,6 @@ namespace Oxide.Plugins
             VoteUI.Add(new CuiElement
             {
                 Parent = "InfoVote" + "VotesYes",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Components =
                 {
                     new CuiTextComponent()
@@ -271,9 +262,7 @@ namespace Oxide.Plugins
             VoteUI.Add(new CuiElement
             {
                 Parent = "InfoVote",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Name = "InfoVote" + "VotesNo",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Components =
                 {
                     new CuiImageComponent()
@@ -293,7 +282,6 @@ namespace Oxide.Plugins
             VoteUI.Add(new CuiElement
             {
                 Parent = "InfoVote" + "VotesNo",
-      //  Слив плагинов server-rust by Apolo YouGame
                 Components =
                 {
                     new CuiTextComponent()
@@ -465,7 +453,6 @@ namespace Oxide.Plugins
             {
                 CuiHelper.DestroyUi(p, "NightVote");
                 CuiHelper.DestroyUi(p, "InfoVote");
-      //  Слив плагинов server-rust by Apolo YouGame
                 CuiHelper.DestroyUi(p, "SkipNight");
             }
             ClearList();
@@ -489,7 +476,7 @@ namespace Oxide.Plugins
             {
                 message = string.Format(message, args);
             }
-            PrintToChat(player, string.Format("<size=16><color=#FFB02E>{0}</color>:</size>\n{1}", header, message));
+            PrintToChat(player, string.Format("<size=16><color=#378a1e>{0}</color>:</size>\n{1}", header, message));
         }
         
         
@@ -631,7 +618,6 @@ namespace Oxide.Plugins
                     var player = BasePlayer.activePlayerList[i];
                     CuiHelper.DestroyUi(player, "NightVote");
                     CuiHelper.DestroyUi(player, "InfoVote");
-      //  Слив плагинов server-rust by Apolo YouGame
                 }
             }
 

@@ -548,7 +548,7 @@ namespace Oxide.Plugins
                 {
                     BackpackItem = new Backpack
                     {
-                        UrlBackpack = "https://gspics.org/images/2024/04/16/0YZkAI.png",
+                        UrlBackpack = "https://cdn.discordapp.com/attachments/1124746976093814796/1208383710144237579/rPeKd9R.png",
 
                         BackpacOption = new List<Backpack.BackpackCraft>
                         {

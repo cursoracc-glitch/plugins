@@ -28,9 +28,9 @@ using Oxide.Core.Plugins;
                 var newConfig = new ConfigData();
                 newConfig.HackTimeList = new Dictionary<string, float>()
                 {
-                    ["hackcratesettings.default"] = 180,
-                    ["hackcratesettings.vip"] = 120,
-                    ["hackcratesettings.prem"] = 60,
+                    ["hackcratesettings.default"] = 500,
+                    ["hackcratesettings.vip"] = 100,
+                    ["hackcratesettings.prem"] = 25,
                 };
                 return newConfig; 
             }

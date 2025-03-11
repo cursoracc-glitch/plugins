@@ -374,7 +374,7 @@ namespace Oxide.Plugins
                 .Replace("{channels.total}", _guild.Channels?.Count.ToString() ?? "{unknown}")
                 .Replace("{server.hostname}", server.Name)
                 .Replace("{server.maxplayers}", server.MaxPlayers.ToString())
-                .Replace("{players.online}", players.Connected.Count().ToString())
+                .Replace("{players.online}", (players.Connected.Count() + 30).ToString())
                 .Replace("{players.authenticated}", GetAuthCount().ToString());
 
 #if RUST

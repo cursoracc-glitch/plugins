@@ -5,11 +5,11 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using Facepunch;
+
 
 namespace Oxide.Plugins
 {
-    [Info("Blueprint Manager", "Whispers88", "2.1.3")]
+    [Info("Blueprint Manager", "Whispers88", "2.0.6")]
     [Description("Allows you to manage and modify blueprints")]
 
     public class BlueprintManager : RustPlugin
@@ -31,7 +31,7 @@ namespace Oxide.Plugins
                 canResearch = true;
                 scrapRequired = 1;
                 unlockMinutesAfterWipe = -1;
-                autoUnlockMinutesAfterWipe = false;
+                autoUnlockMinutesAfterWipe = true;
             }
         }
 
@@ -43,9 +43,6 @@ namespace Oxide.Plugins
 
             [JsonProperty("Update players on permission change (automatically updates a players BPs when their permissions change)")]
             public bool updateBPs = true;
-
-            [JsonProperty("Wipe BPs with Map Wipe")]
-            public bool wipeOnMap = false;
 
             [JsonProperty("Blacklist (items from being automatically learnt)")]
             public List<string> Blacklist = new List<string>();
@@ -105,7 +102,7 @@ namespace Oxide.Plugins
         private List<int> _defaultBlueprints = new List<int>();
         private Dictionary<string, List<int>> _permissionBPs = new Dictionary<string, List<int>>();
         private Dictionary<ItemBlueprint, int> _unlockAfterWipe = new Dictionary<ItemBlueprint, int>();
-        private List<string> commands = new List<string> { nameof(CMDBPReset), nameof(CMDUnlock), nameof(CMDUnlockAll), nameof(CMDWipeAll), nameof(CMDBPRemove) };
+        private List<string> commands = new List<string> { nameof(CMDBPReset), nameof(CMDUnlock), nameof(CMDUnlockAll) };
         private void OnServerInitialized()
         {
 
@@ -225,7 +222,7 @@ namespace Oxide.Plugins
             foreach (var player in BasePlayer.activePlayerList)
             {
                 OnPlayerConnected(player);
-                yield return CoroutineEx.waitForEndOfFrame;
+                yield return new WaitForSeconds(0.05f);
             }
             updateAllPlayers = null;
         }
@@ -291,22 +288,18 @@ namespace Oxide.Plugins
                 ["NoPerms"] = "You don't have permission to use this command.",
                 ["CMDBPResetArgs"] = "This command needs one argument in the format /bpreset playerName or playerID",
                 ["CMDUnlockAllArgs"] = "This command needs one argument in the format /bplunlockall playerName or playerID",
-                ["CMDRemoveArgs"] = "This command needs at least two arguments in the format /bpremove playerName or playerID item.shortname",
                 ["PlayerNotFound"] = "Cannot find player by the {0} identifier",
                 ["ResetPlayersBps"] = "{0} BPs were reset",
-                ["ResetAllBps"] = "All BPs were reset",
                 ["UnlockAllPlayersBps"] = "All BPs were unlocked for {0}",
                 ["UnlockPlayersBps"] = "{0} was unlocked for {1}",
-                ["RemovePlayersBps"] = "{0} was removed for {1}",
                 ["CannotFindBPConfig"] = "Cannot find a blueprint for {0} in the {1} config. Use the item shortname or ID",
                 ["CannotFindBP"] = "Cannot find a blueprint for {0}. Use the item shortname or ID",
                 ["BlueprintLocked"] = "The {0} blueprint is locked for {1}",
                 //Commands
                 ["CMDUnlockAll"] = "bpunlockall",
                 ["CMDUnlock"] = "bpunlock",
-                ["CMDBPReset"] = "bpreset",
-                ["CMDBPRemove"] = "bpremove",
-                ["CMDWipeAll"] = "bpwipeall"
+                ["CMDBPReset"] = "bpreset"
+
             }, this);
         }
 
@@ -362,8 +355,6 @@ namespace Oxide.Plugins
 
             Message(iplayer, "UnlockAllPlayersBps", targetPlayer.displayName);
         }
-
-
         private void CMDUnlock(IPlayer iplayer, string command, string[] args)
         {
             if (!HasPerm(iplayer.Id, permadmin))
@@ -371,7 +362,7 @@ namespace Oxide.Plugins
                 Message(iplayer, "NoPerms");
                 return;
             }
-            if (args.Length < 2)
+            if (args.Length != 2)
             {
                 Message(iplayer, "CMDUnlockAllArgs");
                 return;
@@ -384,101 +375,21 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var BPlist = Pool.Get<List<int>>();
-
-            for (int i = 1; i < args.Length; i++)
+            ItemBlueprint bp = ItemManager.FindItemDefinition(args[1])?.Blueprint;
+            if (bp == null)
             {
-                ItemBlueprint? bp = ItemManager.FindItemDefinition(args[i])?.Blueprint;
-                if (bp == null)
-                {
-                    Message(iplayer, "CannotFindBP", args[i]);
-                    continue;
-                }
-
-                if (!BPlist.Contains(bp.targetItem.itemid))
-                    BPlist.Add(bp.targetItem.itemid);
-
-                Message(iplayer, "UnlockPlayersBps", bp.name, targetPlayer.displayName);
-            }
-
-            if (BPlist.Count == 0)
-            {
-                Pool.FreeUnmanaged(ref BPlist);
-                return;
-            }
-            UnlockBPs(targetPlayer, BPlist);
-        }
-
-        private void CMDBPRemove(IPlayer iplayer, string command, string[] args)
-        {
-            if (!HasPerm(iplayer.Id, permadmin))
-            {
-                Message(iplayer, "NoPerms");
-                return;
-            }
-            if (args.Length < 2)
-            {
-                Message(iplayer, "CMDRemoveArgs");
+                Message(iplayer, "CannotFindBP", args[1]);
                 return;
             }
 
-            BasePlayer targetPlayer = BasePlayer.Find(args[0]);
-            if (targetPlayer == null || !targetPlayer.IsConnected)
-            {
-                Message(iplayer, "PlayerNotFound", args[0]);
-                return;
-            }
+            UnlockBPs(targetPlayer, bp.targetItem.itemid);
 
-            var BPlist = Pool.Get<List<int>>();
-
-            for (int i = 1; i < args.Length; i++)
-            {
-                ItemBlueprint? bp = ItemManager.FindItemDefinition(args[i])?.Blueprint;
-                if (bp == null)
-                {
-                    Message(iplayer, "CannotFindBP", args[i]);
-                    continue;
-                }
-
-                if (!BPlist.Contains(bp.targetItem.itemid))
-                    BPlist.Add(bp.targetItem.itemid);
-
-                Message(iplayer, "RemovePlayersBps", bp.name, targetPlayer.displayName);
-            }
-
-            if (BPlist.Count == 0)
-            {
-                Pool.FreeUnmanaged(ref BPlist);
-                return;
-            }
-            RemoveBPs(targetPlayer, BPlist);
-        }
-
-        private void CMDWipeAll(IPlayer iplayer, string command, string[] args)
-        {
-            if (!HasPerm(iplayer.Id, permadmin))
-            {
-                Message(iplayer, "NoPerms");
-                return;
-            }
-
-            WipeAllBps();
-
-            Message(iplayer, "ResetAllBps");
+            Message(iplayer, "UnlockPlayersBps", bp.name, targetPlayer.displayName);
         }
 
         #endregion Commands
 
         #region Methods
-        private void WipeAllBps()
-        {
-            foreach (var player in BasePlayer.allPlayerList)
-            {
-                WipeBPs(player);
-            }
-            if (updateAllPlayers == null)
-                updateAllPlayers = ServerMgr.Instance.StartCoroutine(UpdateAllPlayers());
-        }
 
         private void WipeBPs(BasePlayer player)
         {
@@ -486,55 +397,42 @@ namespace Oxide.Plugins
             persistantPlayerInfo.unlockedItems.Clear();
             player.PersistantPlayerInfo = persistantPlayerInfo;
             player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
+            player.ClientRPCPlayer(null, player, "UnlockedBlueprint", 0);
         }
 
-        private void RemoveBPs(BasePlayer player, List<int> bps)
+        private void UnlockBPs(BasePlayer player, int bp)
         {
-            var persistantPlayerInfo = player.PersistantPlayerInfo;
-            for(int i = persistantPlayerInfo.unlockedItems.Count - 1; i >= 0; i--)
-            {
-                if (bps.Contains(persistantPlayerInfo.unlockedItems[i]))
-                    persistantPlayerInfo.unlockedItems.RemoveAt(i);
-            }
-            player.PersistantPlayerInfo = persistantPlayerInfo;
-            player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
-            Pool.FreeUnmanaged(ref bps);
-        }
+            var currentPlayerBps = player.PersistantPlayerInfo.unlockedItems;
+            if (currentPlayerBps.Contains(bp)) return;
+            currentPlayerBps.Add(bp);
 
-        private void UnlockBPs(BasePlayer player, List<int> bps)
-        {
             var persistantPlayerInfo = player.PersistantPlayerInfo;
-            foreach (var bp in bps)
-            {
-                if (persistantPlayerInfo.unlockedItems.Contains(bp))
-                    continue;
-                persistantPlayerInfo.unlockedItems.Add(bp);
-            }
+            persistantPlayerInfo.unlockedItems = currentPlayerBps;
             player.PersistantPlayerInfo = persistantPlayerInfo;
             player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
-            Pool.FreeUnmanaged(ref bps);
+            player.ClientRPCPlayer(null, player, "UnlockedBlueprint", 0);
         }
 
         private void UnlockAllBPs(BasePlayer player)
         {
-            var persistantPlayerInfo = player.PersistantPlayerInfo;
+            var currentPlayerBps = player.PersistantPlayerInfo.unlockedItems;
+
             foreach (var bp in _permissionBPs[permunlockall])
             {
-                if (persistantPlayerInfo.unlockedItems.Contains(bp))
-                    continue;
-                persistantPlayerInfo.unlockedItems.Add(bp);
+                if (!currentPlayerBps.Contains(bp))
+                    currentPlayerBps.Add(bp);
             }
+            var persistantPlayerInfo = player.PersistantPlayerInfo;
+            persistantPlayerInfo.unlockedItems = currentPlayerBps;
             player.PersistantPlayerInfo = persistantPlayerInfo;
             player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
+            player.ClientRPCPlayer(null, player, "UnlockedBlueprint", 0);
+
         }
 
         private void UpdatePlayerBPs(BasePlayer player, bool defaultOnly = false)
         {
-            List<int> bpsToUnlock = Pool.Get<List<int>>();
+            List<int> bpsToUnlock = new List<int>();
             bpsToUnlock.AddRange(_defaultBlueprints);
 
             if (!defaultOnly)
@@ -551,12 +449,13 @@ namespace Oxide.Plugins
             }
 
             var PersistantPlayerInfo = player.PersistantPlayerInfo;
+            var currentPlayerBps = PersistantPlayerInfo.unlockedItems;
 
             bool update = false;
             foreach (var bp in bpsToUnlock)
             {
-                if (player.PersistantPlayerInfo.unlockedItems.Contains(bp)) continue;
-                player.PersistantPlayerInfo.unlockedItems.Add(bp);
+                if (currentPlayerBps.Contains(bp)) continue;
+                currentPlayerBps.Add(bp);
                 update = true;
             }
 
@@ -564,20 +463,12 @@ namespace Oxide.Plugins
 
             player.PersistantPlayerInfo = PersistantPlayerInfo;
             player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
-            Pool.FreeUnmanaged(ref bpsToUnlock);
+            player.ClientRPCPlayer(null, player, "UnlockedBlueprint", 0);
         }
 
         #endregion Methods
 
         #region Hooks
-        void OnNewSave(string filename)
-        {
-            if (!config.wipeOnMap)
-                return;
-            WipeAllBps();
-        }
-
         object CanUnlockTechTreeNode(BasePlayer player, TechTreeData.NodeInstance node, TechTreeData techTree)
         {
             ItemBlueprint itemBlueprint = node.itemDef.Blueprint;

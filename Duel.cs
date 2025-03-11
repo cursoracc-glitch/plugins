@@ -11,7 +11,7 @@ using System.Text;
 using UnityEngine;
 namespace Oxide.Plugins
 {
-    [Info("Duel", "RustPlugin.ru", "4.2.62")]
+    [Info("Duel", "rustmods.ru", "4.2.63")]
     [Description("Automatic Duel (Bets) with GUI, weapons list, auto-created arenas, save players loot and position")]
     class Duel : RustPlugin
     {
@@ -4500,7 +4500,7 @@ namespace Oxide.Plugins
                 ItemContainer container = new ItemContainer();
                 container.playerOwner = player;
                 container.ServerInitialize((Item)null, slots);
-                if ((int)container.uid == 0)
+                if ((int)container.uid.Value == 0)
                     container.GiveUID();
 
                 view.enableSaving = false;
