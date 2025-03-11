@@ -1,304 +1,62 @@
-﻿using System;
-using System.Linq;
 using System.Collections.Generic;
 using Oxide.Core;
-using Oxide.Core.Plugins;
-using Oxide.Core.Libraries.Covalence;
-using System.Text.RegularExpressions;
-
-//Reference: System.Drawing
 
 namespace Oxide.Plugins
 {
-    [Info("ColouredNames", "PsychoTea", "1.3.1", ResourceId = 1362)]
-    [Description("Allows players to change their name colour in chat.")]
-
-    class ColouredNames : RustPlugin
+    [Info("ColouredNames", "PsychoTea", "1.0.0")]
+    internal class ColouredNames : RustPlugin
     {
-        [PluginReference] Plugin BetterChat;
-
-        const string permUse = "colourednames.use";
-        const string permBypass = "colourednames.bypass";
-        const string permSetOthers = "colourednames.setothers";
-        const string colourRegex = "^#(?:[0-9a-fA-f]{3}){1,2}$";
-        readonly string[] blockedValues = { "{", "}", "size" };
-
-        Dictionary<ulong, string> colour = new Dictionary<ulong, string>();
-        List<string> blockedColours = new List<string>();
-        bool allowHexcode;
-
-        #region Hooks
-
-        void Init()
+        class StoredData
         {
-            permission.RegisterPermission(permUse, this);
-            permission.RegisterPermission(permBypass, this);
-            permission.RegisterPermission(permSetOthers, this);
-
-            lang.RegisterMessages(new Dictionary<string, string>()
-            {
-                { "NoPermission", "У вас нет разрешения использовать этой команды." },
-                { "NoPermissionSetOthers", "У вас нет разрешения устанавливать цвета других игроков." },
-                { "IncorrectUsage", "<color=aqua>Неправильное использование!</color><color=orange> /colour {{colour}} [player]\nДля списка цветов сделать /colours</color>" },
-                { "PlayerNotFound", "Игрок {0}не был найден." },
-                { "SizeBlocked", "Вы можете не пытаться изменить свой размер! Вы подлый игрок..." },
-                { "HexcodeBlocked", "<color=aqua>Цветные имена: </color><color=orange>Цветовые коды Hexcode отключены.</color>" },
-                { "InvalidCharacters", "The character '{0}' не допускается в цветах. Пожалуйста, удалите это." },
-                { "ColourBlocked", "<color=aqua>Цветные имена: </color><color=orange>Этот цвет заблокирован.</color>" },
-                { "ColourRemoved", "<color=aqua>Цветные имена: </color><color=orange>Название цвета удалено!</color>" },
-                { "ColourChanged", "<color=aqua>Цветные имена: </color><color=orange>Цвет имени изменен на </color><color={0}>{0}</color><color=orange>!</color>" },
-                { "ColourChangedFor", "<color=aqua>Цветные имена: </color><color=orange>{0} название цвет изменен на </color><color={1}>{1}</color><color=orange>!</color>" },
-                { "ChatMessage", "<color={0}>{1}</color>: {2}" },
-                { "LogInfo", "[CHAT] {0}[{1}/{2}] : {3}" },
-                { "ColoursInfo", "<color=aqua>Цветные имена</color><color=orange>\nYou may use any colour used in HTML\nEg: \"</color><color=red>red</color><color=orange>\", \"</color><color=blue>blue</color><color=orange>\", \"</color><color=green>green</color><color=orange>\" etc\nOr you may use any hexcode (if enabled), eg \"</color><color=#FFFF00>#FFFF00</color><color=orange>\"\nTo remove your colour, use \"clear\" or \"remove\"\nAn invalid colour will default to </color>white<color=orange></color>" },
-                { "CantUseClientside", "Вы не можете использовать эту команду из игры - только для сервера." },
-                { "ConsoleColourIncorrectUsage", "Неправильное использование! цвет {{userid}} {{colour}}" },
-                { "InvalidIDConsole", "Ошибка! {0} is not a SteamID!" },
-                { "ConsoleColourChanged", "Цвет {0} изменился на {1}." },
-                { "InvalidColour", "Этот цвет не действителен. Делать /colours для получения дополнительной информации о действительных цветах." }
-            }, this);
-
-            ReadData();
-
-            allowHexcode = GetConfig<bool>("AllowHexcode");
-            foreach (var obj in GetConfig<List<object>>("BlockedColours"))
-                blockedColours.Add(obj.ToString().ToLower());
+            public Dictionary<ulong, string> colour = new Dictionary<ulong, string>();
         }
+        StoredData storedData;
 
-        protected override void LoadDefaultConfig()
-        {
-            PrintWarning("Creating a new configuration file.");
+        void Init() => permission.RegisterPermission("colourednames.colouredName", this);
 
-            Config["AllowHexcode"] = true;
-            Config["BlockedColours"] = new List<string>() { "#000000", "black" };
-
-            Puts("New config file generated.");
-        }
+        void Loaded() => storedData = Interface.GetMod().DataFileSystem.ReadObject<StoredData>("ColouredNames");
 
         object OnPlayerChat(ConsoleSystem.Arg arg)
         {
-            if (BetterChatIns()) return null;
+            BasePlayer player = (BasePlayer)arg.connection.player;
 
-            BasePlayer player = (BasePlayer)arg.Connection.player;
-
-            if (!colour.ContainsKey(player.userID)) return null;
-
-            string argMsg = arg.GetString(0, "text");
-            string message = GetMessage("ChatMessage", player, colour[player.userID], player.displayName, argMsg);
-
-            foreach (BasePlayer bp in BasePlayer.activePlayerList)
-                bp.SendConsoleCommand("chat.add", player.UserIDString, message);
-            Interface.Oxide.LogInfo(GetMessage("LogInfo", player, player.displayName, player.net.ID.ToString(), player.UserIDString, argMsg));
-            return true;
+            if (storedData.colour.ContainsKey(player.userID))
+            {
+                if (storedData.colour[player.userID] == "clear") return null;
+                //ConsoleSystem.Broadcast("chat.add", player.userID.ToString(), string.Format("<color=" + storedData.colour[player.userID] + ">" + player.displayName + "</color>: " + arg.GetString(0, "text")), 1.0);
+                string message = string.Format("<color=" + storedData.colour[player.userID] + ">" + player.displayName + "</color>: " + arg.GetString(0, "text"));
+                foreach (BasePlayer bp in BasePlayer.activePlayerList)
+                    rust.SendChatMessage(bp, message, null, player.userID.ToString());
+                Interface.Oxide.ServerConsole.AddMessage("[CHAT] " + player.displayName + ": " + arg.GetString(0, "text"));
+                return true;
+            }
+            else return null;
         }
-
-        Dictionary<string, object> OnBetterChat(Dictionary<string, object> dict)
-        {
-            ulong userId = ulong.Parse((dict["Player"] as IPlayer).Id);
-            if (!colour.ContainsKey(userId)) return dict;
-            ((Dictionary<string, object>)dict["Username"])["Color"] = colour[userId];
-            return dict;
-        }
-
-        #endregion
-
-        #region Chat Commands
 
         [ChatCommand("colour")]
-        void colourCommand(BasePlayer player, string command, string[] args)
+        private void ColourCmd(BasePlayer player, string command, string[] args)
         {
-            if (!HasPerm(player))
+            if (!permission.UserHasPermission(player.userID.ToString(), "colourednames.colouredName")) SendReply(player, "<color=red>You do not have permission!</color>");
+            else if (args.Length == 0) SendReply(player, "<color=aqua>Incorrect syntax!</color><color=orange> /colour {colour}.\nFor a more information do /colours.</color>");
+            else
             {
-                SendReply(player, GetMessage("NoPermission", player));
-                return;
+                if (!storedData.colour.ContainsKey(player.userID)) storedData.colour.Add(player.userID, args[0]);
+                else if (storedData.colour.ContainsKey(player.userID)) storedData.colour[player.userID] = args[0];
+
+                if (args[0] == "clear") SendReply(player, "<color=aqua>ColouredNames: </color><color=orange>Name colour removed!</color>");
+                else SendReply(player, "<color=aqua>ColouredNames: </color><color=orange>Name colour changed to </color><color={0}>{0}</color><color=orange>!</color>", args[0]);
+
+                Interface.GetMod().DataFileSystem.WriteObject("ColouredNames", storedData);
             }
-
-            if (args.Length == 0)
-            {
-                SendReply(player, GetMessage("IncorrectUsage", player));
-                return;
-            }
-
-            string colLower = args[0].ToLower();
-
-            if (colLower == "clear" || colLower == "remove")
-            {
-                colour.Remove(player.userID);
-                SaveData();
-                SendReply(player, GetMessage("ColourRemoved", player));
-                return;
-            }
-
-            var invalid = CheckInvalids(colLower);
-            if (invalid != "")
-            {
-                SendReply(player, GetMessage("InvalidCharacters", player, invalid));
-                return;
-            }
-
-            if (!CanBypass(player))
-            {
-                if (!allowHexcode && args[0].Contains("#"))
-                {
-                    SendReply(player, GetMessage("HexcodeBlocked", player));
-                    return;
-                }
-
-                if (blockedColours.Where(x => x == colLower).Any())
-                {
-                    SendReply(player, GetMessage("ColourBlocked", player));
-                    return;
-                }
-            }
-
-            if (!IsValidColour(args[0]))
-            {
-                SendReply(player, GetMessage("InvalidColour", player));
-                return;
-            }
-
-            if (args.Length > 1)
-            {
-                if (!CanSetOthers(player))
-                {
-                    SendReply(player, GetMessage("NoPermissionSetOthers", player));
-                    return;
-                }
-
-                BasePlayer target = rust.FindPlayerByName(args[1]);
-                if (target == null)
-                {
-                    SendReply(player, GetMessage("PlayerNotFound", player, args[1]));
-                    return;
-                }
-
-                ChangeColour(target, args[0]);
-                SendReply(player, GetMessage("ColourChangedFor", player, target.displayName, args[0]));
-                return;
-            }
-
-            ChangeColour(player, args[0]);
-            SendReply(player, GetMessage("ColourChanged", player, args[0]));
         }
 
         [ChatCommand("colours")]
-        void coloursCommand(BasePlayer player, string command, string[] args)
-        {
-            if (!HasPerm(player))
-            {
-                SendReply(player, GetMessage("NoPermission", player));
-                return;
-            }
-
-            SendReply(player, GetMessage("ColoursInfo", player));
-        }
-
-        #endregion
-
-        #region Console Commands
-
-        [ConsoleCommand("colour")]
-        void colourConsoleCommand(ConsoleSystem.Arg arg)
-        {
-            if (!arg.IsAdmin)
-            {
-                arg.ReplyWith(GetConsoleMessage("NoPermission"));
-                return;
-            }
-
-            string[] args = (arg.Args == null) ? new string[] { } : arg.Args;
-
-            if (args.Length < 2)
-            {
-                arg.ReplyWith(GetConsoleMessage("ConsoleColourIncorrectUsage"));
-                return;
-            }
-
-            ulong userId;
-            if (!ulong.TryParse(args[0], out userId))
-            {
-                arg.ReplyWith(GetConsoleMessage("InvalidIDConsole", args[0]));
-                return;
-            }
-
-            ChangeColour(userId, args[1]);
-            string name = (BasePlayer.FindByID(userId)?.displayName ?? args[0]);
-            arg.ReplyWith(GetConsoleMessage("ConsoleColourChanged", name, args[1]));
-        }
-
-        [ConsoleCommand("viewcolours")]
-        void viewColoursCommand(ConsoleSystem.Arg arg)
-        {
-            if (!arg.IsAdmin)
-            {
-                arg.ReplyWith(GetConsoleMessage("NoPermission"));
-                return;
-            }
-
-            List<string> hexcode = new List<string>();
-            List<string> others = new List<string>();
-
-            foreach (var kvp in colour)
-            {
-                if (kvp.Value.ToArray()[0] == '#') hexcode.Add($"{kvp.Key}: {kvp.Value}");
-                else others.Add($"{kvp.Key}: {kvp.Value}");
-            }
-
-            string message = "";
-
-            float i = 1;
-            foreach (var str in hexcode)
-            {
-                message += str;
-                if (i % 3 == 0) message += "\n";
-                else message += "       ";
-                i++;
-            }
-
-            message += "\n";
-
-            i = 1;
-            foreach (var str in others)
-            {
-                message += str;
-                if (i % 3 == 0) message += "\n";
-                else message += "       ";
-                i++;
-            }
-
-            arg.ReplyWith(message);
-        }
-
-        #endregion
-
-        #region Helpers
-
-        bool IsValidColour(string input) => Regex.Match(input, colourRegex).Success || System.Drawing.Color.FromName(input).IsKnownColor;
-
-        bool BetterChatIns() => (BetterChat != null);
-
-        void ChangeColour(BasePlayer target, string newColour)
-        {
-            if (!colour.ContainsKey(target.userID)) colour.Add(target.userID, "");
-            colour[target.userID] = newColour;
-            SaveData();
-        }
-        void ChangeColour(ulong userId, string newColour) => ChangeColour(new BasePlayer() { userID = userId }, newColour);
-
-        bool HasPerm(BasePlayer player) => (player.IsAdmin || permission.UserHasPermission(player.UserIDString, permUse));
-        bool CanBypass(BasePlayer player) => (player.IsAdmin || permission.UserHasPermission(player.UserIDString, permBypass));
-        bool CanSetOthers(BasePlayer player) => (player.IsAdmin || permission.UserHasPermission(player.UserIDString, permSetOthers));
-
-        string CheckInvalids(string input) => (blockedValues.Where(x => input.Contains(x)).FirstOrDefault()) ?? string.Empty;
-
-        string GetMessage(string key, BasePlayer player, params string[] args) => String.Format(lang.GetMessage(key, this, player.UserIDString), args);
-        string GetConsoleMessage(string key, params string[] args) => GetMessage(key, new BasePlayer() { userID = 0 }, args);
-
-        T GetConfig<T>(string key) => (T)Config[key];
-
-        void ReadData() => colour = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, string>>(this.Title);
-        void SaveData() => Interface.Oxide.DataFileSystem.WriteObject(this.Title, colour);
-        
-        #endregion
+        private void ColoursCmd(BasePlayer player, string command, string[] args) =>  
+            SendReply(player, @"<color=aqua>ColouredNames:</color><color=orange> You may use any colour used in HTML.
+                                Eg: ""</color><color=red>red</color><color=orange>"", ""</color><color=blue>blue</color><color=orange>"", ""</color><color=green>green</color><color=orange>"" etc.
+                                Or you may use any hex code, eg ""</color><color=#FFFF00>#FFFF00</color><color=orange>"".
+                                To remove your colour, use ""clear"".
+                                An invalid colour will default to </color>white<color=orange>.</color>");
     }
+
 }
